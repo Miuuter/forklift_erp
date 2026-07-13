@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>龙工叉车</title>
-  <meta name="theme-color" content="#6658f6">
+  <meta name="theme-color" content="#1f4e78">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/assets/app.css?v=20260624-frontend-split">
+  <link rel="stylesheet" href="/assets/app.css?v=20260713-industrial-ui">
   <script>
     if (new URLSearchParams(location.search).has("resetClient")) {
       window.__FORKLIFT_CLIENT_RESETTING__ = true;
@@ -29,7 +29,7 @@
       })();
     }
   </script>
-  <script type="module" src="/assets/app.js?v=20260624-frontend-split"></script>
+  <script type="module" src="/assets/app.js?v=20260713-industrial-ui"></script>
 </head>
 <body>
   <a class="skip-link" href="#moduleContent">跳到主内容</a>
@@ -66,12 +66,12 @@
   </div>
 
   <div id="appScreen" class="app-screen is-hidden">
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="应用导航">
       <div class="sidebar-brand">
-        <div class="brand-mark"><img class="brand-icon" src="/assets/icon.svg" alt="" aria-hidden="true"></div>
-        <div>
-          <div class="brand-name">龙工叉车</div>
-          <div class="brand-subtitle">中山天力叉车</div>
+        <div class="brand-mark brand-mark-compact" aria-hidden="true">叉</div>
+        <div class="sidebar-brand-copy">
+          <div class="brand-name">叉车 ERP</div>
+          <div class="brand-subtitle">业务管理中心</div>
         </div>
       </div>
 
@@ -132,19 +132,43 @@
 
     <div class="workspace">
       <header class="topbar">
-        <div>
+        <div class="topbar-heading">
           <div class="topbar-title" id="pageTitle">总览</div>
           <div class="topbar-subtitle" id="pageSubtitle">系统概览与业务入口</div>
         </div>
+        <button class="global-search-trigger" id="globalSearchBtn" type="button">
+          <span class="search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </span>
+          <span>搜索车辆、客户、订单</span>
+          <kbd>Ctrl K</kbd>
+        </button>
         <div class="topbar-actions">
-          <span class="user-chip" id="currentUser">admin</span>
-          <button class="btn btn-ghost" id="switchUserBtn" type="button">切换用户</button>
-          <button class="btn btn-ghost" id="logoutBtn" type="button">
-            <span class="btn-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M9 17l-5-5 5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </span>
-            退出
-          </button>
+          <div class="topbar-create">
+            <button class="btn btn-primary" id="newBusinessBtn" type="button" aria-haspopup="menu" aria-expanded="false">＋ 新建业务</button>
+            <div class="topbar-menu" id="newBusinessMenu" role="menu" aria-label="新建业务">
+              <button type="button" role="menuitem" data-action="quick-vehicle-inbound" data-permissions="vehicle:write">整车入库</button>
+              <button type="button" role="menuitem" data-action="part-stock" data-direction="inbound" data-permissions="stock:adjust">配件入库</button>
+              <button type="button" role="menuitem" data-action="create" data-kind="vehicleOutbound" data-permissions="stock:adjust">销售出库</button>
+              <button type="button" role="menuitem" data-action="create" data-kind="rental" data-permissions="stock:adjust">租赁登记</button>
+              <button type="button" role="menuitem" data-action="create" data-kind="repair" data-permissions="repair:write">维修登记</button>
+              <button type="button" role="menuitem" data-action="stock-transfer" data-permissions="stock:adjust">库存调拨</button>
+            </div>
+          </div>
+          <div class="user-menu-wrap">
+            <button class="user-menu-trigger" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+              <span class="user-avatar" aria-hidden="true">管</span>
+              <span class="user-menu-copy">
+                <strong id="currentUser">admin</strong>
+                <small>账户与权限</small>
+              </span>
+              <span aria-hidden="true">⌄</span>
+            </button>
+            <div class="topbar-menu user-menu" id="userMenu" role="menu" aria-label="用户菜单">
+              <button id="switchUserBtn" type="button" role="menuitem">切换用户</button>
+              <button id="logoutBtn" type="button" role="menuitem">退出登录</button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -159,7 +183,7 @@
   </div>
 
   <div id="detailDrawerOverlay" class="detail-drawer-overlay is-hidden" aria-hidden="true">
-    <aside class="detail-drawer" id="detailDrawer" aria-label="详情"></aside>
+    <aside class="detail-drawer" id="detailDrawer"></aside>
   </div>
 
   <div id="toastHost" class="toast-host" aria-live="polite"></div>

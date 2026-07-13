@@ -37,8 +37,7 @@ export function createPartsWorkflow(deps) {
           { label: "分类", key: "partCategory" },
           { label: "数量", html: true, render: row => stockBadge(row.quantity, row.unit) },
           { label: "销售价", key: "salePrice", formatter: money },
-          { label: "来源", key: "source" },
-          { label: "操作", html: true, render: row => rowActions("part", row, ["stockIn", "stockOut", "edit", "delete"]) }
+          { label: "来源", key: "source" }
         ], rows, listTableOptions("part", "parts")))}
         ${renderPagination("parts")}
       </div>

@@ -46,21 +46,12 @@ export function createDashboardView(deps) {
     const orders = state.data.outboundOrders;
     const rentals = state.data.rentals || [];
     const todoCenter = state.data.todoCenter || {};
-    const stats = state.data.statistics || null;
     const lowStockThreshold = Number(todoCenter.lowStockThreshold ?? 5);
-    const inStockRows = vehicleRows.filter(row => !row.orderId && Number(row.inventoryCount || 0) > 0);
     const lowStockParts = parts.filter(item => Number(item.quantity || 0) <= lowStockThreshold);
     const missingInvoiceOrders = orders.filter(item => isInvoiceUploadReady(item) && !item.invoiceFileAvailable);
     const missingContractOrders = orders.filter(item => isContractUploadReady(item) && !item.contractFileAvailable);
-    const pendingRepairs = todoCenter.pendingRepairCount ?? repairs.filter(item => item.status !== "COMPLETED").length;
     const lowParts = todoCenter.lowStockCount ?? lowStockParts.length;
     const longIdleVehicles = todoCenter.longIdleVehicleCount ?? 0;
-    const unsettledOrders = todoCenter.pendingPaymentCount ?? orders.filter(item => !item.paymentSettled).length;
-    const pendingSalesReports = todoCenter.pendingSalesReportCount ?? orders.filter(item => item.paymentSettled && !item.salesReported).length;
-    const pendingInvoices = todoCenter.pendingInvoiceApplicationCount ?? orders.filter(item => item.paymentSettled && item.salesReported && !item.invoiceApplied).length;
-    const missingInvoiceFiles = todoCenter.pendingInvoiceFileCount ?? missingInvoiceOrders.length;
-    const missingContractFiles = todoCenter.pendingContractFileCount ?? missingContractOrders.length;
-    const outstandingAmount = todoCenter.outstandingAmount ?? receivableOutstandingTotal(orders);
     const overduePaymentCount = todoCenter.overduePaymentCount ?? orders.filter(item => Number(item.overdueDays || 0) > 0).length;
     const rentalDueCount = todoCenter.rentalDueCount ?? rentals.filter(item => item.status === "ACTIVE" && daysUntil(item.endDate) !== null && daysUntil(item.endDate) <= 7).length;
     const queueRows = todoQueues(todoCenter, {
@@ -78,12 +69,19 @@ export function createDashboardView(deps) {
     const criticalTodos = todoCenter.criticalTodoCount ?? queueRows
       .filter(queue => queue.priority === "danger")
       .reduce((sum, queue) => sum + Number(queue.count || 0), 0);
-    const vehicleTotal = pageTotal("vehicles", vehicles.length);
-    const partTotal = pageTotal("parts", parts.length);
-    const orderTotal = pageTotal("outboundOrders", orders.length);
-    const workItems = (Array.isArray(todoCenter.items) && todoCenter.items.length
-      ? overviewTodoItems(todoCenter)
-      : overviewWorkItems(vehicleRows, orders, repairs, parts)).slice(0, 12);
+    const groupedQueues = queueGroups(queueRows);
+    const activeGroup = groupedQueues.find(group => group.key === state.overviewQueueGroup) || groupedQueues[0];
+    state.overviewQueueGroup = activeGroup?.key || "finance";
+    const selectedQueue = activeGroup?.queues?.find(queue => queue.key === state.overviewQueueKey) || activeGroup?.queues?.[0] || null;
+    state.overviewQueueKey = selectedQueue?.key || "";
+    const workItems = selectedQueue?.items?.length
+      ? selectedQueue.items.slice(0, 6).map(item => {
+        const action = todoItemAction(item);
+        return overviewItem(item.label, item.title, todoItemDetail(item), item.priority || "primary", action.name, action.data, item.sortTime || item.dueDate || "");
+      })
+      : (Array.isArray(todoCenter.items) && todoCenter.items.length
+        ? overviewTodoItems(todoCenter)
+        : overviewWorkItems(vehicleRows, orders, repairs, parts)).slice(0, 6);
     const recentVehicleRows = vehicleRows
       .filter(row => row.orderId || Number(row.inventoryCount || 0) > 0)
       .slice(0, 8);
@@ -91,50 +89,28 @@ export function createDashboardView(deps) {
     return `
       <div class="page overview-page">
         <section class="summary-grid">
-          ${summaryCard("今日待办", totalTodos, `${criticalTodos} 项高优先级`, { action: "go-tab", data: { tab: "overview" } })}
+          ${summaryCard("待处理事项", totalTodos, `${criticalTodos} 项高优先级`, { action: "go-tab", data: { tab: "overview" } })}
           ${summaryCard("逾期收款", overduePaymentCount, money(todoCenter.overdueAmount || 0), { action: "go-tab", data: { tab: "outboundOrders", stage: "overdue" } })}
           ${summaryCard("租赁到期", rentalDueCount, `未来 ${todoCenter.rentalDueSoonDays ?? 7} 天`, { action: "go-tab", data: { tab: "rentals", status: "dueSoon" } })}
           ${summaryCard("库存异常", lowParts + longIdleVehicles, `低库存 ${lowParts} / 未动 ${longIdleVehicles}`, { action: "go-tab", data: { tab: "parts", stock: "low" } })}
         </section>
 
-        ${stats ? renderFinanceKpis(stats, lowParts) : ""}
-
-        ${renderSurface("经营异常队列", renderTodoQueues(queueRows), `
+        ${renderSurface("经营异常", renderQueueWorkbench(groupedQueues, activeGroup, selectedQueue, workItems), `
           <button class="btn btn-ghost" type="button" data-action="refresh">${icon("refresh")}刷新</button>
         `)}
 
-        <section class="overview-workbench">
-          ${renderSurface("优先处理", renderOverviewWorkItems(workItems))}
-          <div class="overview-side">
-            ${renderSurface("订单附件", renderOverviewAttachmentItems(missingInvoiceOrders, missingContractOrders))}
-            ${renderSurface("库存预警", compactTable([
+        <section class="overview-compact-grid">
+          ${renderSurface("订单附件", renderOverviewAttachmentItems(missingInvoiceOrders, missingContractOrders))}
+          ${renderSurface("库存预警", compactTable([
               { label: "编码", key: "partCode" },
               { label: "名称", key: "partName" },
               { label: "数量", key: "quantity", formatter: stockText }
-            ], lowStockParts.slice(0, 8)))}
-          </div>
-        </section>
-
-        <section class="grid-two">
-          ${renderSurface("整车流转", compactTable([
+            ], lowStockParts.slice(0, 6)))}
+          ${renderSurface("整车动态", compactTable([
             { label: "车号", html: true, render: row => vehicleFlowMachineSummary(row) },
-            { label: "车辆状态", html: true, render: row => vehicleFlowStatusSummary(row) },
-            { label: "销售跟进", html: true, render: row => vehicleFlowFollowupSummary(row) },
-            { label: "操作", html: true, render: row => vehicleFlowActions(row) }
-          ], recentVehicleRows))}
-          ${renderSurface("维修跟进", compactTable([
-            { label: "客户", key: "customerName" },
-            { label: "状态", html: true, render: row => repairStatusToggle(row) },
-            { label: "费用", key: "totalFee", formatter: money },
-            { label: "操作", html: true, render: row => hasPermission("repair:write") ? `<button class="btn btn-sm" type="button" data-action="toggle-repair-status" data-id="${escapeAttr(row.id)}">${icon("swap")}完成</button>` : "" }
-          ], repairs.filter(item => item.status !== "COMPLETED").slice(0, 8)))}
-        </section>
-
-        <section class="summary-grid">
-          ${summaryCard("整车档案", vehicleTotal, `${inStockRows.length} 台在库待销售`, { action: "go-tab", data: { tab: "vehicles", stock: "inStock" } })}
-          ${summaryCard("配件档案", partTotal, `${lowParts} 项低库存`, { action: "go-tab", data: { tab: "parts", stock: "low" } })}
-          ${summaryCard("出库订单", orderTotal, `${unsettledOrders} 单待收款`, { action: "go-tab", data: { tab: "outboundOrders", stage: "payment" } })}
-          ${summaryCard("销售闭环", pendingSalesReports + pendingInvoices, `${missingInvoiceFiles + missingContractFiles} 份附件待补`, { action: "go-tab", data: { tab: "outboundOrders" } })}
+            { label: "状态", html: true, render: row => vehicleFlowStatusSummary(row) },
+            { label: "销售", html: true, render: row => vehicleFlowFollowupSummary(row) }
+          ], recentVehicleRows.slice(0, 6)))}
         </section>
       </div>
     `;
@@ -177,7 +153,38 @@ export function createDashboardView(deps) {
 
         ${renderSurface("月度收支走势", renderFinanceTrend(monthlyRows))}
 
-        ${renderSurface("年度对比", renderTable([
+        ${renderStatisticsReports({
+          yearlyRows,
+          resourceRows,
+          stockRows,
+          topRows,
+          topRentalRows,
+          lowRows
+        })}
+      </div>
+    `;
+  }
+
+  function renderStatisticsReports({
+    yearlyRows,
+    resourceRows,
+    stockRows,
+    topRows,
+    topRentalRows,
+    lowRows
+  }) {
+    const tabs = [
+      { key: "yearly", label: "年度对比" },
+      { key: "resource", label: "分类收支" },
+      { key: "stock", label: "库存价值" },
+      { key: "outbound", label: "出库 TOP" },
+      { key: "rental", label: "租赁 TOP" },
+      { key: "lowStock", label: "低库存" }
+    ];
+    const active = tabs.some(tab => tab.key === state.statisticsReport) ? state.statisticsReport : "yearly";
+    state.statisticsReport = active;
+    const content = {
+      yearly: renderTable([
             { label: "年份", key: "period" },
             { label: "总收入", key: "totalIncome", formatter: money },
             { label: "成本/支出", key: "totalExpense", formatter: money },
@@ -186,54 +193,110 @@ export function createDashboardView(deps) {
             { label: "维修单", key: "repairOrders" },
             { label: "租赁单", key: "rentalOrders" },
             { label: "改装工单", key: "modificationOrders" }
-          ], yearlyRows))}
-
-        <section class="grid-two">
-          ${renderSurface("出入库分类收支", renderTable([
+          ], yearlyRows),
+      resource: renderTable([
             { label: "类型", key: "label" },
             { label: "入库数量", key: "inboundQuantity" },
             { label: "入库成本", key: "inboundCost", formatter: money },
             { label: "出库数量", key: "outboundQuantity" },
             { label: "出库收入", key: "outboundRevenue", formatter: money },
             { label: "毛利", key: "grossProfit", formatter: money }
-          ], resourceRows))}
-          ${renderSurface("当前库存价值", renderTable([
+          ], resourceRows),
+      stock: renderTable([
             { label: "类型", key: "label" },
             { label: "档案数", key: "itemCount" },
             { label: "库存数", key: "stockQuantity" },
             { label: "成本价值", key: "costValue", formatter: money },
             { label: "结算价值", html: true, render: row => money(row.settlementValue ?? row.retailValue) }
-          ], stockRows))}
-        </section>
-
-        <section class="grid-two">
-          ${renderSurface("年度出库收益 TOP", renderTable([
+          ], stockRows),
+      outbound: renderTable([
             { label: "类型", key: "resourceType", formatter: resourceTypeLabel },
             { label: "编码", key: "resourceCode" },
             { label: "名称", key: "resourceName" },
             { label: "数量", key: "quantity" },
             { label: "收入", key: "revenue", formatter: money },
             { label: "毛利", key: "grossProfit", formatter: money }
-          ], topRows))}
-          ${renderSurface("年度租赁收入 TOP", renderTable([
+          ], topRows),
+      rental: renderTable([
             { label: "租赁单", key: "rentalNo" },
             { label: "车号", key: "vehicleNumber" },
             { label: "车型", key: "machineName" },
             { label: "去向", key: "destination" },
             { label: "租赁收入", key: "rentalPrice", formatter: money },
             { label: "状态", html: true, render: row => rentalStatusBadge(row.status) }
-          ], topRentalRows))}
-        </section>
-
-        <section class="grid-two">
-          ${renderSurface("低库存预警", renderTable([
+          ], topRentalRows),
+      lowStock: renderTable([
             { label: "类型", key: "resourceType", formatter: resourceTypeLabel },
             { label: "编码", key: "resourceCode" },
             { label: "名称", key: "resourceName" },
             { label: "库存", key: "quantity", formatter: (value, row) => `${value}${row.unit || ""}` },
             { label: "阈值", key: "threshold" }
-          ], lowRows))}
-        </section>
+          ], lowRows)
+    }[active];
+    return renderSurface("经营报表", `
+      <div class="report-tabs" role="tablist" aria-label="经营报表">
+        ${tabs.map(tab => `
+          <button class="report-tab${tab.key === active ? " is-active" : ""}" type="button" role="tab" aria-selected="${tab.key === active ? "true" : "false"}" data-action="set-statistics-report" data-report="${escapeAttr(tab.key)}">${escapeHtml(tab.label)}</button>
+        `).join("")}
+      </div>
+      <div class="report-panel">${content}</div>
+    `);
+  }
+
+  function queueGroups(queues = []) {
+    const groupMeta = [
+      { key: "finance", label: "财务", keys: ["overduePayment", "pendingPayment"] },
+      { key: "sales", label: "销售闭环", keys: ["salesReport", "invoiceApplication", "invoiceFile", "contractFile"] },
+      { key: "inventory", label: "库存", keys: ["lowStock", "longIdleVehicles"] },
+      { key: "service", label: "服务", keys: ["repairPending", "rentalDue"] }
+    ];
+    const assigned = new Set();
+    const groups = groupMeta.map(group => {
+      const rows = queues.filter(queue => group.keys.includes(queue.key));
+      rows.forEach(queue => assigned.add(queue.key));
+      return { ...group, queues: rows, count: rows.reduce((sum, queue) => sum + Number(queue.count || 0), 0) };
+    });
+    const remaining = queues.filter(queue => !assigned.has(queue.key));
+    if (remaining.length) {
+      groups[1].queues.push(...remaining);
+      groups[1].count += remaining.reduce((sum, queue) => sum + Number(queue.count || 0), 0);
+    }
+    return groups.filter(group => group.queues.length);
+  }
+
+  function renderQueueWorkbench(groups, activeGroup, selectedQueue, items) {
+    if (!groups.length) return emptyState("暂无经营异常");
+    return `
+      <div class="queue-group-tabs" role="tablist" aria-label="经营异常分组">
+        ${groups.map(group => `
+          <button class="queue-group-tab${group.key === activeGroup.key ? " is-active" : ""}" type="button" role="tab" aria-selected="${group.key === activeGroup.key ? "true" : "false"}" data-action="set-overview-queue-group" data-group="${escapeAttr(group.key)}">
+            <span>${escapeHtml(group.label)}</span>
+            <strong>${escapeHtml(group.count)}</strong>
+          </button>
+        `).join("")}
+      </div>
+      <div class="queue-workbench">
+        <div class="queue-selector">
+          ${activeGroup.queues.map(queue => `
+            <button class="queue-selector-item${queue === selectedQueue ? " is-active" : ""}" type="button" data-action="set-overview-queue" data-queue="${escapeAttr(queue.key)}">
+              <span>
+                <strong>${escapeHtml(queue.label || "-")}</strong>
+                <small>${escapeHtml(queue.description || "-")}</small>
+              </span>
+              <em>${escapeHtml(queue.count || 0)}</em>
+            </button>
+          `).join("")}
+        </div>
+        <div class="queue-preview">
+          <div class="queue-preview-head">
+            <div>
+              <strong>${escapeHtml(selectedQueue?.label || activeGroup.label)}</strong>
+              <span>${escapeHtml(selectedQueue?.description || "优先处理当前分组事项")}</span>
+            </div>
+            ${selectedQueue ? `<button class="btn btn-sm" type="button" ${queueActionAttrs(selectedQueue)}>查看全部</button>` : ""}
+          </div>
+          ${renderOverviewWorkItems(items)}
+        </div>
       </div>
     `;
   }

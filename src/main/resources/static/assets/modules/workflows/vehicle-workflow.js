@@ -1,6 +1,8 @@
 export function createVehicleWorkflow(deps) {
   const {
     state,
+    vehicleDetailTabs,
+    ensureVehicleDetailTab,
     activeRentalForMachine,
     latestVehicleOutboundOrder,
     yesNoFromText,
@@ -72,8 +74,7 @@ export function createVehicleWorkflow(deps) {
       { label: "经销商/仓位", key: "warehouseName" },
       { label: "车辆数", key: "unitCount" },
       { label: "库存", html: true, render: row => stockBadge(row.inventoryCount, "台") },
-      { label: "销售单价", key: "salePrice", formatter: money },
-      { label: "操作", html: true, render: row => vehicleModelActions(row) }
+      { label: "销售单价", key: "salePrice", formatter: money }
     ], rows, {
       tableKey: "vehicles",
       selectableRow: row => ({
@@ -84,7 +85,7 @@ export function createVehicleWorkflow(deps) {
       })
     }));
   }
-  
+
   function vehicleFlowRows() {
     return state.data.vehicles
       .filter(item => !item.modelOnly)
@@ -297,28 +298,10 @@ export function createVehicleWorkflow(deps) {
     `, actions);
   }
   
-  function vehicleDetailTabs() {
-    return [
-      { key: "archive", label: "档案" },
-      { key: "config", label: "配置" },
-      { key: "outbound", label: "出库" },
-      { key: "rental", label: "租赁" },
-      { key: "repair", label: "维修" },
-      { key: "modification", label: "改装" },
-      { key: "attachments", label: "附件" }
-    ];
-  }
-  
-  function ensureVehicleDetailTab() {
-    const keys = vehicleDetailTabs().map(item => item.key);
-    if (!keys.includes(state.vehicleDetailTab)) state.vehicleDetailTab = "archive";
-    return state.vehicleDetailTab;
-  }
-  
   function renderVehicleDetailTabs(activeKey) {
     return `
       <div class="detail-tabs" role="tablist" aria-label="车辆详情">
-        ${vehicleDetailTabs().map(tab => `
+        ${vehicleDetailTabs.map(tab => `
           <button class="detail-tab${tab.key === activeKey ? " is-active" : ""}" type="button" role="tab" aria-selected="${tab.key === activeKey ? "true" : "false"}" data-action="set-vehicle-detail-tab" data-tab="${escapeAttr(tab.key)}">
             ${escapeHtml(tab.label)}
           </button>
@@ -592,6 +575,7 @@ export function createVehicleWorkflow(deps) {
     vehicleFlowMachineSummary,
     vehicleFlowStatusSummary,
     vehicleFlowFollowupSummary,
-    vehicleFlowActions
+    vehicleFlowActions,
+    ensureVehicleDetailTab
   };
 }

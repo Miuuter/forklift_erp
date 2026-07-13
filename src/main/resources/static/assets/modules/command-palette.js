@@ -21,6 +21,7 @@ export function createCommandPalette({
   handleActionError
 }) {
   let commandPalette = null;
+  let returnFocus = null;
 
   function openCommandPalette() {
     if (commandPalette?.overlay?.isConnected) {
@@ -29,6 +30,7 @@ export function createCommandPalette({
       return;
     }
     const overlay = document.createElement("div");
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlay.className = "command-overlay";
     overlay.innerHTML = `
       <section class="command-palette" role="dialog" aria-modal="true" aria-label="全局操作">
@@ -58,6 +60,7 @@ export function createCommandPalette({
       void executeCommandItem(commandPalette.items[Number(item.dataset.commandIndex || 0)]);
     });
     renderCommandPalette("");
+    setBackgroundInert(true);
     requestAnimationFrame(() => {
       overlay.classList.add("is-open");
       commandPalette.input.focus();
@@ -68,8 +71,26 @@ export function createCommandPalette({
     const overlay = commandPalette?.overlay;
     commandPalette = null;
     if (!overlay) return;
+    setBackgroundInert(false);
     overlay.classList.remove("is-open");
-    window.setTimeout(() => overlay.remove(), 160);
+    window.setTimeout(() => {
+      overlay.remove();
+      if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+      returnFocus = null;
+    }, 160);
+  }
+
+  function setBackgroundInert(inert) {
+    [getEls()?.appScreen, getEls()?.loginScreen].filter(Boolean).forEach(root => {
+      if (inert) {
+        root.dataset.commandInertBefore = root.inert ? "true" : "false";
+        root.inert = true;
+        return;
+      }
+      if (root.dataset.commandInertBefore === undefined) return;
+      root.inert = root.dataset.commandInertBefore === "true";
+      delete root.dataset.commandInertBefore;
+    });
   }
 
   function handleCommandPaletteKeydown(event) {

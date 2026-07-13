@@ -1,4 +1,4 @@
-const CACHE_NAME = "forklift-erp-client-20260713-p1-workflow-fixes";
+const CACHE_NAME = "forklift-erp-client-20260713-industrial-ui";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -20,6 +20,14 @@ const SHELL_ASSETS = [
   "/assets/modules/session.js",
   "/assets/modules/status-ui.js",
   "/assets/modules/ui-config.js",
+  "/assets/modules/ui/confirm-dialog.js",
+  "/assets/modules/ui/contracts.js",
+  "/assets/modules/ui/action-registry.js",
+  "/assets/modules/ui/data-table.js",
+  "/assets/modules/ui/drawer-actions.js",
+  "/assets/modules/ui/form-workspace.js",
+  "/assets/modules/ui/overlay-manager.js",
+  "/assets/modules/ui/state-utils.js",
   "/assets/modules/workflows/attachments-workflow.js",
   "/assets/modules/workflows/configs-workflow.js",
   "/assets/modules/workflows/imports-workflow.js",
@@ -32,11 +40,11 @@ const SHELL_ASSETS = [
   "/assets/modules/workflows/users-workflow.js",
   "/assets/modules/workflows/vehicle-workflow.js",
   "/assets/styles/base.css",
+  "/assets/styles/tokens.css",
   "/assets/styles/surfaces.css",
   "/assets/styles/tables.css",
   "/assets/styles/overlays.css",
-  "/assets/styles/visual-polish.css",
-  "/assets/styles/dashboard-polish.css",
+  "/assets/styles/industrial-ui.css",
   "/assets/styles/responsive.css",
   "/assets/icon.svg",
   "/manifest.webmanifest"

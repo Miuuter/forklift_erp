@@ -59,8 +59,7 @@ export function createOperationsWorkflow(deps) {
           { label: "销售单", key: "salesOrderNo" },
           { label: "状态", html: true, render: row => modificationStatusBadge(row.status) },
           { label: "替换明细", html: true, render: row => modificationLineSummary(row.lines) },
-          { label: "创建时间", key: "createdAt", formatter: dateTime },
-          { label: "操作", html: true, render: row => modificationOrderActions(row) }
+          { label: "创建时间", key: "createdAt", formatter: dateTime }
         ], rows, listTableOptions("modificationOrder", null)))}
         ${renderPagination("modificationOrders")}
       </div>
@@ -90,8 +89,7 @@ export function createOperationsWorkflow(deps) {
           { label: "联系人", key: "contactName" },
           { label: "电话", key: "contactPhone" },
           { label: "税号/身份证号", key: "taxOrIdNumber" },
-          { label: "备注", key: "remarks" },
-          { label: "操作", html: true, render: row => rowActions("customer", row, ["edit", "delete"]) }
+          { label: "备注", key: "remarks" }
         ], rows, listTableOptions("customer", "customers")))}
         ${renderPagination("customers")}
       </div>
@@ -120,8 +118,7 @@ export function createOperationsWorkflow(deps) {
           { label: "联系人", key: "contactName" },
           { label: "电话", key: "contactPhone" },
           { label: "税号", key: "taxNumber" },
-          { label: "备注", key: "remarks" },
-          { label: "操作", html: true, render: row => rowActions("supplier", row, ["edit", "delete"]) }
+          { label: "备注", key: "remarks" }
         ], rows, listTableOptions("supplier", "suppliers")))}
         ${renderPagination("suppliers")}
       </div>
@@ -155,8 +152,7 @@ export function createOperationsWorkflow(deps) {
           { label: "入库内容", html: true, render: row => purchaseResourceSummary(row) },
           { label: "数量", html: true, render: row => `${escapeHtml(row.quantity || 0)} <span class="helper-inline">${escapeHtml(row.unit || "")}</span>` },
           { label: "金额", key: "totalAmount", formatter: money },
-          { label: "状态", html: true, render: row => purchaseStatusControl(row) },
-          { label: "操作", html: true, render: row => rowActions("purchaseOrder", row, ["edit", "delete"]) }
+          { label: "状态", html: true, render: row => purchaseStatusControl(row) }
         ], rows, listTableOptions("purchaseOrder", "purchases")))}
         ${renderPagination("purchases")}
       </div>
@@ -187,8 +183,7 @@ export function createOperationsWorkflow(deps) {
           { label: "账面", key: "bookQuantity", formatter: stockText },
           { label: "实盘", key: "actualQuantity", formatter: stockText },
           { label: "差异", html: true, render: row => stocktakingDifference(row) },
-          { label: "状态", html: true, render: row => stocktakingStatusBadge(row.status) },
-          { label: "操作", html: true, render: row => stocktakingActions(row) }
+          { label: "状态", html: true, render: row => stocktakingStatusBadge(row.status) }
         ], rows, listTableOptions("stocktaking", "stocktakes")))}
         ${renderPagination("stocktakes")}
       </div>
@@ -227,8 +222,7 @@ export function createOperationsWorkflow(deps) {
           { label: "默认", html: true, render: row => row.defaultWarehouse ? badge("默认", "teal") : "" },
           { label: "整车", key: "vehicleCount", formatter: stockText },
           { label: "配件 SKU", key: "partSkuCount", formatter: stockText },
-          { label: "配件数量", key: "partQuantity", formatter: stockText },
-          { label: "操作", html: true, render: row => rowActions("warehouse", row, ["edit", "delete"]) }
+          { label: "配件数量", key: "partQuantity", formatter: stockText }
         ], rows, listTableOptions("warehouse", null)))}
         ${renderPagination("warehouses")}
       </div>

@@ -1,7 +1,7 @@
+@import "./styles/tokens.css";
 @import "./styles/base.css";
 @import "./styles/surfaces.css";
 @import "./styles/tables.css";
 @import "./styles/overlays.css";
-@import "./styles/visual-polish.css";
-@import "./styles/dashboard-polish.css";
+@import "./styles/industrial-ui.css";
 @import "./styles/responsive.css";

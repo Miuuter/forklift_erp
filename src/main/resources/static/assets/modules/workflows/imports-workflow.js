@@ -185,10 +185,8 @@ export function createImportWorkflow(deps) {
           { label: "行数", html: true, render: row => importCountSummary(row) },
           { label: "摘要", key: "summary" },
           { label: "提交人", key: "createdBy" },
-          { label: "完成时间", key: "finishedAt", formatter: dateTime },
-          { label: "操作", html: true, render: row => importJobActions(row) }
+          { label: "完成时间", key: "finishedAt", formatter: dateTime }
         ], rows, listTableOptions("importJob", "imports", {
-          selectable: false,
           batch: false,
           emptyState: () => emptyState("暂无导入记录，先下载模板并上传文件。")
         })))}

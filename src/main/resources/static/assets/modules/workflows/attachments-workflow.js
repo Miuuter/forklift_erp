@@ -161,10 +161,8 @@ export function createAttachmentWorkflow(deps) {
           { label: "文件", html: true, render: row => attachmentFileSummary(row) },
           { label: "上传信息", html: true, render: row => attachmentUploadSummary(row) },
           { label: "状态", html: true, render: row => attachmentStatusSummary(row) },
-          { label: "备注", key: "uploadNote" },
-          { label: "操作", html: true, render: row => attachmentActions(row) }
+          { label: "备注", key: "uploadNote" }
         ], rows, listTableOptions("attachment", "attachments", {
-          selectable: false,
           batch: false,
           emptyState: () => attachmentEmptyState()
         })))}

@@ -13,6 +13,13 @@ import { createMutationRefresh } from "./modules/mutation-refresh.js";
 import { createModalRenderer, setModalSubmitting } from "./modules/modal-renderer.js";
 import { createDetailDrawer } from "./modules/detail-drawer.js";
 import { createCommandPalette } from "./modules/command-palette.js";
+import { createOverlayManager } from "./modules/ui/overlay-manager.js";
+import { createConfirmDialog } from "./modules/ui/confirm-dialog.js";
+import { createDataTable } from "./modules/ui/data-table.js";
+import { buildFormWorkspaceConfig } from "./modules/ui/form-workspace.js";
+import { createActionRegistry } from "./modules/ui/action-registry.js";
+import { createDrawerActions } from "./modules/ui/drawer-actions.js";
+import { ensureVehicleDetailTab as normalizeVehicleDetailTab, VEHICLE_DETAIL_TABS } from "./modules/ui/state-utils.js";
 import { createAttachmentWorkflow } from "./modules/workflows/attachments-workflow.js";
 import { createImportWorkflow } from "./modules/workflows/imports-workflow.js";
 import { createUserWorkflow } from "./modules/workflows/users-workflow.js";
@@ -38,6 +45,52 @@ const state = createInitialState({
 restorePersistedListState();
 
 const api = createApiClient(() => state.token);
+
+let els;
+let searchReloadTimer = null;
+let remoteComboSearchTimer = null;
+let remoteComboRequestSequence = 0;
+let modalPointerDownStartedOnOverlay = false;
+let detailPointerDownStartedOnOverlay = false;
+
+const overlayManager = createOverlayManager({
+  getBackgroundRoots: () => [els?.appScreen, els?.loginScreen].filter(Boolean)
+});
+
+const { confirmDanger } = createConfirmDialog({
+  overlayManager,
+  escapeHtml,
+  icon
+});
+
+const dataTable = createDataTable({
+  state,
+  escapeAttr,
+  escapeHtml,
+  display,
+  renderEmptyState: emptyState,
+  createListEmptyState,
+  entityLabel,
+  selectedIdSet,
+  renderBatchToolbar,
+  batchActionsForKind,
+  isBatchMode
+});
+
+const {
+  listTableOptions,
+  renderTable,
+  applyTableSort,
+  renderSelectableAttrs
+} = dataTable;
+
+const entityActionRegistry = createActionRegistry({
+  escapeAttr,
+  escapeHtml,
+  icon,
+  canWriteEntity,
+  hasPermission
+});
 
 const {
   fetchProtectedBlob,
@@ -473,6 +526,8 @@ const {
 
 const vehicleWorkflow = createVehicleWorkflow({
   state,
+  vehicleDetailTabs: VEHICLE_DETAIL_TABS,
+  ensureVehicleDetailTab: () => normalizeVehicleDetailTab(state),
   activeRentalForMachine,
   latestVehicleOutboundOrder,
   yesNoFromText,
@@ -525,7 +580,8 @@ const {
   vehicleFlowMachineSummary,
   vehicleFlowStatusSummary,
   vehicleFlowFollowupSummary,
-  vehicleFlowActions
+  vehicleFlowActions,
+  ensureVehicleDetailTab
 } = vehicleWorkflow;
 
 const configWorkflow = createConfigWorkflow({
@@ -590,16 +646,10 @@ const {
   renderStatistics
 } = statisticsWorkflow;
 
-let els;
-let searchReloadTimer = null;
-let remoteComboSearchTimer = null;
-let remoteComboRequestSequence = 0;
-let modalPointerDownStartedOnOverlay = false;
-let detailPointerDownStartedOnOverlay = false;
-
-const { closeModal, renderModal } = createModalRenderer({
+const { closeModal, requestCloseModal, renderModal } = createModalRenderer({
   state,
   getEls: () => els,
+  overlayManager,
   resetModalPointerDown: () => {
     modalPointerDownStartedOnOverlay = false;
   },
@@ -610,13 +660,38 @@ const { closeModal, renderModal } = createModalRenderer({
   usesVehicleInboundConfigEditor,
   renderConfigSelectionEditor,
   canSaveAndContinue,
+  formWorkspaceConfig: (kind, modalFields) => buildFormWorkspaceConfig(kind, modalFields, canSaveAndContinue, state.modal?.item),
+  confirmDiscard: () => confirmDanger({
+    title: "放弃未保存的修改？",
+    target: modalTitle(state.modal?.kind, state.modal?.item),
+    impact: "当前表单中尚未保存的输入将丢失。",
+    confirmText: "放弃修改"
+  }),
   escapeAttr,
   escapeHtml
+});
+
+const drawerActions = createDrawerActions({
+  hasPermission,
+  canUpdateUserJobTag,
+  canUpdateUserEnabled,
+  rowActions,
+  modificationOrderActions,
+  outboundOrderActions,
+  yesNoFromStatusText,
+  stocktakingActions,
+  attachmentActions: attachmentWorkflow.attachmentActions,
+  importJobActions: importWorkflow.importJobActions,
+  userActions,
+  escapeAttr,
+  escapeHtml,
+  icon
 });
 
 const { openDetailDrawer, closeDetailDrawer, renderDetailDrawer } = createDetailDrawer({
   state,
   getEls: () => els,
+  overlayManager,
   transitionMs: DETAIL_DRAWER_TRANSITION_MS,
   findEntity,
   renderCurrentTab,
@@ -624,7 +699,7 @@ const { openDetailDrawer, closeDetailDrawer, renderDetailDrawer } = createDetail
   entityLabel,
   detailFields,
   renderDetailGrid,
-  renderDetailDrawerActions,
+  renderDetailDrawerActions: drawerActions.render,
   escapeHtml
 });
 
@@ -662,6 +737,11 @@ document.addEventListener("DOMContentLoaded", () => {
     pageTitle: document.getElementById("pageTitle"),
     pageSubtitle: document.getElementById("pageSubtitle"),
     currentUser: document.getElementById("currentUser"),
+    globalSearchBtn: document.getElementById("globalSearchBtn"),
+    newBusinessBtn: document.getElementById("newBusinessBtn"),
+    newBusinessMenu: document.getElementById("newBusinessMenu"),
+    userMenuBtn: document.getElementById("userMenuBtn"),
+    userMenu: document.getElementById("userMenu"),
     switchUserBtn: document.getElementById("switchUserBtn"),
     logoutBtn: document.getElementById("logoutBtn"),
     content: document.getElementById("moduleContent"),
@@ -673,6 +753,10 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   els.loginForm.addEventListener("submit", handleLogin);
+  els.globalSearchBtn.addEventListener("click", openCommandPalette);
+  els.newBusinessBtn.addEventListener("click", () => toggleTopbarMenu(els.newBusinessBtn, els.newBusinessMenu));
+  els.userMenuBtn.addEventListener("click", () => toggleTopbarMenu(els.userMenuBtn, els.userMenu));
+  els.newBusinessMenu.addEventListener("click", handleTopbarBusinessAction);
   els.switchUserBtn.addEventListener("click", () => openEntityModal("switchUser", { username: "" }));
   els.logoutBtn.addEventListener("click", () => logout("已退出登录"));
   els.mainNav.addEventListener("click", handleNav);
@@ -692,18 +776,14 @@ document.addEventListener("DOMContentLoaded", () => {
   els.modalCard.addEventListener("focusout", handleModalFocusOut);
   els.modalCard.addEventListener("change", handleModalChange);
   els.modalCard.addEventListener("submit", handleModalSubmit);
+  els.modalCard.addEventListener("invalid", handleModalInvalid, true);
   els.detailDrawerOverlay.addEventListener("pointerdown", handleDetailDrawerOverlayPointerDown);
   els.detailDrawerOverlay.addEventListener("click", handleDetailDrawerOverlayClick);
   els.detailDrawer.addEventListener("click", handleDetailDrawerClick);
+  document.addEventListener("click", event => {
+    if (!event.target.closest(".topbar-create, .user-menu-wrap")) closeTopbarMenus();
+  });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && state.modal) {
-      closeModal();
-      return;
-    }
-    if (event.key === "Escape" && state.detailDrawer) {
-      closeDetailDrawer();
-      return;
-    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k" && !state.modal) {
       event.preventDefault();
       openCommandPalette();
@@ -718,6 +798,30 @@ document.addEventListener("DOMContentLoaded", () => {
 
   registerClientWorker();
 });
+
+function toggleTopbarMenu(button, menu) {
+  const opening = !menu.classList.contains("is-open");
+  closeTopbarMenus();
+  menu.classList.toggle("is-open", opening);
+  button.setAttribute("aria-expanded", opening ? "true" : "false");
+}
+
+function closeTopbarMenus() {
+  [
+    [els?.newBusinessBtn, els?.newBusinessMenu],
+    [els?.userMenuBtn, els?.userMenu]
+  ].forEach(([button, menu]) => {
+    menu?.classList.remove("is-open");
+    button?.setAttribute("aria-expanded", "false");
+  });
+}
+
+async function handleTopbarBusinessAction(event) {
+  const control = event.target.closest("[data-action]");
+  if (!control) return;
+  closeTopbarMenus();
+  await handleContentClick({ target: control });
+}
 
 function registerClientWorker() {
   if (!("serviceWorker" in navigator)) return;
@@ -764,6 +868,9 @@ function restorePersistedListState() {
   if (Number.isFinite(Number(persisted.visibleLogRows))) {
     state.visibleLogRows = Math.max(LOG_PAGE_SIZE, Number(persisted.visibleLogRows));
   }
+  if (typeof persisted.overviewQueueGroup === "string") state.overviewQueueGroup = persisted.overviewQueueGroup;
+  if (typeof persisted.overviewQueueKey === "string") state.overviewQueueKey = persisted.overviewQueueKey;
+  if (typeof persisted.statisticsReport === "string") state.statisticsReport = persisted.statisticsReport;
 }
 
 function persistListState() {
@@ -779,7 +886,10 @@ function persistListState() {
       pages,
       sorts: state.sorts || {},
       selectedStatsYear: state.selectedStatsYear,
-      visibleLogRows: state.visibleLogRows
+      visibleLogRows: state.visibleLogRows,
+      overviewQueueGroup: state.overviewQueueGroup,
+      overviewQueueKey: state.overviewQueueKey,
+      statisticsReport: state.statisticsReport
     }));
   } catch (error) {
     // Storage may be unavailable in private browsing or locked-down WebViews.
@@ -854,6 +964,7 @@ function logout(message) {
   state.vehicleDetail = null;
   state.selectedVehicleId = null;
   state.detailDrawer = null;
+  state.batchModes = {};
   state.batchSelections = {};
   clearSession();
   closeModal();
@@ -1016,6 +1127,22 @@ async function handleContentClick(event) {
       renderCurrentTab();
       return;
     }
+    if (action === "set-overview-queue-group") {
+      state.overviewQueueGroup = control.dataset.group || "finance";
+      state.overviewQueueKey = "";
+      renderCurrentTab();
+      return;
+    }
+    if (action === "set-overview-queue") {
+      state.overviewQueueKey = control.dataset.queue || "";
+      renderCurrentTab();
+      return;
+    }
+    if (action === "set-statistics-report") {
+      state.statisticsReport = control.dataset.report || "yearly";
+      renderCurrentTab();
+      return;
+    }
     if (action === "sort-table") {
       applyTableSort(control.dataset.tableKey, control.dataset.sortKey);
       persistListState();
@@ -1024,6 +1151,11 @@ async function handleContentClick(event) {
     }
     if (action === "toggle-row-select") {
       toggleBatchSelection(control.dataset.batchKind, id, control.checked);
+      renderCurrentTab();
+      return;
+    }
+    if (action === "toggle-batch-mode") {
+      toggleBatchMode(control.dataset.batchKind);
       renderCurrentTab();
       return;
     }
@@ -1343,6 +1475,18 @@ function handleContentKeydown(event) {
   selectable.click();
 }
 
+function handleFormWorkspaceNavigation(event) {
+  const anchor = event.target.closest("[data-action='scroll-form-section']");
+  if (!anchor) return false;
+  const section = els.modalCard.querySelector(`#${CSS.escape(anchor.dataset.sectionId || "")}`);
+  if (!section) return true;
+  els.modalCard.querySelectorAll(".form-anchor").forEach(button => {
+    button.classList.toggle("is-active", button === anchor);
+  });
+  section.scrollIntoView({ behavior: "smooth", block: "start" });
+  return true;
+}
+
 function handleContentPointerOver(event) {
   const column = event.target.closest(".finance-chart-column");
   if (!column || !els.content.contains(column)) return;
@@ -1509,7 +1653,7 @@ function handleModalOverlayPointerDown(event) {
 
 function handleOverlayClick(event) {
   if (event.target === els.modalOverlay && modalPointerDownStartedOnOverlay) {
-    closeModal();
+    void requestCloseModal();
   }
   modalPointerDownStartedOnOverlay = false;
 }
@@ -1536,6 +1680,14 @@ function handleDetailDrawerClick(event) {
 }
 
 async function handleModalClick(event) {
+  const invalidFieldLink = event.target.closest("[data-action='focus-invalid-field']");
+  if (invalidFieldLink) {
+    const field = els.modalCard.querySelector(`[name="${CSS.escape(invalidFieldLink.dataset.name || "")}"]`);
+    field?.focus();
+    field?.scrollIntoView({ block: "center", behavior: "smooth" });
+    return;
+  }
+  if (handleFormWorkspaceNavigation(event)) return;
   const configAction = event.target.closest("[data-config-action]");
   if (configAction) {
     event.preventDefault();
@@ -1579,11 +1731,12 @@ async function handleModalClick(event) {
     closeAllCombos();
   }
   if (event.target.closest("[data-close-modal]")) {
-    closeModal();
+    await requestCloseModal();
   }
 }
 
 function handleModalInput(event) {
+  clearModalValidationSummaryIfValid(event.target.closest("form"));
   const input = event.target.closest("[data-combo-input]");
   if (!input) {
     const form = event.target.closest("form");
@@ -1617,6 +1770,32 @@ function handleModalInput(event) {
   }
   openCombo(combo, query);
   scheduleRemoteComboSearch(combo, query);
+}
+
+function handleModalInvalid(event) {
+  const form = event.target.closest("form");
+  if (!form) return;
+  requestAnimationFrame(() => showModalValidationSummary(form));
+}
+
+function showModalValidationSummary(form, message = "") {
+  const summary = els.modalCard.querySelector("[data-validation-summary]");
+  if (!summary) return;
+  const invalidFields = [...form.querySelectorAll(":invalid")].filter(field => field.name);
+  const items = invalidFields.map(field => {
+    const label = field.closest(".field")?.querySelector(":scope > span")?.childNodes?.[0]?.textContent?.trim() || field.name;
+    return `<button type="button" data-action="focus-invalid-field" data-name="${escapeAttr(field.name)}">${escapeHtml(label)}</button>`;
+  });
+  summary.innerHTML = `
+    <strong>${escapeHtml(message || "请检查以下必填或格式错误字段")}</strong>
+    ${items.length ? `<div>${items.join("")}</div>` : ""}
+  `;
+  summary.classList.remove("is-hidden");
+}
+
+function clearModalValidationSummaryIfValid(form) {
+  if (!form || form.querySelector(":invalid")) return;
+  els.modalCard.querySelector("[data-validation-summary]")?.classList.add("is-hidden");
 }
 
 function handleModalFocusIn(event) {
@@ -3111,6 +3290,8 @@ function detailTitle(kind, item) {
     purchaseOrder: item.purchaseNo || item.resourceName,
     stocktaking: item.stocktakingNo || item.resourceName,
     repair: item.customerName || item.vehicleNumber,
+    attachment: item.originalName || item.attachmentLabel,
+    importJob: item.originalFileName || item.templateName,
     user: item.username
   }[kind] || `ID ${item.id}`;
 }
@@ -3218,6 +3399,30 @@ function detailFields(kind, item) {
       ["客户应收", money(item.totalFee)],
       ["状态", repairStatusText(item.status)]
     ],
+    attachment: [
+      ["业务对象", attachmentResourceTypeLabel(item.resourceType)],
+      ["对象编号", item.resourceCode || item.resourceId],
+      ["对象名称", item.resourceName],
+      ["附件类型", attachmentCategoryLabel(item.attachmentCategory)],
+      ["文件名", item.originalName || item.attachmentLabel],
+      ["文件大小", fileSize(item.fileSize)],
+      ["上传人", item.uploadedBy],
+      ["上传时间", dateTime(item.uploadedAt)],
+      ["状态", item.deleted ? "已删除" : "有效"],
+      ["备注", item.uploadNote]
+    ],
+    importJob: [
+      ["导入类型", importTypeLabel(item.importType)],
+      ["模板", item.templateName],
+      ["文件名", item.originalFileName],
+      ["状态", item.status],
+      ["总行数", item.totalRows],
+      ["有效行", item.validRows],
+      ["错误行", item.errorRows],
+      ["已导入", item.importedRows],
+      ["提交人", item.createdBy],
+      ["摘要", item.summary]
+    ],
     user: [
       ["用户名", item.username],
       ["角色", (item.roles || []).join(" / ")],
@@ -3227,32 +3432,6 @@ function detailFields(kind, item) {
     ]
   }[kind] || Object.entries(item).slice(0, 8).map(([key, value]) => [key, value]);
   return fields.map(([label, value]) => ({ label, value }));
-}
-
-function renderDetailDrawerActions(kind, item) {
-  const actions = {
-    part: rowActions("part", item, ["stockIn", "stockOut", "edit", "delete"]),
-    modificationOrder: modificationOrderActions(item),
-    outboundOrder: outboundOrderActions(item),
-    rental: rowActions("rental", item, ["edit", "delete"]),
-    customer: `${customerContextActions(item)}${rowActions("customer", item, ["edit", "delete"])}`,
-    supplier: rowActions("supplier", item, ["edit", "delete"]),
-    purchaseOrder: `${purchaseStatusControl(item)}${rowActions("purchaseOrder", item, ["edit", "delete"])}`,
-    stocktaking: stocktakingActions(item),
-    repair: `${repairStatusToggle(item)}${rowActions("repair", item, ["edit", "delete"])}`,
-    user: userActions(item)
-  }[kind] || "";
-  return actions ? `<div class="detail-drawer-actions">${actions}</div>` : "";
-}
-
-function customerContextActions(customer = {}) {
-  if (!customer?.id) return "";
-  const actions = [
-    hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="create" data-kind="vehicleOutbound" data-customer-id="${escapeAttr(customer.id)}">${icon("minus")}登记销售</button>` : "",
-    hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="create" data-kind="rental" data-customer-id="${escapeAttr(customer.id)}">${icon("plus")}租赁登记</button>` : "",
-    hasPermission("repair:write") ? `<button class="btn btn-sm" type="button" data-action="create" data-kind="repair" data-customer-id="${escapeAttr(customer.id)}">${icon("plus")}维修登记</button>` : ""
-  ].filter(Boolean);
-  return actions.length ? `<div class="action-row">${actions.join("")}</div>` : "";
 }
 
 function focusPrimarySearch() {
@@ -3287,6 +3466,19 @@ async function syncShell() {
     } else {
       button.removeAttribute("aria-current");
     }
+  });
+  els.newBusinessMenu?.querySelectorAll("[data-permissions], [data-roles]").forEach(button => {
+    const requiredRoles = (button.dataset.roles || "").split(",").map(role => role.trim()).filter(Boolean);
+    const requiredPermissions = (button.dataset.permissions || "").split(",").map(permission => permission.trim()).filter(Boolean);
+    const allowed = (!requiredRoles.length || hasAnyRole(...requiredRoles))
+      && (!requiredPermissions.length || hasAnyPermission(...requiredPermissions));
+    button.classList.toggle("is-hidden", !allowed);
+  });
+  const hasBusinessAction = [...(els.newBusinessMenu?.querySelectorAll("button") || [])]
+    .some(button => !button.classList.contains("is-hidden"));
+  els.newBusinessBtn?.classList.toggle("is-hidden", !hasBusinessAction);
+  els.mainNav.querySelectorAll(".nav-item").forEach(button => {
+    if (!button.title) button.title = button.textContent.trim();
   });
   els.mainNav.querySelectorAll("[data-nav-group]").forEach(group => {
     const hasVisibleItem = [...group.querySelectorAll("[data-tab]")]
@@ -3827,156 +4019,6 @@ function createListEmptyState(kind) {
   `;
 }
 
-function renderTableEmptyState(options) {
-  if (typeof options.emptyState === "function") return options.emptyState();
-  if (options.emptyState) return options.emptyState;
-  return emptyState("暂无数据");
-}
-
-function listTableOptions(kind, exportType, options = {}) {
-  return {
-    tableKey: options.tableKey || exportType || kind,
-    emptyState: options.emptyState === undefined ? () => createListEmptyState(kind) : options.emptyState,
-    selectableRow: options.selectable === false ? null : row => ({
-      action: "open-detail",
-      data: { kind, id: row.id },
-      active: state.detailDrawer?.kind === kind && Number(state.detailDrawer?.id) === Number(row.id),
-      label: `查看${entityLabel(kind)}详情`
-    }),
-    batch: options.batch === false ? null : {
-      kind,
-      exportType,
-      actions: batchActionsForKind(kind)
-    }
-  };
-}
-
-function renderTable(columns, rows, options = {}) {
-  const tableKey = options.tableKey || null;
-  const preparedColumns = prepareTableColumns(columns);
-  const visibleRows = tableKey ? sortRowsForTable(tableKey, preparedColumns, rows) : rows;
-  if (!visibleRows.length) return renderTableEmptyState(options);
-  const batch = options.batch;
-  const visibleIds = visibleRows.map(row => String(row.id)).filter(Boolean);
-  const selectedIds = batch ? selectedIdSet(batch.kind) : new Set();
-  const allVisibleSelected = batch && visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id));
-  const dataColumns = tableKey ? visibleTableColumns(tableKey, preparedColumns) : preparedColumns;
-  const tableColumns = batch ? [
-    {
-      label: `<input class="row-check" type="checkbox" data-action="toggle-visible-select" data-batch-kind="${escapeAttr(batch.kind)}" data-visible-ids="${escapeAttr(visibleIds.join(","))}" aria-label="选择当前页" ${allVisibleSelected ? "checked" : ""}>`,
-      htmlLabel: true,
-      html: true,
-      render: row => `<input class="row-check" type="checkbox" data-action="toggle-row-select" data-batch-kind="${escapeAttr(batch.kind)}" data-id="${escapeAttr(row.id)}" aria-label="选择此行" ${selectedIds.has(String(row.id)) ? "checked" : ""}>`
-    },
-    ...dataColumns
-  ] : dataColumns;
-  return `
-    ${batch ? renderBatchToolbar(batch, visibleRows) : ""}
-    <div class="table-wrap" tabindex="0" aria-label="数据表格，可横向滚动">
-      <table>
-        <thead>
-          <tr>${tableColumns.map(column => renderTableHeader(column, tableKey)).join("")}</tr>
-        </thead>
-        <tbody>
-          ${visibleRows.map(row => {
-            const selectable = options.selectableRow ? options.selectableRow(row) : null;
-            const rowClass = [
-              selectable ? "table-row-selectable" : "",
-              selectable?.active ? "table-row-active" : "",
-              batch && selectedIds.has(String(row.id)) ? "table-row-checked" : ""
-            ].filter(Boolean).join(" ");
-            return `
-              <tr${rowClass ? ` class="${rowClass}"` : ""}${renderSelectableAttrs(selectable)}>
-                ${tableColumns.map(column => `<td data-label="${escapeAttr(tableCellLabel(column))}">${renderCell(column, row)}</td>`).join("")}
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function prepareTableColumns(columns) {
-  return (columns || []).map((column, index) => ({
-    ...column,
-    sortId: column.sortKey || column.key || `column-${index}`,
-    sortable: column.sortable !== false && !column.htmlLabel && !column.html && Boolean(column.sortValue || column.key || column.render)
-  }));
-}
-
-function visibleTableColumns(tableKey, columns) {
-  return columns;
-}
-
-function renderTableHeader(column, tableKey) {
-  if (column.htmlLabel) return `<th>${column.label}</th>`;
-  const label = escapeHtml(column.label);
-  if (!tableKey || !column.sortable) return `<th>${label}</th>`;
-  const sort = state.sorts?.[tableKey];
-  const active = sort?.key === column.sortId;
-  const direction = active ? sort.direction : "";
-  const indicator = active ? (direction === "desc" ? "↓" : "↑") : "↕";
-  return `
-    <th>
-      <button class="table-sort-button${active ? " is-active" : ""}" type="button" data-action="sort-table" data-table-key="${escapeAttr(tableKey)}" data-sort-key="${escapeAttr(column.sortId)}" aria-sort="${active ? (direction === "desc" ? "descending" : "ascending") : "none"}">
-        <span>${label}</span><span class="sort-indicator" aria-hidden="true">${indicator}</span>
-      </button>
-    </th>
-  `;
-}
-
-function tableCellLabel(column) {
-  if (column.cardLabel !== undefined) return column.cardLabel;
-  if (column.htmlLabel) return "选择";
-  return String(column.label || "");
-}
-
-function applyTableSort(tableKey, sortKey) {
-  if (!tableKey || !sortKey) return;
-  const current = state.sorts?.[tableKey];
-  const nextDirection = current?.key === sortKey && current.direction === "asc" ? "desc" : "asc";
-  state.sorts = {
-    ...(state.sorts || {}),
-    [tableKey]: { key: sortKey, direction: nextDirection }
-  };
-}
-
-function sortRowsForTable(tableKey, columns, rows) {
-  const sort = state.sorts?.[tableKey];
-  if (!sort?.key) return rows;
-  const column = columns.find(item => item.sortId === sort.key);
-  if (!column) return rows;
-  const direction = sort.direction === "desc" ? -1 : 1;
-  return [...rows].sort((left, right) => compareTableValues(tableSortValue(column, left), tableSortValue(column, right)) * direction);
-}
-
-function tableSortValue(column, row) {
-  if (column.sortValue) return column.sortValue(row);
-  if (column.key) return row[column.key];
-  if (column.render && !column.html) return column.render(row);
-  return "";
-}
-
-function compareTableValues(left, right) {
-  const leftEmpty = left === null || left === undefined || left === "";
-  const rightEmpty = right === null || right === undefined || right === "";
-  if (leftEmpty && rightEmpty) return 0;
-  if (leftEmpty) return 1;
-  if (rightEmpty) return -1;
-  const leftNumber = Number(left);
-  const rightNumber = Number(right);
-  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
-    return leftNumber - rightNumber;
-  }
-  const leftTime = Date.parse(left);
-  const rightTime = Date.parse(right);
-  if (Number.isFinite(leftTime) && Number.isFinite(rightTime)) {
-    return leftTime - rightTime;
-  }
-  return String(left).localeCompare(String(right), "zh-CN", { numeric: true, sensitivity: "base" });
-}
-
 function renderExportableSurface(title, exportType, body) {
   return `
     <section class="surface">
@@ -4015,51 +4057,12 @@ function compactTable(columns, rows) {
   return `<div class="compact-table">${renderTable(columns, rows)}</div>`;
 }
 
-function renderCell(column, row) {
-  if (column.html) return column.render(row);
-  const raw = column.render ? column.render(row) : row[column.key];
-  const value = column.formatter ? column.formatter(raw, row) : raw;
-  return escapeHtml(display(value));
-}
-
-function renderSelectableAttrs(selectable) {
-  if (!selectable?.action) return "";
-  const attrs = [
-    `data-select-action="${escapeAttr(selectable.action)}"`,
-    'tabindex="0"',
-    'role="button"'
-  ];
-  if (typeof selectable.active === "boolean") {
-    attrs.push(`aria-pressed="${selectable.active ? "true" : "false"}"`);
-  }
-  if (selectable.label) {
-    attrs.push(`aria-label="${escapeAttr(selectable.label)}"`);
-  }
-  for (const [key, value] of Object.entries(selectable.data || {})) {
-    if (value === undefined || value === null) continue;
-    attrs.push(`data-${toDataAttrName(key)}="${escapeAttr(value)}"`);
-  }
-  return ` ${attrs.join(" ")}`;
-}
-
 function toDataAttrName(key) {
   return String(key).replace(/([A-Z])/g, "-$1").toLowerCase();
 }
 
 function rowActions(kind, row, actions) {
-  const canWrite = canWriteEntity(kind);
-  const canAdjustStock = hasPermission("stock:adjust");
-  const attachmentResourceType = attachmentResourceTypeForKind(kind);
-  return `
-    <div class="action-row">
-      ${actions.includes("detail") ? `<button class="btn btn-sm" type="button" data-action="detail-vehicle" data-id="${escapeAttr(row.id)}">${icon("eye")}详情</button>` : ""}
-      ${actions.includes("stockIn") && kind === "vehicle" && canAdjustStock ? `<button class="btn btn-sm" type="button" data-action="vehicle-stock" data-direction="inbound" data-id="${escapeAttr(row.id)}">${icon("plus")}入库</button>` : ""}
-      ${actions.includes("stockIn") && kind === "part" && canAdjustStock ? `<button class="btn btn-sm" type="button" data-action="part-stock" data-direction="inbound" data-part-code="${escapeAttr(row.partCode)}">${icon("plus")}入库</button>` : ""}
-      ${actions.includes("stockOut") && kind === "part" && canAdjustStock ? `<button class="btn btn-sm" type="button" data-action="part-stock" data-direction="outbound" data-part-code="${escapeAttr(row.partCode)}">${icon("minus")}出库</button>` : ""}
-      ${actions.includes("edit") && canWrite ? `<button class="btn btn-sm" type="button" data-action="edit" data-kind="${kind}" data-id="${escapeAttr(row.id)}">${icon("edit")}编辑</button>` : ""}
-      ${actions.includes("delete") && canWrite ? `<button class="btn btn-sm btn-danger" type="button" data-action="delete" data-kind="${kind}" data-id="${escapeAttr(row.id)}">${icon("trash")}删除</button>` : ""}
-    </div>
-  `;
+  return entityActionRegistry.render(kind, row, actions);
 }
 
 function renderBatchToolbar(batch, rows) {
@@ -4080,6 +4083,20 @@ function renderBatchToolbar(batch, rows) {
 
 function selectedIdSet(kind) {
   return new Set((state.batchSelections?.[kind] || []).map(String));
+}
+
+function isBatchMode(kind) {
+  return Boolean(state.batchModes?.[kind]);
+}
+
+function toggleBatchMode(kind) {
+  if (!kind) return;
+  const active = !isBatchMode(kind);
+  state.batchModes = {
+    ...(state.batchModes || {}),
+    [kind]: active
+  };
+  if (!active) clearBatchSelection(kind);
 }
 
 function selectedRows(kind) {
@@ -4184,18 +4201,7 @@ function stocktakingActions(row = {}) {
 
 function purchaseStatusControl(row = {}) {
   const received = row.status === "RECEIVED";
-  const receivable = ["ORDERED", "PARTIAL", "ARRIVED"].includes(row.status);
-  if (!hasPermission("stock:adjust")) {
-    return purchaseStatusBadge(row.status);
-  }
-  return `
-    <div class="cell-stack">
-      ${purchaseStatusBadge(row.status)}
-      ${received || receivable ? `<button class="btn btn-sm ${received ? "" : "btn-primary"}" type="button" data-action="toggle-purchase-received" data-id="${escapeAttr(row.id)}" title="${received ? "恢复收货前状态" : "将订单标记为已收货"}">${icon(received ? "refresh" : "download")}${received ? "撤销收货" : "标记收货"}</button>` : ""}
-      ${received ? `<span class="helper-inline">运费 ${escapeHtml(money(row.freightAmount ?? 0))}</span>` : ""}
-      ${received ? `<button class="btn btn-sm" type="button" data-action="purchase-freight" data-id="${escapeAttr(row.id)}">${icon("edit")}修改运费</button>` : ""}
-    </div>
-  `;
+  return `<div class="cell-stack">${purchaseStatusBadge(row.status)}${received ? `<span class="helper-inline">运费 ${escapeHtml(money(row.freightAmount ?? 0))}</span>` : ""}</div>`;
 }
 function stocktakingStatusBadge(status) {
   const map = {
@@ -4220,7 +4226,27 @@ function uniqueSupplierCount() {
     .filter(Boolean)).size;
 }
 
-function renderModalFields(modalFields, item) {
+function renderModalFields(modalFields, item, options = {}) {
+  if (Array.isArray(options.sections) && options.sections.length) {
+    const hiddenFields = modalFields.filter(field => field.type === "hidden");
+    return `
+      ${hiddenFields.map(field => renderField(field, item)).join("")}
+      ${options.sections.map(section => `
+        <section class="form-section" id="${escapeAttr(section.key)}" data-form-section>
+          <div class="form-section-head">
+            <div>
+              <span class="form-section-index">${escapeHtml(String(options.sections.indexOf(section) + 1).padStart(2, "0"))}</span>
+              <h3>${escapeHtml(section.title)}</h3>
+            </div>
+            <span>${escapeHtml(section.fields.length)} 项</span>
+          </div>
+          <div class="modal-grid">
+            ${section.fields.map(field => renderField(field, item)).join("")}
+          </div>
+        </section>
+      `).join("")}
+    `;
+  }
   let activeSection = null;
   return modalFields.map(field => {
     const section = field.type === "hidden" ? activeSection : (field.section || "");
@@ -4240,6 +4266,10 @@ function renderField(field, data) {
   const value = toInputValue(rawValue, field);
   const span = field.span ? ` data-span="${field.span}"` : "";
   const required = field.required && prefillValue === undefined ? " required" : "";
+  const prefillHint = fieldPrefillHint(field, data);
+  const fieldHint = prefillHint
+    ? `<span class="field-source" data-field-source>${escapeHtml(prefillHint)}</span>`
+    : "";
   const coerce = field.coerce || field.type || "string";
 
   if (field.type === "hidden") {
@@ -4250,7 +4280,7 @@ function renderField(field, data) {
     return `
       <label class="field checkbox-field"${span}>
         <input name="${escapeAttr(field.name)}" type="checkbox" data-coerce="${escapeAttr(coerce)}"${rawValue ? " checked" : ""}>
-        <span>${escapeHtml(field.label)}</span>
+        <span>${escapeHtml(field.label)}${fieldHint}</span>
       </label>
     `;
   }
@@ -4266,7 +4296,7 @@ function renderField(field, data) {
     const remoteAttrs = remoteSource ? ` data-remote-source="${escapeAttr(remoteSource)}"` : "";
     return `
       <label class="field"${span}>
-        <span>${escapeHtml(field.label)}</span>
+        <span>${escapeHtml(field.label)}${fieldHint}</span>
         <div class="combo${options.length ? "" : " is-empty"}" data-combo data-name="${escapeAttr(field.name)}" data-allow-custom="${field.allowCustom ? "true" : "false"}" data-required="${field.required ? "true" : "false"}"${remoteAttrs}>
           <input class="combo-input" data-combo-input type="text" value="${escapeAttr(displayValue)}" placeholder="${escapeAttr(placeholder)}" autocomplete="off"${required}>
           <button class="combo-toggle" type="button" data-combo-toggle aria-label="展开选项"></button>
@@ -4282,7 +4312,7 @@ function renderField(field, data) {
   if (field.type === "textarea") {
     return `
       <label class="field"${span}>
-        <span>${escapeHtml(field.label)}</span>
+        <span>${escapeHtml(field.label)}${fieldHint}</span>
         <textarea name="${escapeAttr(field.name)}" data-coerce="${escapeAttr(coerce)}" placeholder="${escapeAttr(fieldPlaceholder(field, [], data))}"${renderPrefillAttrs(field, prefillValue)}${required}>${escapeHtml(value)}</textarea>
       </label>
     `;
@@ -4293,7 +4323,7 @@ function renderField(field, data) {
     const selectedValue = value || prefillValue || field.defaultValue || options[0]?.value || "";
     return `
       <label class="field"${span}>
-        <span>${escapeHtml(field.label)}</span>
+        <span>${escapeHtml(field.label)}${fieldHint}</span>
         <div class="status-toggle-group" data-toggle-group="${escapeAttr(field.name)}">
           ${options.map(option => {
             const active = String(option.value) === String(selectedValue);
@@ -4308,7 +4338,7 @@ function renderField(field, data) {
   if (field.type === "file") {
     return `
       <label class="field"${span}>
-        <span>${escapeHtml(field.label)}</span>
+        <span>${escapeHtml(field.label)}${fieldHint}</span>
         <input name="${escapeAttr(field.name)}" type="file"${field.accept ? ` accept="${escapeAttr(field.accept)}"` : ""}${field.multiple ? " multiple" : ""}${required}>
       </label>
     `;
@@ -4316,7 +4346,7 @@ function renderField(field, data) {
 
   return `
     <label class="field"${span}>
-      <span>${escapeHtml(field.label)}</span>
+      <span>${escapeHtml(field.label)}${fieldHint}</span>
       <input name="${escapeAttr(field.name)}" type="${escapeAttr(field.type || "text")}" data-coerce="${escapeAttr(coerce)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(fieldPlaceholder(field, [], data))}"${renderPrefillAttrs(field, prefillValue)}${field.step ? ` step="${escapeAttr(field.step)}"` : ""}${field.readOnly ? " readonly" : ""}${required}>
     </label>
   `;
@@ -4686,6 +4716,14 @@ function fieldPrefillValue(field, data = {}) {
     return typeof field.defaultValue === "function" ? field.defaultValue() : field.defaultValue;
   }
   return undefined;
+}
+
+function fieldPrefillHint(field, data = {}) {
+  if (!Object.prototype.hasOwnProperty.call(data?.__prefillValues || {}, field.name)) return "";
+  const placeholder = String(data?.__placeholders?.[field.name] || "").trim();
+  if (placeholder.startsWith("默认：")) return placeholder;
+  if (placeholder.startsWith("预填：")) return `自动带入 · ${placeholder.slice(3)}`;
+  return "自动带入";
 }
 
 function fieldPlaceholder(field, options = [], data = {}) {
@@ -6773,72 +6811,6 @@ function modalDangerConfirmation(kind, item = {}, payload = {}) {
   return null;
 }
 
-function confirmDanger({ title, target, impact, confirmText = "确认继续", cancelText = "取消" } = {}) {
-  if (typeof document === "undefined" || !document.body) {
-    return Promise.resolve(window.confirm([
-      title || "确认操作",
-      target ? `对象：${target}` : "",
-      impact ? `影响：${impact}` : "",
-      "",
-      `${confirmText}？`
-    ].filter(line => line !== "").join("\n")));
-  }
-
-  return new Promise(resolve => {
-    let settled = false;
-    let pointerDownStartedOnOverlay = false;
-    const overlay = document.createElement("div");
-    overlay.className = "confirm-overlay";
-    overlay.innerHTML = `
-      <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="dangerConfirmTitle">
-        <div class="confirm-icon">${icon("trash")}</div>
-        <div class="confirm-content">
-          <h2 id="dangerConfirmTitle">${escapeHtml(title || "确认操作")}</h2>
-          ${target ? `<p class="confirm-target">对象：${escapeHtml(target)}</p>` : ""}
-          ${impact ? `<p class="confirm-impact">${escapeHtml(impact)}</p>` : ""}
-        </div>
-        <div class="confirm-actions">
-          <button class="btn btn-ghost" type="button" data-confirm-cancel>${escapeHtml(cancelText)}</button>
-          <button class="btn btn-danger" type="button" data-confirm-ok>${icon("trash")}${escapeHtml(confirmText)}</button>
-        </div>
-      </section>
-    `;
-    document.body.appendChild(overlay);
-
-    const okButton = overlay.querySelector("[data-confirm-ok]");
-    const cancelButton = overlay.querySelector("[data-confirm-cancel]");
-    const finish = confirmed => {
-      if (settled) return;
-      settled = true;
-      overlay.classList.remove("is-open");
-      window.setTimeout(() => overlay.remove(), 180);
-      document.removeEventListener("keydown", onKeydown, true);
-      resolve(confirmed);
-    };
-    const onKeydown = event => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        finish(false);
-      }
-    };
-
-    okButton?.addEventListener("click", () => finish(true), { once: true });
-    cancelButton?.addEventListener("click", () => finish(false), { once: true });
-    overlay.addEventListener("pointerdown", event => {
-      pointerDownStartedOnOverlay = event.target === overlay;
-    });
-    overlay.addEventListener("click", event => {
-      if (event.target === overlay && pointerDownStartedOnOverlay) finish(false);
-      pointerDownStartedOnOverlay = false;
-    });
-    document.addEventListener("keydown", onKeydown, true);
-    requestAnimationFrame(() => {
-      overlay.classList.add("is-open");
-      cancelButton?.focus();
-    });
-  });
-}
-
 function handleActionError(error) {
   if (isAuthExpiredError(error)) {
     logout("登录已过期，请重新登录");
@@ -6848,6 +6820,9 @@ function handleActionError(error) {
     showToast(error.message || "数据已被其他用户更新，请刷新后重试", "error");
     void refreshAfterConflict();
     return;
+  }
+  if (state.modal && els?.modalCard?.querySelector("form")) {
+    showModalValidationSummary(els.modalCard.querySelector("form"), error.message || "保存失败，请检查表单后重试");
   }
   showToast(error.message || "操作失败", "error");
 }

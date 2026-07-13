@@ -48,8 +48,7 @@ export function createRentalsWorkflow(deps) {
           { label: "租期", html: true, render: row => rentalPeriodSummary(row) },
           { label: "状态", html: true, render: row => rentalStatusBadge(row.status) },
           { label: "经办人", key: "operator" },
-          { label: "备注", key: "remark" },
-          { label: "操作", html: true, render: row => rowActions("rental", row, ["edit", "delete"]) }
+          { label: "备注", key: "remark" }
         ], rows, listTableOptions("rental", "rentals")))}
         ${renderPagination("rentals")}
       </div>

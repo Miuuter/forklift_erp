@@ -1,12 +1,12 @@
 {
-  "name": "\u9f99\u5de5\u53c9\u8f66",
-  "short_name": "\u9f99\u5de5\u53c9\u8f66",
+  "name": "\u53c9\u8f66 ERP",
+  "short_name": "\u53c9\u8f66 ERP",
   "description": "\u4e2d\u5c71\u5929\u529b\u53c9\u8f66\u6574\u8f66\u3001\u914d\u4ef6\u3001\u7ef4\u4fee\u548c\u914d\u7f6e\u6570\u636e\u7ba1\u7406\u5ba2\u6237\u7aef",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f5f7fb",
-  "theme_color": "#c91519",
+  "background_color": "#f3f5f7",
+  "theme_color": "#1f4e78",
   "icons": [
     {
       "src": "/assets/icon.svg",

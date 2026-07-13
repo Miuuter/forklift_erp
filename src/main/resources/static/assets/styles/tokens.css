@@ -1,0 +1,37 @@
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --panel-2: #f7f9fb;
+  --line: #d6dce5;
+  --line-strong: #bcc7d4;
+  --text: #172033;
+  --muted: #667085;
+  --primary: #1f4e78;
+  --primary-strong: #173c5d;
+  --primary-weak: #e9f1f8;
+  --accent: #087b6d;
+  --accent-weak: #e5f5f2;
+  --success: #19733c;
+  --success-weak: #e8f5ec;
+  --warn: #a86408;
+  --warn-weak: #fff3da;
+  --danger: #b42318;
+  --danger-weak: #ffebe9;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05), 0 8px 20px rgba(16, 24, 40, 0.06);
+  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-strong: 0 18px 48px rgba(16, 24, 40, 0.2);
+  --focus-ring: 0 0 0 3px rgba(31, 78, 120, 0.2);
+  --sidebar: #172a3c;
+  --sidebar-2: #20384f;
+  --sidebar-text: #e9eff5;
+  --sidebar-muted: #93a6b8;
+  --sidebar-hover: #233e57;
+  --sidebar-active: #2c4e6b;
+  --sidebar-active-line: #6ea8d6;
+  --warning: var(--warn);
+  --teal: var(--accent);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1.2);
+}

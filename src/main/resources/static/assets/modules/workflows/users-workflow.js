@@ -94,9 +94,8 @@ export function createUserWorkflow(deps) {
           { label: "角色", html: true, render: row => roleBadges(row.roles) },
           { label: "职务", html: true, render: row => jobTagControl(row) },
           { label: "状态", html: true, render: row => userEnabledControl(row) },
-          { label: "创建时间", key: "createdAt", formatter: dateTime },
-          { label: "操作", html: true, render: row => userActions(row) }
-        ], rows, listTableOptions("user", null, { selectable: false, batch: false })))}
+          { label: "创建时间", key: "createdAt", formatter: dateTime }
+        ], rows, listTableOptions("user", null, { batch: false })))}
         ${renderPagination("users")}
       </div>
     `;
@@ -104,19 +103,12 @@ export function createUserWorkflow(deps) {
 
   function jobTagControl(row = {}) {
     const tag = normalizeJobTag(row.jobTag, row.roles);
-    if (!canUpdateUserJobTag(row)) {
-      return jobTagBadge(tag);
-    }
-    const next = nextJobTag(tag);
-    return `<button class="status-toggle ${escapeAttr(jobTagType(tag))}" type="button" data-action="toggle-user-job-tag" data-id="${escapeAttr(row.id)}" title="点击切换为${escapeAttr(jobTagLabel(next))}">${escapeHtml(jobTagLabel(tag))}</button>`;
+    return jobTagBadge(tag);
   }
 
   function userEnabledControl(row = {}) {
     const enabled = Boolean(row.enabled);
-    if (!canUpdateUserEnabled(row)) {
-      return badge(enabled ? "启用" : "停用", enabled ? "teal" : "danger");
-    }
-    return `<button class="status-toggle ${enabled ? "teal" : "danger"}" type="button" data-action="toggle-user-enabled" data-id="${escapeAttr(row.id)}" aria-pressed="${enabled ? "true" : "false"}" title="点击切换启用状态">${escapeHtml(enabled ? "启用" : "停用")}</button>`;
+    return badge(enabled ? "启用" : "停用", enabled ? "teal" : "danger");
   }
 
   function userActions(row) {

@@ -37,8 +37,7 @@ export function createRepairsWorkflow(deps) {
           { label: "客户", html: true, render: row => repairCustomerSummary(row) },
           { label: "维修人", html: true, render: row => repairPersonSummary(row) },
           { label: "状态", html: true, render: row => repairStatusToggle(row) },
-          { label: "客户应收", key: "totalFee", formatter: money },
-          { label: "操作", html: true, render: row => rowActions("repair", row, ["edit", "delete"]) }
+          { label: "客户应收", key: "totalFee", formatter: money }
         ], rows, listTableOptions("repair", "repairs")))}
         ${renderPagination("repairs")}
       </div>
@@ -69,12 +68,9 @@ export function createRepairsWorkflow(deps) {
   }
 
   function repairStatusToggle(row = {}) {
-    if (!hasPermission("repair:write")) {
-      return statusBadge(row.status);
-    }
     const normalized = row.status === "COMPLETED" ? "COMPLETED" : "PENDING";
     const active = normalized === "COMPLETED";
-    return `<button class="status-toggle ${active ? "teal" : "warn"}" type="button" data-action="toggle-repair-status" data-id="${escapeAttr(row.id)}" aria-pressed="${active ? "true" : "false"}" title="点击切换维修状态">${escapeHtml(repairStatusText(normalized))}</button>`;
+    return badge(repairStatusText(normalized), active ? "teal" : "warn");
   }
 
   return {

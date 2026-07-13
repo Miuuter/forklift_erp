@@ -62,8 +62,7 @@ export function createOutboundWorkflow(deps) {
           { label: "报销售", html: true, render: row => orderSalesReportSummary(row) },
           { label: "发票跟进", html: true, render: row => orderInvoiceSummary(row) },
           { label: "上牌/合同", html: true, render: row => orderContractSummary(row) },
-          { label: "订单备注", key: "orderRemark" },
-          { label: "操作", html: true, render: row => outboundOrderActions(row) }
+          { label: "订单备注", key: "orderRemark" }
         ], rows, listTableOptions("outboundOrder", "outboundOrders")))}
         ${renderPagination("outboundOrders")}
       </div>
@@ -167,12 +166,9 @@ export function createOutboundWorkflow(deps) {
   }
 
   function orderStatusToggle(row, field, active, activeLabel, inactiveLabel) {
-    if (!hasPermission("stock:adjust")) {
-      return active ? badge(activeLabel, "teal") : badge(inactiveLabel, "primary");
-    }
     const label = active ? activeLabel : inactiveLabel;
     const type = active ? "teal" : "primary";
-    return `<button class="status-toggle ${escapeAttr(type)}" type="button" data-action="toggle-order-status" data-id="${escapeAttr(row.id)}" data-field="${escapeAttr(field)}" aria-pressed="${active ? "true" : "false"}" title="点击切换状态">${escapeHtml(label)}</button>`;
+    return badge(label, type);
   }
 
   function yesNoFromStatusText(value) {
