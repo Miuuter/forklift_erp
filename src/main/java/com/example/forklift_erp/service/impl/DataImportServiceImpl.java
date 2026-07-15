@@ -100,12 +100,14 @@ public class DataImportServiceImpl implements DataImportService {
 
     @Override
     @Transactional
-    public DataImportValidationVO validate(String importType, MultipartFile file) {
+    public DataImportValidationVO validate(String importType, String importMode, MultipartFile file) {
         ImportProfile profile = profile(importType);
-        DataImportJob job = createJob(profile, file);
+        String normalizedMode = normalizeImportMode(importMode, profile);
+        DataImportJob job = createJob(profile, normalizedMode, file);
         Path stagedFile = importFileStorage.store(file, job.getId(), profile.code());
         importFileStorage.registerRollbackCleanup(stagedFile);
         job.setStagedFileName(stagedFile.getFileName().toString());
+        job.setFileFingerprint(importFileStorage.fingerprint(stagedFile));
 
         ValidationResult validation = profile.validate(stagedFile);
         job.setTotalRows(validation.totalRows());
@@ -113,7 +115,10 @@ public class DataImportServiceImpl implements DataImportService {
         job.setErrorRows(validation.errors().size());
         job.setSummary(validation.summary());
         job.setErrorRowsJson(writeJson(validation.errors()));
-        job.setValidationSnapshotJson(writeJson(validation.snapshot()));
+        Map<String, Object> snapshot = new java.util.LinkedHashMap<>(validation.snapshot());
+        snapshot.put("importMode", normalizedMode);
+        snapshot.put("fileFingerprint", job.getFileFingerprint());
+        job.setValidationSnapshotJson(writeJson(snapshot));
         job.setStatus(validation.importable() ? "READY" : "VALIDATION_FAILED");
         jobRepository.save(job);
         return toValidationVO(job, validation.errors(), validation.importable());
@@ -136,7 +141,13 @@ public class DataImportServiceImpl implements DataImportService {
         jobStatusService.markImporting(job.getId());
 
         try {
-            ImportResult result = importTransactionTemplate.execute(status -> profile.importFile(stagedFile));
+            ImportContext context = new ImportContext(
+                    job.getId(),
+                    job.getImportType(),
+                    normalizeImportMode(job.getImportMode(), profile),
+                    job.getFileFingerprint()
+            );
+            ImportResult result = importTransactionTemplate.execute(status -> profile.importFile(stagedFile, context));
             DataImportJob completedJob = jobStatusService.markCompleted(
                     job.getId(),
                     result == null ? 0 : result.importedRows(),
@@ -151,9 +162,10 @@ public class DataImportServiceImpl implements DataImportService {
         }
     }
 
-    private DataImportJob createJob(ImportProfile profile, MultipartFile file) {
+    private DataImportJob createJob(ImportProfile profile, String importMode, MultipartFile file) {
         DataImportJob job = new DataImportJob();
         job.setImportType(profile.code());
+        job.setImportMode(importMode);
         job.setTemplateName(profile.templateName());
         job.setOriginalFileName(importFileStorage.originalFileName(file, profile.templateName() + ".xlsx"));
         job.setStatus("VALIDATING");
@@ -198,6 +210,21 @@ public class DataImportServiceImpl implements DataImportService {
         return normalized == null ? "" : normalized.toUpperCase(Locale.ROOT).replace("_", "-");
     }
 
+    private String normalizeImportMode(String importMode, ImportProfile profile) {
+        String normalized = trimToNull(importMode);
+        if (normalized == null) {
+            return profile.defaultImportMode();
+        }
+        normalized = normalized.toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+        if (ImportContext.MODE_OPENING_MIGRATION.equals(normalized)
+                || ImportContext.MODE_BUSINESS_DOCUMENT.equals(normalized)
+                || ImportContext.MODE_MASTER_DATA.equals(normalized)) {
+            return normalized;
+        }
+        throw new BusinessException(ResultCode.PARAM_ERROR,
+                "Import mode must be OPENING_MIGRATION, BUSINESS_DOCUMENT or MASTER_DATA");
+    }
+
     private String trimToNull(String value) {
         if (value == null) {
             return null;
@@ -222,7 +249,9 @@ public class DataImportServiceImpl implements DataImportService {
 
         ValidationResult validate(Path file);
 
-        ImportResult importFile(Path file);
+        ImportResult importFile(Path file, ImportContext context);
+
+        String defaultImportMode();
     }
 
     private final class VehicleWorkbookProfile implements ImportProfile {
@@ -248,9 +277,14 @@ public class DataImportServiceImpl implements DataImportService {
         }
 
         @Override
-        public ImportResult importFile(Path file) {
+        public ImportResult importFile(Path file, ImportContext context) {
             WorkbookSnapshot snapshot = workbookReader.readVehicleWorkbook(file);
-            return vehicleImporter.importWorkbook(snapshot);
+            return vehicleImporter.importWorkbook(snapshot, context);
+        }
+
+        @Override
+        public String defaultImportMode() {
+            return ImportContext.MODE_BUSINESS_DOCUMENT;
         }
     }
 
@@ -277,9 +311,14 @@ public class DataImportServiceImpl implements DataImportService {
         }
 
         @Override
-        public ImportResult importFile(Path file) {
+        public ImportResult importFile(Path file, ImportContext context) {
             WorkbookSnapshot snapshot = workbookReader.readPartsWorkbook(file);
-            return partsImporter.importWorkbook(snapshot);
+            return partsImporter.importWorkbook(snapshot, context);
+        }
+
+        @Override
+        public String defaultImportMode() {
+            return ImportContext.MODE_OPENING_MIGRATION;
         }
     }
 

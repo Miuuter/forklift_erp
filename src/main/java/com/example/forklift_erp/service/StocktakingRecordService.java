@@ -3,6 +3,7 @@ package com.example.forklift_erp.service;
 import com.example.forklift_erp.common.PageResult;
 import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.constant.MachineStockStatus;
+import com.example.forklift_erp.constant.StockBusinessType;
 import com.example.forklift_erp.dto.StocktakingRecordDTO;
 import com.example.forklift_erp.dto.StocktakingRecordVO;
 import com.example.forklift_erp.entity.MachineInventory;
@@ -12,10 +13,12 @@ import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.StocktakingRecordRepository;
+import com.example.forklift_erp.repository.StockBalanceRepository;
 import com.example.forklift_erp.service.impl.StockOperationRecorder;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
 import com.example.forklift_erp.util.InventoryQuantities;
 import com.example.forklift_erp.util.ListPageSupport;
+import com.example.forklift_erp.util.MoneyValues;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Sort;
@@ -52,6 +55,12 @@ public class StocktakingRecordService {
 
     @Autowired
     private ResourceVisibilityPolicy visibilityPolicy;
+
+    @Autowired
+    private StockBalanceRepository stockBalanceRepository;
+
+    @Autowired
+    private InventoryAdjustmentAccountingService inventoryAdjustmentAccountingService;
 
     @Transactional(readOnly = true)
     public List<StocktakingRecordVO> findAll() {
@@ -143,14 +152,24 @@ public class StocktakingRecordService {
         String resourceType = normalizeResourceType(request.getResourceType());
         record.setResourceType(resourceType);
         record.setResourceId(request.getResourceId());
+        Long warehouseId = stockLedgerService.resolveWarehouseId(request.getWarehouseId());
+        record.setWarehouseId(warehouseId);
         if (StocktakingRecord.RESOURCE_MACHINE.equals(resourceType)) {
             MachineInventory machine = machineRepository.findById(request.getResourceId())
                     .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
             visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be stocktaken");
+            if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+                throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be stocktaken with a normal count");
+            }
+            if (MachineStockStatus.isActiveModification(machine.getStockStatus())) {
+                throw new BusinessException(ResultCode.CONFLICT,
+                        "A vehicle in an active modification workflow cannot be stocktaken");
+            }
             record.setResourceCode(machine.getVehicleProductNumber());
             record.setResourceName(machine.getName());
             record.setSpecificationModel(machine.getSpecificationModel());
-            record.setBookQuantity(quantity(machine.getInventoryCount()));
+            record.setBookQuantity(stockLedgerService.availableQuantity(
+                    StockLedgerService.RESOURCE_MACHINE, machine.getId(), warehouseId));
         } else if (StocktakingRecord.RESOURCE_PART.equals(resourceType)) {
             PartInventory part = partRepository.findById(request.getResourceId())
                     .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "Part not found"));
@@ -158,10 +177,15 @@ public class StocktakingRecordService {
             record.setResourceCode(part.getPartCode());
             record.setResourceName(part.getPartName());
             record.setSpecificationModel(part.getSpecification());
-            record.setBookQuantity(quantity(part.getQuantity()));
+            record.setBookQuantity(stockLedgerService.availableQuantity(
+                    StockLedgerService.RESOURCE_PART, part.getId(), warehouseId));
         } else {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Unsupported stocktaking resource type: " + resourceType);
         }
+        record.setBookBalanceVersion(stockBalanceRepository
+                .findByResourceTypeAndResourceIdAndWarehouseId(resourceType, record.getResourceId(), warehouseId)
+                .map(balance -> balance.getVersion())
+                .orElse(0L));
         record.setActualQuantity(quantity(request.getActualQuantity()));
         record.setDifferenceQuantity(record.getActualQuantity() - record.getBookQuantity());
         record.setStocktakingDate(request.getStocktakingDate() == null ? LocalDate.now() : request.getStocktakingDate());
@@ -176,49 +200,75 @@ public class StocktakingRecordService {
             MachineInventory machine = machineRepository.findByIdForUpdate(record.getResourceId())
                     .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
             visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be stocktaken");
+            if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+                throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be stocktaken with a normal count");
+            }
+            if (MachineStockStatus.isActiveModification(machine.getStockStatus())) {
+                throw new BusinessException(ResultCode.CONFLICT,
+                        "A vehicle in an active modification workflow cannot be stocktaken");
+            }
+            int currentWarehouseQuantity = stockLedgerService.availableQuantity(
+                    StockLedgerService.RESOURCE_MACHINE, machine.getId(), record.getWarehouseId());
+            assertStocktakingSnapshotCurrent(record, currentWarehouseQuantity);
+            if (record.getActualQuantity() > 1) {
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        "A serialized vehicle stocktake can only confirm 0 or 1 unit");
+            }
+            int currentTotalQuantity = stockLedgerService.totalAvailableQuantity(
+                    StockLedgerService.RESOURCE_MACHINE, machine.getId());
+            int projectedTotalQuantity = currentTotalQuantity - currentWarehouseQuantity + record.getActualQuantity();
+            if (projectedTotalQuantity > 1) {
+                throw new BusinessException(ResultCode.CONFLICT,
+                        "A serialized vehicle cannot exist in more than one warehouse");
+            }
             InventoryQuantities.QuantityChange change = InventoryQuantities.adjustTo(
-                    machine.getInventoryCount(),
+                    currentWarehouseQuantity,
                     record.getActualQuantity(),
                     "Inventory count cannot be negative"
             );
-            machine.setInventoryCount(change.afterQuantity());
-            machine.setStockStatus(change.afterQuantity() > 0 ? MachineStockStatus.IN_STOCK.code() : MachineStockStatus.OUTBOUND.code());
-            collaborationService.stampWrite(machine);
-            machineRepository.saveAndFlush(machine);
             recordStocktakingMovement(
                     record,
                     StockLedgerService.RESOURCE_MACHINE,
                     machine.getId(),
                     machine.getVehicleProductNumber(),
                     machine.getName(),
-                    machine.getWarehouseId(),
+                    record.getWarehouseId(),
                     change.beforeQuantity(),
-                    change.afterQuantity()
+                    change.afterQuantity(),
+                    stockUnitCost(machine)
             );
+            machine.setInventoryCount(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId()));
+            machine.setStockStatus(machine.getInventoryCount() > 0 ? MachineStockStatus.IN_STOCK.code() : MachineStockStatus.OUTBOUND.code());
+            collaborationService.stampWrite(machine);
+            machineRepository.saveAndFlush(machine);
             return;
         }
         if (StocktakingRecord.RESOURCE_PART.equals(record.getResourceType())) {
             PartInventory part = partRepository.findByIdForUpdate(record.getResourceId())
                     .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "Part not found"));
             visibilityPolicy.ensureWritable(part.getIsLocked(), "Part is locked and cannot be stocktaken");
+            int currentWarehouseQuantity = stockLedgerService.availableQuantity(
+                    StockLedgerService.RESOURCE_PART, part.getId(), record.getWarehouseId());
+            assertStocktakingSnapshotCurrent(record, currentWarehouseQuantity);
             InventoryQuantities.QuantityChange change = InventoryQuantities.adjustTo(
-                    part.getQuantity(),
+                    currentWarehouseQuantity,
                     record.getActualQuantity(),
                     "Inventory count cannot be negative"
             );
-            part.setQuantity(change.afterQuantity());
-            collaborationService.stampWrite(part);
-            partRepository.saveAndFlush(part);
             recordStocktakingMovement(
                     record,
                     StockLedgerService.RESOURCE_PART,
                     part.getId(),
                     part.getPartCode(),
                     part.getPartName(),
-                    part.getWarehouseId(),
+                    record.getWarehouseId(),
                     change.beforeQuantity(),
-                    change.afterQuantity()
+                    change.afterQuantity(),
+                    stockUnitCost(part)
             );
+            part.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, part.getId()));
+            collaborationService.stampWrite(part);
+            partRepository.saveAndFlush(part);
         }
     }
 
@@ -230,36 +280,58 @@ public class StocktakingRecordService {
             String resourceName,
             Long warehouseId,
             int beforeQuantity,
-            int afterQuantity
+            int afterQuantity,
+            BigDecimal fallbackUnitCost
     ) {
         int delta = afterQuantity - beforeQuantity;
         if (delta == 0) {
-            stockLedgerService.reconcileAvailableQuantity(
-                    resourceType, resourceId, warehouseId, afterQuantity
-            );
             return;
         }
-        String operationType = delta > 0 ? "INBOUND" : "OUTBOUND";
-        int quantity = Math.abs(delta);
-        stockOperationRecorder.record(new StockOperationRecorder.Command(
-                "Stocktaking",
+        InventoryAdjustmentAccountingService.AdjustmentResult result =
+                inventoryAdjustmentAccountingService.post(new InventoryAdjustmentAccountingService.Command(
+                "Stocktaking stock",
                 resourceType,
                 resourceId,
                 resourceCode,
                 resourceName,
                 warehouseId,
-                operationType,
-                quantity,
                 beforeQuantity,
                 afterQuantity,
-                BigDecimal.ZERO,
-                BigDecimal.ZERO,
+                fallbackUnitCost,
                 record.getOperator(),
                 record.getRemark(),
                 "STOCKTAKING",
                 record.getId(),
-                "Stocktaking adjustment " + beforeQuantity + " -> " + afterQuantity
+                "Post stocktaking difference " + beforeQuantity + " -> " + afterQuantity,
+                record.getStocktakingDate(),
+                delta > 0 ? StockBusinessType.STOCKTAKING_GAIN : StockBusinessType.STOCKTAKING_LOSS,
+                "STOCKTAKING:" + record.getId(),
+                true
         ));
+        if (result.movement() != null) {
+            record.setSnapshotMovementId(result.movement().getId());
+        }
+    }
+
+    private BigDecimal stockUnitCost(MachineInventory machine) {
+        return MoneyValues.firstNonNegativeOrZero(machine.getLandedUnitCost(), machine.getPurchasePrice());
+    }
+
+    private BigDecimal stockUnitCost(PartInventory part) {
+        return MoneyValues.firstNonNegativeOrZero(part.getLandedUnitCost(), part.getPurchasePrice());
+    }
+
+    private void assertStocktakingSnapshotCurrent(StocktakingRecord record, int currentWarehouseQuantity) {
+        Long currentVersion = stockBalanceRepository
+                .findByResourceTypeAndResourceIdAndWarehouseId(record.getResourceType(), record.getResourceId(), record.getWarehouseId())
+                .map(balance -> balance.getVersion())
+                .orElse(0L);
+        if (!java.util.Objects.equals(record.getBookBalanceVersion(), currentVersion)
+                || record.getBookQuantity() == null
+                || record.getBookQuantity() != currentWarehouseQuantity) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Stock changed after the stocktaking snapshot; recalculate the count before completing it");
+        }
     }
 
     private int quantity(Integer value) {

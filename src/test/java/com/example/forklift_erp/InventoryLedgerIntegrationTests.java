@@ -1,17 +1,21 @@
 package com.example.forklift_erp;
 
+import com.example.forklift_erp.constant.FinancialEventType;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.PartInventory;
 import com.example.forklift_erp.entity.Role;
 import com.example.forklift_erp.entity.StockBalance;
+import com.example.forklift_erp.entity.StockLot;
 import com.example.forklift_erp.entity.StockMovementLine;
 import com.example.forklift_erp.entity.User;
 import com.example.forklift_erp.entity.Warehouse;
+import com.example.forklift_erp.repository.FinancialEventRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.OperationAuditLogRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.RoleRepository;
 import com.example.forklift_erp.repository.StockBalanceRepository;
+import com.example.forklift_erp.repository.StockLotRepository;
 import com.example.forklift_erp.repository.StockMovementLineRepository;
 import com.example.forklift_erp.repository.StocktakingRecordRepository;
 import com.example.forklift_erp.repository.UserRepository;
@@ -73,6 +77,12 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
 
     @Autowired
     private StockMovementLineRepository stockMovementLineRepository;
+
+    @Autowired
+    private StockLotRepository stockLotRepository;
+
+    @Autowired
+    private FinancialEventRepository financialEventRepository;
 
     @Autowired
     private StocktakingRecordRepository stocktakingRecordRepository;
@@ -156,6 +166,7 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                         .content(json(Map.of(
                                 "partCode", partCode,
                                 "quantity", 2,
+                                "warehouseId", warehouseId,
                                 "version", version,
                                 "operator", "ledger-test",
                                 "remark", "integration test inbound"
@@ -195,6 +206,35 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
 
         assertBalance(partId, warehouseId, 8);
         assertMovementLine(partId, 5, 3, 8);
+        assertFifoQuantity(partId, 8);
+        assertFinancialEvent(stocktakingId, FinancialEventType.INVENTORY_GAIN, "50.00");
+        assertMovementCost(partId, 5, "50.00");
+    }
+
+    @Test
+    void stocktakingLossConsumesFifoAndPostsTheExactLossValue() throws Exception {
+        String partCode = "LEDGER-ST-LOSS-" + unique("part");
+        partsToCleanup.add(partCode);
+
+        JsonNode part = createPart(partCode, 5);
+        Long partId = part.path("id").asLong();
+        Long warehouseId = part.path("warehouseId").asLong();
+
+        JsonNode stocktaking = createStocktakingRecord(partId, 2);
+        Long stocktakingId = stocktaking.path("id").asLong();
+        stocktakingRecordsToCleanup.add(stocktakingId);
+
+        mockMvc.perform(put("/api/stocktaking-records/{id}/complete", stocktakingId)
+                        .header("Authorization", bearer(superToken))
+                        .param("version", stocktaking.path("version").asText()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("COMPLETED"))
+                .andExpect(jsonPath("$.data.differenceQuantity").value(-3));
+
+        assertBalance(partId, warehouseId, 2);
+        assertFifoQuantity(partId, 2);
+        assertFinancialEvent(stocktakingId, FinancialEventType.INVENTORY_LOSS, "30.00");
+        assertMovementCost(partId, -3, "30.00");
     }
 
     @Test
@@ -242,6 +282,7 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                         .content(json(Map.of(
                                 "partCode", partCode,
                                 "quantity", 1,
+                                "warehouseId", sourceWarehouseId,
                                 "version", transferred.getVersion(),
                                 "operator", "ledger-test",
                                 "remark", "inbound after partial transfer"
@@ -260,8 +301,50 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
     }
 
     @Test
-    void machineTransferThenInboundPreservesTheDistributedTotal() throws Exception {
-        JsonNode machine = createMachine(3);
+    void concreteVehicleTransferKeepsOneUnitAndRejectsSecondInbound() throws Exception {
+        JsonNode machine = createMachine(1);
+        Long machineId = machine.path("id").asLong();
+        Long sourceWarehouseId = machine.path("warehouseId").asLong();
+        Long targetWarehouseId = createWarehouse().path("id").asLong();
+
+        mockMvc.perform(post("/api/warehouses/transfer")
+                        .header("Authorization", bearer(superToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "resourceType", StockLedgerService.RESOURCE_MACHINE,
+                                "resourceId", machineId,
+                                "fromWarehouseId", sourceWarehouseId,
+                                "toWarehouseId", targetWarehouseId,
+                                "quantity", 1,
+                                "version", machine.path("version").asLong(),
+                                "operator", "ledger-test"
+                        ))))
+                .andExpect(status().isOk());
+
+        MachineInventory transferred = machineRepository.findById(machineId).orElseThrow();
+        assertThat(transferred.getWarehouseId()).isEqualTo(targetWarehouseId);
+        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId, 0);
+        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, targetWarehouseId, 1);
+
+        mockMvc.perform(put("/api/inventory/{id}/inbound", machineId)
+                        .header("Authorization", bearer(superToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "quantity", 1,
+                                "warehouseId", targetWarehouseId,
+                                "version", transferred.getVersion(),
+                                "operator", "ledger-test"
+                        ))))
+                .andExpect(status().isConflict());
+
+        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId, 0);
+        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, targetWarehouseId, 1);
+        assertTotalBalance(StockLedgerService.RESOURCE_MACHINE, machineId, 1);
+    }
+
+    @Test
+    void concreteVehicleTransferRequiresExactlyOneUnit() throws Exception {
+        JsonNode machine = createMachine(1);
         Long machineId = machine.path("id").asLong();
         Long sourceWarehouseId = machine.path("warehouseId").asLong();
         Long targetWarehouseId = createWarehouse().path("id").asLong();
@@ -275,60 +358,17 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                                 "fromWarehouseId", sourceWarehouseId,
                                 "toWarehouseId", targetWarehouseId,
                                 "quantity", 2,
-                                "version", machine.path("version").asLong(),
-                                "operator", "ledger-test"
+                                "version", machine.path("version").asLong()
                         ))))
-                .andExpect(status().isOk());
-
-        MachineInventory transferred = machineRepository.findById(machineId).orElseThrow();
-        assertThat(transferred.getWarehouseId()).isEqualTo(sourceWarehouseId);
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId, 1);
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, targetWarehouseId, 2);
-
-        mockMvc.perform(put("/api/inventory/{id}/inbound", machineId)
-                        .header("Authorization", bearer(superToken))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of(
-                                "quantity", 1,
-                                "version", transferred.getVersion(),
-                                "operator", "ledger-test"
-                        ))))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.inventoryCount").value(4));
-
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId, 2);
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, targetWarehouseId, 2);
-        assertTotalBalance(StockLedgerService.RESOURCE_MACHINE, machineId, 4);
-    }
-
-    @Test
-    void machineCanFinishAStagedTransferFromTheSecondaryWarehouse() throws Exception {
-        JsonNode machine = createMachine(3);
-        Long machineId = machine.path("id").asLong();
-        Long sourceWarehouseId = machine.path("warehouseId").asLong();
-        Long stagingWarehouseId = createWarehouse().path("id").asLong();
-        Long targetWarehouseId = createWarehouse().path("id").asLong();
+                .andExpect(status().isBadRequest());
 
         transfer(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId,
-                stagingWarehouseId, 2, machine.path("version").asLong());
-        MachineInventory firstStage = machineRepository.findById(machineId).orElseThrow();
-
-        transfer(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId,
-                stagingWarehouseId, 1, firstStage.getVersion());
-        MachineInventory staged = machineRepository.findById(machineId).orElseThrow();
-        assertThat(staged.getWarehouseId()).isEqualTo(sourceWarehouseId);
-        assertThat(staged.getVersion()).isGreaterThan(firstStage.getVersion());
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId, 0);
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, stagingWarehouseId, 3);
-
-        transfer(StockLedgerService.RESOURCE_MACHINE, machineId, stagingWarehouseId,
-                targetWarehouseId, 3, staged.getVersion());
+                targetWarehouseId, 1, machine.path("version").asLong());
         MachineInventory transferred = machineRepository.findById(machineId).orElseThrow();
         assertThat(transferred.getWarehouseId()).isEqualTo(targetWarehouseId);
-        assertThat(transferred.getVersion()).isGreaterThan(staged.getVersion());
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, stagingWarehouseId, 0);
-        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, targetWarehouseId, 3);
-        assertTotalBalance(StockLedgerService.RESOURCE_MACHINE, machineId, 3);
+        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, sourceWarehouseId, 0);
+        assertBalance(StockLedgerService.RESOURCE_MACHINE, machineId, targetWarehouseId, 1);
+        assertTotalBalance(StockLedgerService.RESOURCE_MACHINE, machineId, 1);
     }
 
     @Test
@@ -350,6 +390,7 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                         .content(json(Map.of(
                                 "partCode", partCode,
                                 "quantity", 1,
+                                "warehouseId", part.path("warehouseId").asLong(),
                                 "version", part.path("version").asLong()
                         ))))
                 .andExpect(status().isOk())
@@ -391,7 +432,8 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(Map.of(
                                 "quantity", 1,
-                                "version", machine.path("version").asLong()
+                                "version", machine.path("version").asLong(),
+                                "warehouseId", machine.path("warehouseId").asLong()
                         ))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
@@ -450,6 +492,8 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("partCategory", "LEDGER_TEST");
         payload.put("quantity", quantity);
         payload.put("unit", "pcs");
+        payload.put("purchasePrice", "10.00");
+        payload.put("warehouseId", defaultWarehouseId());
 
         String response = mockMvc.perform(post("/api/parts")
                         .header("Authorization", bearer(superToken))
@@ -474,7 +518,8 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                                 "name", "Ledger test machine",
                                 "specificationModel", "CPD25",
                                 "machineType", "TEST",
-                                "inventoryCount", quantity
+                                "inventoryCount", quantity,
+                                "warehouseId", defaultWarehouseId()
                         ))))
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
@@ -485,6 +530,7 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("resourceType", "PART");
         payload.put("resourceId", partId);
+        payload.put("warehouseId", defaultWarehouseId());
         payload.put("actualQuantity", actualQuantity);
         payload.put("operator", "ledger-test");
         payload.put("remark", "integration test stocktaking");
@@ -607,6 +653,33 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
             assertThat(line.getBeforeQuantity()).isEqualTo(before);
             assertThat(line.getAfterQuantity()).isEqualTo(after);
         });
+    }
+
+    private void assertMovementCost(Long partId, int delta, String expectedCost) {
+        assertThat(stockMovementLineRepository
+                .findByResourceTypeAndResourceIdOrderByCreatedAtDesc(StockLedgerService.RESOURCE_PART, partId))
+                .anySatisfy(line -> {
+                    assertThat(line.getQuantityDelta()).isEqualTo(delta);
+                    assertThat(line.getCostAmount()).isEqualByComparingTo(expectedCost);
+                });
+    }
+
+    private void assertFifoQuantity(Long partId, int expectedQuantity) {
+        int remaining = stockLotRepository
+                .findByResourceTypeAndResourceIdOrderByIdAsc(StockLedgerService.RESOURCE_PART, partId)
+                .stream()
+                .filter(lot -> !StockLot.STATUS_REVERSED.equals(lot.getStatus()))
+                .mapToInt(lot -> lot.getRemainingQuantity() == null ? 0 : lot.getRemainingQuantity())
+                .sum();
+        assertThat(remaining).isEqualTo(expectedQuantity);
+    }
+
+    private void assertFinancialEvent(Long stocktakingId, String eventType, String expectedAmount) {
+        assertThat(financialEventRepository.findBySourceTypeAndSourceIdOrderByIdAsc("STOCKTAKING", stocktakingId))
+                .anySatisfy(event -> {
+                    assertThat(event.getEventType()).isEqualTo(eventType);
+                    assertThat(event.getAmount()).isEqualByComparingTo(expectedAmount);
+                });
     }
 
 }

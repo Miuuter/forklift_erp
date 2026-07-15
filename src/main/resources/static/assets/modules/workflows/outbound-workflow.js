@@ -62,7 +62,8 @@ export function createOutboundWorkflow(deps) {
           { label: "报销售", html: true, render: row => orderSalesReportSummary(row) },
           { label: "发票跟进", html: true, render: row => orderInvoiceSummary(row) },
           { label: "上牌/合同", html: true, render: row => orderContractSummary(row) },
-          { label: "订单备注", key: "orderRemark" }
+          { label: "订单备注", key: "orderRemark" },
+          { label: "操作", html: true, render: row => outboundOrderActions(row) }
         ], rows, listTableOptions("outboundOrder", "outboundOrders")))}
         ${renderPagination("outboundOrders")}
       </div>
@@ -72,9 +73,9 @@ export function createOutboundWorkflow(deps) {
   function orderPriceSummary(row) {
     return `
       <div class="cell-stack">
-        <span>结算 ${escapeHtml(money(row.settlementPrice) || "-")}</span>
-        <span class="helper-inline">销售 ${escapeHtml(money(row.salePrice) || "-")}</span>
-        <span class="helper-inline">应收 ${escapeHtml(money(row.receivableAmount ?? row.settlementPrice) || "-")}</span>
+        <span>单价 ${escapeHtml(money(row.unitSalePrice ?? row.settlementPrice ?? row.salePrice) || "-")}</span>
+        <span class="helper-inline">行金额 ${escapeHtml(money(row.lineAmount ?? row.receivableAmount) || "-")}</span>
+        <span class="helper-inline">应收 ${escapeHtml(money(row.receivableAmount ?? row.lineAmount) || "-")}</span>
       </div>
     `;
   }
@@ -105,7 +106,7 @@ export function createOutboundWorkflow(deps) {
     if (row.outstandingAmount !== undefined && row.outstandingAmount !== null) {
       return Number(row.outstandingAmount);
     }
-    return Math.max(0, Number(row.receivableAmount ?? row.settlementPrice ?? 0) - Number(row.receivedAmount ?? 0));
+    return Math.max(0, Number(row.receivableAmount ?? row.lineAmount ?? 0) - Number(row.receivedAmount ?? 0));
   }
 
   function receivableOutstandingTotal(rows = []) {
@@ -166,9 +167,12 @@ export function createOutboundWorkflow(deps) {
   }
 
   function orderStatusToggle(row, field, active, activeLabel, inactiveLabel) {
+    if (!hasPermission("stock:adjust")) {
+      return active ? badge(activeLabel, "teal") : badge(inactiveLabel, "primary");
+    }
     const label = active ? activeLabel : inactiveLabel;
     const type = active ? "teal" : "primary";
-    return badge(label, type);
+    return `<button class="status-toggle ${escapeAttr(type)}" type="button" data-action="toggle-order-status" data-id="${escapeAttr(row.id)}" data-field="${escapeAttr(field)}" aria-pressed="${active ? "true" : "false"}" title="点击切换状态">${escapeHtml(label)}</button>`;
   }
 
   function yesNoFromStatusText(value) {
@@ -188,6 +192,8 @@ export function createOutboundWorkflow(deps) {
     return `
       <div class="action-row">
         <button class="btn btn-sm" type="button" data-action="edit" data-kind="outboundOrder" data-id="${escapeAttr(row.id)}">${icon("edit")}编辑</button>
+        <button class="btn btn-sm btn-primary" type="button" data-action="record-payment" data-source-type="OUTBOUND_ORDER" data-source-id="${escapeAttr(row.id)}" data-direction="RECEIPT">${icon("money")}登记收款</button>
+        <button class="btn btn-sm" type="button" data-action="reverse-payment" data-source-type="OUTBOUND_ORDER" data-source-id="${escapeAttr(row.id)}">${icon("refresh")}收款冲销</button>
         ${canManageOrderLock() ? `<button class="btn btn-sm ${row.isLocked ? "" : "btn-danger"}" type="button" data-action="toggle-order-lock" data-id="${escapeAttr(row.id)}" data-locked="${escapeAttr(nextLocked)}">${icon(row.isLocked ? "unlock" : "lock")}${row.isLocked ? "解锁" : "锁定"}</button>` : ""}
         ${uploadReady ? `<button class="btn btn-sm" type="button" data-action="upload-invoice" data-id="${escapeAttr(row.id)}">${icon("upload")}上传发票</button>` : ""}
         ${row.invoiceFileAvailable ? `<button class="btn btn-sm" type="button" data-action="download-invoice" data-id="${escapeAttr(row.id)}">${icon("download")}下载发票</button>` : ""}
@@ -235,11 +241,16 @@ export function buildVehicleOutboundOrderPayload(payload, machine, customerId) {
   return {
     machineId: payload.machineId,
     machineVersion: machine.version,
+    warehouseId: payload.warehouseId,
     customerId,
     salesDate: payload.salesDate,
-    settlementPrice: payload.settlementPrice,
-    salePrice: payload.salePrice,
-    receivableAmount: payload.receivableAmount,
+    unitSalePrice: payload.unitSalePrice,
+    lineAmount: payload.lineAmount,
+    // Compatibility aliases for older API consumers. They are always derived
+    // from the explicit unit/line semantics above.
+    settlementPrice: payload.unitSalePrice,
+    salePrice: payload.unitSalePrice,
+    receivableAmount: payload.lineAmount,
     receivedAmount: payload.receivedAmount,
     paymentDueDate: payload.paymentDueDate,
     lastPaymentDate: payload.lastPaymentDate,

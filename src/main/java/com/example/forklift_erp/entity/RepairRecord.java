@@ -118,6 +118,9 @@ public class RepairRecord implements CollaborativeResource {
     @Column(name = "repair_expense", precision = 10, scale = 2)
     private BigDecimal repairExpense;
 
+    @Column(name = "pass_through_amount", precision = 12, scale = 2)
+    private BigDecimal passThroughAmount = BigDecimal.ZERO;
+
     /**
      * 配件费用
      */
@@ -132,6 +135,12 @@ public class RepairRecord implements CollaborativeResource {
      */
     @Column(name = "total_fee", precision = 10, scale = 2)
     private BigDecimal totalFee;
+
+    @Column(name = "receivable_amount", precision = 12, scale = 2)
+    private BigDecimal receivableAmount;
+
+    @Column(name = "financial_posted")
+    private Boolean financialPosted = false;
 
     /**
      * 状态

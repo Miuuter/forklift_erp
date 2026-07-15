@@ -1,6 +1,7 @@
 package com.example.forklift_erp.service;
 
 import com.example.forklift_erp.common.ResultCode;
+import com.example.forklift_erp.constant.StockBusinessType;
 import com.example.forklift_erp.entity.StockBalance;
 import com.example.forklift_erp.entity.StockMovement;
 import com.example.forklift_erp.entity.StockMovementLine;
@@ -11,13 +12,13 @@ import com.example.forklift_erp.repository.StockMovementLineRepository;
 import com.example.forklift_erp.repository.StockMovementRepository;
 import com.example.forklift_erp.repository.WarehouseRepository;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
+import com.example.forklift_erp.util.MoneyValues;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -47,6 +48,10 @@ public class StockLedgerService {
             }
             return warehouseId;
         }
+        if (warehouseRepository.count() > 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Warehouse is required when more than one warehouse exists");
+        }
         return resolveDefaultWarehouse().getId();
     }
 
@@ -68,6 +73,9 @@ public class StockLedgerService {
     public StockBalance syncBalance(String resourceType, Long resourceId, Long warehouseId, Integer availableQuantity) {
         Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
         int quantity = availableQuantity == null ? 0 : availableQuantity;
+        if (quantity < 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Inventory quantity cannot be negative");
+        }
         StockBalance balance = stockBalanceRepository
                 .findForUpdate(resourceType, resourceId, resolvedWarehouseId)
                 .orElseGet(() -> {
@@ -96,9 +104,7 @@ public class StockLedgerService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Inventory quantity cannot be negative");
         }
 
-        List<StockBalance> balances = new ArrayList<>(
-                stockBalanceRepository.findAllForUpdate(resourceType, resourceId)
-        );
+        List<StockBalance> balances = stockBalanceRepository.findAllForUpdate(resourceType, resourceId);
         validateBalances(balances);
         if (balances.isEmpty()) {
             StockBalance balance = newBalance(resourceType, resourceId, resolvedWarehouseId);
@@ -106,42 +112,29 @@ public class StockLedgerService {
             stockBalanceRepository.save(balance);
             return;
         }
-
         int currentTotal = balances.stream()
                 .mapToInt(balance -> quantity(balance.getAvailableQuantity()))
                 .sum();
-        int delta = expectedTotal - currentTotal;
-        if (delta > 0) {
-            StockBalance preferred = findOrCreateBalance(balances, resourceType, resourceId, resolvedWarehouseId);
-            preferred.setAvailableQuantity(quantity(preferred.getAvailableQuantity()) + delta);
-            stockBalanceRepository.save(preferred);
+        if (currentTotal == expectedTotal) {
             return;
         }
-        if (delta == 0) {
-            return;
-        }
+        throw new BusinessException(ResultCode.CONFLICT,
+                "Inventory profile quantity differs from warehouse balances; create an explicit adjustment instead");
+    }
 
-        int remaining = -delta;
-        List<StockBalance> reductionOrder = balances.stream()
-                .sorted(Comparator
-                        .comparing((StockBalance balance) -> !resolvedWarehouseId.equals(balance.getWarehouseId()))
-                        .thenComparing(StockBalance::getId))
-                .toList();
-        for (StockBalance balance : reductionOrder) {
-            if (remaining == 0) {
-                break;
-            }
-            int available = quantity(balance.getAvailableQuantity());
-            int reduction = Math.min(available, remaining);
-            if (reduction > 0) {
-                balance.setAvailableQuantity(available - reduction);
-                remaining -= reduction;
-            }
-        }
-        if (remaining > 0) {
-            throw new BusinessException(ResultCode.CONFLICT, "Stock balances are lower than the inventory total change");
-        }
-        stockBalanceRepository.saveAll(reductionOrder);
+    @Transactional(readOnly = true)
+    public int availableQuantity(String resourceType, Long resourceId, Long warehouseId) {
+        Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
+        return stockBalanceRepository.findByResourceTypeAndResourceIdAndWarehouseId(resourceType, resourceId, resolvedWarehouseId)
+                .map(balance -> quantity(balance.getAvailableQuantity()))
+                .orElse(0);
+    }
+
+    @Transactional(readOnly = true)
+    public int totalAvailableQuantity(String resourceType, Long resourceId) {
+        return stockBalanceRepository.findByResourceTypeAndResourceId(resourceType, resourceId).stream()
+                .mapToInt(balance -> quantity(balance.getAvailableQuantity()))
+                .sum();
     }
 
     @Transactional
@@ -200,6 +193,8 @@ public class StockLedgerService {
         StockMovement movement = new StockMovement();
         movement.setMovementNo(nextMovementNo());
         movement.setMovementType("TRANSFER");
+        movement.setBusinessType(StockBusinessType.TRANSFER);
+        movement.setBusinessDate(LocalDate.now());
         movement.setResourceType(resourceType);
         movement.setSourceType(sourceType);
         movement.setSourceId(sourceId);
@@ -235,6 +230,112 @@ public class StockLedgerService {
     }
 
     @Transactional
+    public StockMovement freezeForRental(
+            String resourceType,
+            Long resourceId,
+            String resourceCode,
+            String resourceName,
+            Long warehouseId,
+            int quantity,
+            String operator,
+            String remark,
+            String sourceType,
+            Long sourceId,
+            LocalDate businessDate
+    ) {
+        Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
+        if (quantity <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Rental quantity must be greater than 0");
+        }
+        StockBalance balance = findOrCreateBalanceForUpdate(resourceType, resourceId, resolvedWarehouseId);
+        int beforeAvailable = quantity(balance.getAvailableQuantity());
+        int beforeLocked = quantity(balance.getLockedQuantity());
+        if (beforeAvailable < quantity) {
+            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK, "Insufficient available stock for rental");
+        }
+        balance.setAvailableQuantity(beforeAvailable - quantity);
+        balance.setLockedQuantity(beforeLocked + quantity);
+        stockBalanceRepository.save(balance);
+
+        StockMovement movement = new StockMovement();
+        movement.setMovementNo(nextMovementNo());
+        movement.setMovementType("RENT_OUT");
+        movement.setBusinessType(StockBusinessType.RENT_OUT);
+        movement.setBusinessDate(businessDate == null ? LocalDate.now() : businessDate);
+        movement.setResourceType(resourceType);
+        movement.setSourceType(sourceType);
+        movement.setSourceId(sourceId);
+        movement.setOperator(operator);
+        movement.setRemark(remark);
+        StockMovement saved = stockMovementRepository.save(movement);
+        StockMovementLine line = new StockMovementLine();
+        line.setMovementId(saved.getId());
+        line.setResourceType(resourceType);
+        line.setResourceId(resourceId);
+        line.setResourceCode(resourceCode);
+        line.setResourceName(resourceName);
+        line.setWarehouseId(resolvedWarehouseId);
+        line.setQuantityDelta(-quantity);
+        line.setBeforeQuantity(beforeAvailable);
+        line.setAfterQuantity(beforeAvailable - quantity);
+        stockMovementLineRepository.save(line);
+        return saved;
+    }
+
+    @Transactional
+    public StockMovement releaseRental(
+            String resourceType,
+            Long resourceId,
+            String resourceCode,
+            String resourceName,
+            Long warehouseId,
+            int quantity,
+            String operator,
+            String remark,
+            String sourceType,
+            Long sourceId,
+            LocalDate businessDate
+    ) {
+        Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
+        if (quantity <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Rental quantity must be greater than 0");
+        }
+        StockBalance balance = findOrCreateBalanceForUpdate(resourceType, resourceId, resolvedWarehouseId);
+        int beforeAvailable = quantity(balance.getAvailableQuantity());
+        int beforeLocked = quantity(balance.getLockedQuantity());
+        if (beforeLocked < quantity) {
+            throw new BusinessException(ResultCode.CONFLICT, "Rental lock is missing or already released");
+        }
+        balance.setAvailableQuantity(beforeAvailable + quantity);
+        balance.setLockedQuantity(beforeLocked - quantity);
+        stockBalanceRepository.save(balance);
+
+        StockMovement movement = new StockMovement();
+        movement.setMovementNo(nextMovementNo());
+        movement.setMovementType("RENT_RETURN");
+        movement.setBusinessType(StockBusinessType.RENT_RETURN);
+        movement.setBusinessDate(businessDate == null ? LocalDate.now() : businessDate);
+        movement.setResourceType(resourceType);
+        movement.setSourceType(sourceType);
+        movement.setSourceId(sourceId);
+        movement.setOperator(operator);
+        movement.setRemark(remark);
+        StockMovement saved = stockMovementRepository.save(movement);
+        StockMovementLine line = new StockMovementLine();
+        line.setMovementId(saved.getId());
+        line.setResourceType(resourceType);
+        line.setResourceId(resourceId);
+        line.setResourceCode(resourceCode);
+        line.setResourceName(resourceName);
+        line.setWarehouseId(resolvedWarehouseId);
+        line.setQuantityDelta(quantity);
+        line.setBeforeQuantity(beforeAvailable);
+        line.setAfterQuantity(beforeAvailable + quantity);
+        stockMovementLineRepository.save(line);
+        return saved;
+    }
+
+    @Transactional
     public StockMovement recordMovement(
             String movementType,
             String resourceType,
@@ -262,7 +363,13 @@ public class StockLedgerService {
                 operator,
                 remark,
                 sourceType,
-                sourceId
+                sourceId,
+                null,
+                LocalDate.now(),
+                movementType,
+                null,
+                null,
+                null
         );
     }
 
@@ -282,12 +389,73 @@ public class StockLedgerService {
             String sourceType,
             Long sourceId
     ) {
+        return recordMovement(
+                movementType,
+                resourceType,
+                resourceId,
+                resourceCode,
+                resourceName,
+                warehouseId,
+                beforeQuantity,
+                afterQuantity,
+                unitCost,
+                operator,
+                remark,
+                sourceType,
+                sourceId,
+                null,
+                LocalDate.now(),
+                movementType,
+                null,
+                null,
+                null
+        );
+    }
+
+    @Transactional
+    public StockMovement recordMovement(
+            String movementType,
+            String resourceType,
+            Long resourceId,
+            String resourceCode,
+            String resourceName,
+            Long warehouseId,
+            Integer beforeQuantity,
+            Integer afterQuantity,
+            BigDecimal unitCost,
+            String operator,
+            String remark,
+            String sourceType,
+            Long sourceId,
+            Long sourceLineId,
+            LocalDate businessDate,
+            String businessType,
+            BigDecimal unitRevenue,
+            String idempotencyKey,
+            Long stockLotId
+    ) {
+        if (idempotencyKey != null) {
+            StockMovement existing = stockMovementRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
+            if (existing != null) {
+                return existing;
+            }
+        }
         Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
         int before = beforeQuantity == null ? 0 : beforeQuantity;
         int after = afterQuantity == null ? 0 : afterQuantity;
         int delta = after - before;
-
-        reconcileAvailableQuantity(resourceType, resourceId, resolvedWarehouseId, after);
+        StockBalance balance = findOrCreateBalanceForUpdate(resourceType, resourceId, resolvedWarehouseId);
+        int actualBefore = quantity(balance.getAvailableQuantity());
+        if (actualBefore == before) {
+            if (after < 0) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, "Inventory quantity cannot be negative");
+            }
+            balance.setAvailableQuantity(after);
+            stockBalanceRepository.save(balance);
+        } else if (actualBefore != after) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse balance changed since the operation was prepared; refresh and retry");
+        }
 
         StockMovement movement = new StockMovement();
         movement.setMovementNo(nextMovementNo());
@@ -295,8 +463,12 @@ public class StockLedgerService {
         movement.setResourceType(resourceType);
         movement.setSourceType(sourceType);
         movement.setSourceId(sourceId);
+        movement.setSourceLineId(sourceLineId);
+        movement.setBusinessDate(businessDate == null ? LocalDate.now() : businessDate);
+        movement.setBusinessType(businessType == null || businessType.isBlank() ? movementType : businessType);
         movement.setOperator(operator);
         movement.setRemark(remark);
+        movement.setIdempotencyKey(idempotencyKey);
         StockMovement savedMovement = stockMovementRepository.save(movement);
 
         StockMovementLine line = new StockMovementLine();
@@ -310,6 +482,11 @@ public class StockLedgerService {
         line.setBeforeQuantity(before);
         line.setAfterQuantity(after);
         line.setUnitCost(unitCost);
+        line.setUnitRevenue(unitRevenue);
+        line.setStockLotId(stockLotId);
+        line.setSourceLineId(sourceLineId);
+        line.setCostAmount(MoneyValues.zeroIfNullOrNegative(unitCost).multiply(BigDecimal.valueOf(Math.abs(delta))));
+        line.setLineAmount(MoneyValues.zeroIfNullOrNegative(unitRevenue).multiply(BigDecimal.valueOf(Math.abs(delta))));
         stockMovementLineRepository.save(line);
 
         return savedMovement;
@@ -318,22 +495,6 @@ public class StockLedgerService {
     private StockBalance findOrCreateBalanceForUpdate(String resourceType, Long resourceId, Long warehouseId) {
         return stockBalanceRepository.findForUpdate(resourceType, resourceId, warehouseId)
                 .orElseGet(() -> newBalance(resourceType, resourceId, warehouseId));
-    }
-
-    private StockBalance findOrCreateBalance(
-            List<StockBalance> balances,
-            String resourceType,
-            Long resourceId,
-            Long warehouseId
-    ) {
-        return balances.stream()
-                .filter(balance -> warehouseId.equals(balance.getWarehouseId()))
-                .findFirst()
-                .orElseGet(() -> {
-                    StockBalance created = newBalance(resourceType, resourceId, warehouseId);
-                    balances.add(created);
-                    return created;
-                });
     }
 
     private StockBalance newBalance(String resourceType, Long resourceId, Long warehouseId) {

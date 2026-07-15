@@ -8,6 +8,7 @@ import com.example.forklift_erp.entity.StocktakingRecord;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
+import com.example.forklift_erp.repository.StockBalanceRepository;
 import com.example.forklift_erp.repository.StocktakingRecordRepository;
 import com.example.forklift_erp.service.impl.StockOperationRecorder;
 import org.junit.jupiter.api.AfterEach;
@@ -22,6 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -90,11 +92,13 @@ class StocktakingRecordServiceTests {
     }
 
     @Test
-    void zeroDifferenceStocktakeStillReconcilesWarehouseBalances() {
+    void zeroDifferenceStocktakeDoesNotCreateAnImplicitWarehouseReconciliation() {
         StocktakingRecordRepository stocktakingRepository = mock(StocktakingRecordRepository.class);
         MachineInventoryRepository machineRepository = mock(MachineInventoryRepository.class);
         StockLedgerService stockLedgerService = mock(StockLedgerService.class);
         StocktakingRecord record = record(10L, StocktakingRecord.RESOURCE_MACHINE, 1L);
+        record.setWarehouseId(7L);
+        record.setBookBalanceVersion(0L);
         MachineInventory machine = machine(1L, false);
         machine.setWarehouseId(7L);
         when(stocktakingRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(record));
@@ -102,11 +106,33 @@ class StocktakingRecordServiceTests {
         when(machineRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(machine));
         StocktakingRecordService service = service(stocktakingRepository, machineRepository, mock(PartInventoryRepository.class));
         ReflectionTestUtils.setField(service, "stockLedgerService", stockLedgerService);
+        when(stockLedgerService.availableQuantity(StockLedgerService.RESOURCE_MACHINE, 1L, 7L)).thenReturn(1);
 
         service.complete(10L, 0L);
 
-        verify(stockLedgerService).reconcileAvailableQuantity(
+        verify(stockLedgerService, never()).reconcileAvailableQuantity(
                 StockLedgerService.RESOURCE_MACHINE, 1L, 7L, 1
+        );
+        verify(stockLedgerService, never()).recordMovement(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any()
         );
     }
 
@@ -124,6 +150,7 @@ class StocktakingRecordServiceTests {
         ReflectionTestUtils.setField(service, "stockOperationRecorder", mock(StockOperationRecorder.class));
         ReflectionTestUtils.setField(service, "stockLedgerService", mock(StockLedgerService.class));
         ReflectionTestUtils.setField(service, "visibilityPolicy", new ResourceVisibilityPolicy());
+        ReflectionTestUtils.setField(service, "stockBalanceRepository", mock(StockBalanceRepository.class));
         return service;
     }
 

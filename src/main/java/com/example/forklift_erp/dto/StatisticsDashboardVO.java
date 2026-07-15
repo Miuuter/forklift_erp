@@ -36,6 +36,8 @@ public class StatisticsDashboardVO {
         private BigDecimal rentalIncome = BigDecimal.ZERO;
         private BigDecimal modificationIncome = BigDecimal.ZERO;
         private BigDecimal modificationExpense = BigDecimal.ZERO;
+        private BigDecimal inventoryGain = BigDecimal.ZERO;
+        private BigDecimal inventoryLoss = BigDecimal.ZERO;
         private BigDecimal totalIncome = BigDecimal.ZERO;
         private BigDecimal totalExpense = BigDecimal.ZERO;
         private Integer inboundQuantity = 0;

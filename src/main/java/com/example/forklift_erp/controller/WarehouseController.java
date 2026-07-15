@@ -38,6 +38,16 @@ public class WarehouseController {
         return Result.success(service.findAll());
     }
 
+    @GetMapping("/balance")
+    @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)
+    public Result<Integer> getAvailableQuantity(
+            @RequestParam String resourceType,
+            @RequestParam Long resourceId,
+            @RequestParam(required = false) Long warehouseId
+    ) {
+        return Result.success(service.availableQuantity(resourceType, resourceId, warehouseId));
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)

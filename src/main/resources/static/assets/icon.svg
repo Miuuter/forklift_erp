@@ -1,19 +1,23 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Lonking logo">
-  <rect width="512" height="512" rx="96" fill="#eef8ff"/>
-  <rect x="88" y="88" width="336" height="336" rx="40" fill="#dff3ff"/>
-  <rect x="88" y="88" width="336" height="336" rx="40" fill="none" stroke="#9fd3ff" stroke-width="10"/>
-  <text x="256" y="213"
-        text-anchor="middle"
-        font-family="Arial Black, Arial, Helvetica, sans-serif"
-        font-size="58"
-        font-weight="900"
-        letter-spacing="-2"
-        fill="#151515">LONKING</text>
-  <text x="256" y="318"
-        text-anchor="middle"
-        font-family="Microsoft YaHei, SimHei, Arial, sans-serif"
-        font-size="78"
-        font-weight="900"
-        letter-spacing="4"
-        fill="#151515">&#x9F99;&#x5DE5;</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="叉车 ERP">
+  <defs>
+    <linearGradient id="app-bg" x1="72" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2F6998"/>
+      <stop offset="1" stop-color="#173C5D"/>
+    </linearGradient>
+    <linearGradient id="app-body" x1="128" y1="214" x2="350" y2="376" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EAF6FF"/>
+      <stop offset="1" stop-color="#B8DCF9"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#app-bg)"/>
+  <path d="M92 112c0-11 9-20 20-20h288c11 0 20 9 20 20v288c0 11-9 20-20 20H112c-11 0-20-9-20-20V112Z" fill="none" stroke="#FFFFFF" stroke-opacity=".14" stroke-width="8"/>
+  <path d="M104 382h304" stroke="#FFFFFF" stroke-opacity=".22" stroke-width="12" stroke-linecap="round"/>
+  <path d="M112 344h194l-24-112h-84l-34 58h-52v54Z" fill="url(#app-body)" stroke="#FFFFFF" stroke-width="12" stroke-linejoin="round"/>
+  <path d="M198 232v-42h66l18 42M226 190v42M168 290h99" fill="none" stroke="#24577F" stroke-width="13" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M320 142v202M350 142v202M320 170h30M350 286h76M350 328h98" fill="none" stroke="#FFFFFF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="170" cy="350" r="48" fill="#122C43" stroke="#FFFFFF" stroke-width="14"/>
+  <circle cx="288" cy="350" r="39" fill="#122C43" stroke="#FFFFFF" stroke-width="14"/>
+  <circle cx="170" cy="350" r="17" fill="#61BBAF"/>
+  <circle cx="288" cy="350" r="14" fill="#61BBAF"/>
+  <path d="M119 154h72" stroke="#61BBAF" stroke-width="16" stroke-linecap="round"/>
 </svg>

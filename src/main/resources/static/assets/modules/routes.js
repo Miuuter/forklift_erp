@@ -11,6 +11,7 @@ export const endpoints = {
     list: "/api/parts",
     create: "/api/parts",
     update: id => `/api/parts/${id}`,
+    valuation: id => `/api/parts/${id}/valuation`,
     delete: id => `/api/parts/${id}`
   },
   repair: {
@@ -63,6 +64,11 @@ export const endpoints = {
     downloadInvoice: id => `/api/outbound-orders/${id}/invoice`,
     downloadContract: id => `/api/outbound-orders/${id}/contract`
   },
+  payment: {
+    list: (sourceType, sourceId) => `/api/payments?sourceType=${encodeURIComponent(sourceType)}&sourceId=${encodeURIComponent(sourceId)}`,
+    create: "/api/payments",
+    reverse: id => `/api/payments/${id}/reverse`
+  },
   workflow: {
     machineInboundPurchase: "/api/workflows/machine-inbound-purchase",
     vehicleOutboundWithCustomer: "/api/workflows/vehicle-outbound-with-customer"
@@ -79,6 +85,7 @@ export const endpoints = {
     list: "/api/rentals",
     create: "/api/rentals",
     update: id => `/api/rentals/${id}`,
+    bills: id => `/api/rentals/${id}/bills`,
     delete: id => `/api/rentals/${id}`
   },
   customer: {
@@ -110,6 +117,7 @@ export const endpoints = {
   },
   warehouse: {
     list: "/api/warehouses",
+    balance: "/api/warehouses/balance",
     create: "/api/warehouses",
     update: id => `/api/warehouses/${id}`,
     delete: id => `/api/warehouses/${id}`,
@@ -153,5 +161,6 @@ export const endpoints = {
   logs: "/api/logs",
   todos: "/api/todos",
   statistics: "/api/statistics/finance",
+  dailyReconciliation: "/api/statistics/reconciliation/daily",
   listSummary: "/api/statistics/list-summary"
 };

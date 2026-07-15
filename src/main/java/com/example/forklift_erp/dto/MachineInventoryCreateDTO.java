@@ -31,6 +31,9 @@ public class MachineInventoryCreateDTO {
     private String configuration;
     @Size(max = 50)
     private String supplier;
+    private Long supplierId;
+    @Size(max = 120)
+    private String supplierNameSnapshot;
     @Size(max = 100)
     private String warehouseName;
     private Long warehouseId;
@@ -42,6 +45,8 @@ public class MachineInventoryCreateDTO {
     private String materialNumber;
     @DecimalMin(value = "0.00", message = "\u91c7\u8d2d\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
     private BigDecimal purchasePrice;
+    @DecimalMin(value = "0.00", message = "Landed unit cost cannot be negative")
+    private BigDecimal landedUnitCost;
     @DecimalMin(value = "0.00", message = "\u9500\u552e\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
     private BigDecimal salePrice;
     @DecimalMin(value = "0.00", message = "\u7ed3\u7b97\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
@@ -85,6 +90,8 @@ public class MachineInventoryCreateDTO {
         entity.setMachineType(this.machineType);
         entity.setConfiguration(this.configuration);
         entity.setSupplier(this.supplier);
+        entity.setSupplierId(this.supplierId);
+        entity.setSupplierNameSnapshot(this.supplierNameSnapshot);
         entity.setWarehouseName(this.warehouseName);
         if (this.warehouseId != null) {
             entity.setWarehouseId(this.warehouseId);
@@ -95,6 +102,7 @@ public class MachineInventoryCreateDTO {
         entity.setApplicationNumber(this.applicationNumber);
         entity.setMaterialNumber(this.materialNumber);
         entity.setPurchasePrice(this.purchasePrice);
+        entity.setLandedUnitCost(this.landedUnitCost);
         entity.setSalePrice(this.salePrice);
         entity.setSettlementPrice(this.settlementPrice);
         entity.setEngineNumber(this.engineNumber);
@@ -127,6 +135,8 @@ public class MachineInventoryCreateDTO {
         entity.setMachineType(this.machineType);
         entity.setConfiguration(this.configuration);
         entity.setSupplier(this.supplier);
+        entity.setSupplierId(this.supplierId);
+        entity.setSupplierNameSnapshot(this.supplierNameSnapshot);
         entity.setWarehouseName(this.warehouseName);
         if (this.warehouseId != null) {
             entity.setWarehouseId(this.warehouseId);
@@ -137,6 +147,7 @@ public class MachineInventoryCreateDTO {
         entity.setApplicationNumber(this.applicationNumber);
         entity.setMaterialNumber(this.materialNumber);
         entity.setPurchasePrice(this.purchasePrice);
+        entity.setLandedUnitCost(this.landedUnitCost);
         entity.setSalePrice(this.salePrice);
         entity.setSettlementPrice(this.settlementPrice);
         entity.setEngineNumber(this.engineNumber);

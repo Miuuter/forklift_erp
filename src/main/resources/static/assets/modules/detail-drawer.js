@@ -10,6 +10,7 @@ export function createDetailDrawer({
   detailFields,
   renderDetailGrid,
   renderDetailDrawerActions,
+  icon,
   escapeHtml
 }) {
   let closeTimer = null;
@@ -69,7 +70,7 @@ export function createDetailDrawer({
           <div class="detail-drawer-kicker">${escapeHtml(entityLabel(drawer.kind))}</div>
           <h2 id="${titleId}">${escapeHtml(title)}</h2>
         </div>
-        <button class="btn btn-icon-only btn-ghost" type="button" data-action="close-detail" aria-label="关闭详情">×</button>
+        <button class="btn btn-icon-only btn-ghost" type="button" data-action="close-detail" aria-label="关闭详情">${icon("close")}</button>
       </div>
       <div class="detail-drawer-body">
         <section class="detail-drawer-section">

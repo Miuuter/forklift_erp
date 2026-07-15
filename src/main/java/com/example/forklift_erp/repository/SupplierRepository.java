@@ -18,6 +18,7 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
     List<Supplier> findAllByOrderBySupplierNameAsc();
 
     boolean existsBySupplierName(String supplierName);
+    Optional<Supplier> findBySupplierName(String supplierName);
 
     boolean existsBySupplierNameAndIdNot(String supplierName, Long id);
 

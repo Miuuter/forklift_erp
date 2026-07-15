@@ -40,6 +40,12 @@ public class PurchaseOrder implements CollaborativeResource {
     @Column(name = "resource_type", nullable = false, length = 30)
     private String resourceType;
 
+    @Column(name = "warehouse_id")
+    private Long warehouseId;
+
+    @Column(name = "resource_id")
+    private Long resourceId;
+
     @Column(name = "resource_code", length = 100)
     private String resourceCode;
 
@@ -69,6 +75,21 @@ public class PurchaseOrder implements CollaborativeResource {
 
     @Column(name = "expected_arrival_date")
     private LocalDate expectedArrivalDate;
+
+    @Column(name = "received_date")
+    private LocalDate receivedDate;
+
+    @Column(name = "received_stock_movement_id")
+    private Long receivedStockMovementId;
+
+    @Column(name = "stock_lot_id")
+    private Long stockLotId;
+
+    @Column(name = "landed_unit_cost", precision = 12, scale = 2)
+    private BigDecimal landedUnitCost;
+
+    @Column(name = "financial_posted")
+    private Boolean financialPosted = false;
 
     @Column(nullable = false, length = 30)
     private String status = "ORDERED";

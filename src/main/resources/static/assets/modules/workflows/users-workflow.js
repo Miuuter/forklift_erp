@@ -3,6 +3,7 @@ export function createUserWorkflow(deps) {
     state,
     api,
     endpoints,
+    openEntityModal,
     markReferenceDataStale,
     refreshAfterMutation,
     renderCurrentTab,
@@ -32,15 +33,19 @@ export function createUserWorkflow(deps) {
     icon
   } = deps;
 
+  async function openUserJobTag(id) {
+    const user = findEntity("user", id);
+    if (!user?.id || !canUpdateUserJobTag(user)) return;
+    await openEntityModal("userJobTag", {
+      ...user,
+      jobTag: normalizeJobTag(user.jobTag, user.roles)
+    });
+  }
+
   async function toggleUserJobTag(id) {
     const user = findEntity("user", id);
     if (!user?.id || !canUpdateUserJobTag(user)) return;
     const nextTag = nextJobTag(user.jobTag);
-    if (!(await confirmDanger({
-      title: "确认切换用户职务",
-      target: entityDisplayName("user", user),
-      impact: `用户职务将切换为${jobTagLabel(nextTag)}，可能影响维修人员选择和业务分配。`
-    }))) return;
     await api(endpoints.user.updateJobTag(user.id), {
       method: "PUT",
       body: {
@@ -48,7 +53,7 @@ export function createUserWorkflow(deps) {
         jobTag: nextTag
       }
     });
-    showToast(`职务已切换为${jobTagLabel(nextTag)}`, "success");
+    showToast(`职务已切换为${jobTagLabel(nextTag)}；再次点击可继续切换`, "success");
     markReferenceDataStale(["repairUser"]);
     await refreshAfterMutation("user", { refreshDetail: false });
     renderCurrentTab();
@@ -94,8 +99,9 @@ export function createUserWorkflow(deps) {
           { label: "角色", html: true, render: row => roleBadges(row.roles) },
           { label: "职务", html: true, render: row => jobTagControl(row) },
           { label: "状态", html: true, render: row => userEnabledControl(row) },
-          { label: "创建时间", key: "createdAt", formatter: dateTime }
-        ], rows, listTableOptions("user", null, { batch: false })))}
+          { label: "创建时间", key: "createdAt", formatter: dateTime },
+          { label: "操作", html: true, render: row => userActions(row) }
+        ], rows, listTableOptions("user", null, { selectable: false, batch: false })))}
         ${renderPagination("users")}
       </div>
     `;
@@ -103,12 +109,19 @@ export function createUserWorkflow(deps) {
 
   function jobTagControl(row = {}) {
     const tag = normalizeJobTag(row.jobTag, row.roles);
-    return jobTagBadge(tag);
+    if (!canUpdateUserJobTag(row)) {
+      return jobTagBadge(tag);
+    }
+    const next = nextJobTag(tag);
+    return `<button class="status-toggle ${escapeAttr(jobTagType(tag))}" type="button" data-action="toggle-user-job-tag" data-id="${escapeAttr(row.id)}" title="点击切换为${escapeAttr(jobTagLabel(next))}">${escapeHtml(jobTagLabel(tag))}</button>`;
   }
 
   function userEnabledControl(row = {}) {
     const enabled = Boolean(row.enabled);
-    return badge(enabled ? "启用" : "停用", enabled ? "teal" : "danger");
+    if (!canUpdateUserEnabled(row)) {
+      return badge(enabled ? "启用" : "停用", enabled ? "teal" : "danger");
+    }
+    return `<button class="status-toggle ${enabled ? "teal" : "danger"}" type="button" data-action="toggle-user-enabled" data-id="${escapeAttr(row.id)}" aria-pressed="${enabled ? "true" : "false"}" title="点击切换启用状态">${escapeHtml(enabled ? "启用" : "停用")}</button>`;
   }
 
   function userActions(row) {
@@ -152,6 +165,7 @@ export function createUserWorkflow(deps) {
   }
 
   return {
+    openUserJobTag,
     toggleUserJobTag,
     toggleUserEnabled,
     renderUsers,

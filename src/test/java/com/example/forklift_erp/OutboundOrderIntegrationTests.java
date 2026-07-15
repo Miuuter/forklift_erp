@@ -155,6 +155,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> outboundPayload = new LinkedHashMap<>();
         outboundPayload.put("machineId", machine.path("id").asLong());
         outboundPayload.put("machineVersion", machine.path("version").asLong());
+        outboundPayload.put("warehouseId", machine.path("warehouseId").asLong());
         outboundPayload.put("customerId", customer.path("id").asLong());
         outboundPayload.put("salesDate", "2026-05-20");
         outboundPayload.put("settlementPrice", "128000.00");
@@ -265,7 +266,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         MachineInventory adjustedMachine = machineRepository.findById(machine.path("id").asLong()).orElseThrow();
         assertThat(adjustedMachine.getInventoryCount()).isZero();
         assertThat(adjustedMachine.getStockStatus()).isEqualTo("OUTBOUND");
-        assertThat(adjustedMachine.getSettlementPrice()).isEqualByComparingTo(new BigDecimal("128000.00"));
+        assertThat(adjustedMachine.getSettlementPrice()).isNull();
         assertThat(adjustedMachine.getSalePrice()).isEqualByComparingTo(new BigDecimal("136000.00"));
         assertThat(adjustedMachine.getSalesDate()).isEqualTo("2026-05-20");
         assertThat(adjustedMachine.getDestination1()).startsWith("广东日丰电缆有限公司");
@@ -371,7 +372,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         assertThat(reportedMachine.getIsSalesReported()).isEqualTo("是");
         assertThat(reportedMachine.getIsInvoiceApplied()).isEqualTo("是");
         assertThat(reportedMachine.getSalesReportDate()).isEqualTo(LocalDate.of(2026, 5, 25));
-        assertThat(reportedMachine.getSettlementPrice()).isEqualByComparingTo(new BigDecimal("129500.00"));
+        assertThat(reportedMachine.getSettlementPrice()).isNull();
         assertThat(reportedMachine.getSalePrice()).isEqualByComparingTo(new BigDecimal("137500.00"));
         assertThat(reportedMachine.getSalesDate()).isEqualTo("2026-05-21");
     }
@@ -384,6 +385,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("partCode", part.path("partCode").asText());
         payload.put("partVersion", part.path("version").asLong());
+        payload.put("warehouseId", part.path("warehouseId").asLong());
         payload.put("quantity", 2);
         payload.put("customerId", customer.path("id").asLong());
         payload.put("settlementPrice", "360.00");
@@ -412,10 +414,14 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
     void rentalRecordTracksVehicleDestinationPriceAndFeedsStatistics() throws Exception {
         JsonNode customer = createCustomer("Codex 租赁后销售客户有限公司");
         JsonNode machine = createMachine();
+        JsonNode beforeAnnual = loadFinanceDashboard().path("annualSummary");
+        BigDecimal rentalIncomeBefore = beforeAnnual.path("rentalIncome").decimalValue();
+        int rentalOrdersBefore = beforeAnnual.path("rentalOrders").asInt();
 
         Map<String, Object> rentalPayload = new LinkedHashMap<>();
         rentalPayload.put("machineId", machine.path("id").asLong());
         rentalPayload.put("machineVersion", machine.path("version").asLong());
+        rentalPayload.put("warehouseId", machine.path("warehouseId").asLong());
         rentalPayload.put("customerId", customer.path("id").asLong());
         rentalPayload.put("destination", "佛山禅城工地 A 区");
         rentalPayload.put("monthlyRentalPrice", "8800.00");
@@ -444,6 +450,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> outboundWhileRented = new LinkedHashMap<>();
         outboundWhileRented.put("machineId", machine.path("id").asLong());
         outboundWhileRented.put("machineVersion", machine.path("version").asLong());
+        outboundWhileRented.put("warehouseId", machine.path("warehouseId").asLong());
         outboundWhileRented.put("customerId", customer.path("id").asLong());
         outboundWhileRented.put("salesDate", "2026-05-28");
         outboundWhileRented.put("settlementPrice", "120000.00");
@@ -475,14 +482,16 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 .andExpect(jsonPath("$.data.status").value("RETURNED"))
                 .andExpect(jsonPath("$.data.endDate").value("2026-05-29"));
 
-        mockMvc.perform(get("/api/statistics/finance")
-                        .param("year", "2026")
-                        .header("Authorization", bearer(superToken)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.annualSummary.rentalIncome").value(851.61))
-                .andExpect(jsonPath("$.data.annualSummary.rentalOrders").value(1))
-                .andExpect(jsonPath("$.data.topRentals[0].destination").value("佛山禅城工地 A 区"));
+        JsonNode finance = loadFinanceDashboard();
+        JsonNode annual = finance.path("annualSummary");
+        assertThat(annual.path("rentalIncome").decimalValue().subtract(rentalIncomeBefore))
+                .isEqualByComparingTo("851.61");
+        assertThat(annual.path("rentalOrders").asInt()).isEqualTo(rentalOrdersBefore + 1);
+        assertThat(finance.path("topRentals").toString()).contains("佛山禅城工地 A 区");
 
+        outboundWhileRented.put("machineVersion", machineRepository.findById(machine.path("id").asLong())
+                .orElseThrow()
+                .getVersion());
         String orderResponse = mockMvc.perform(post("/api/outbound-orders/vehicle")
                         .header("Authorization", bearer(superToken))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -603,6 +612,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("machineId", machine.path("id").asLong());
         payload.put("machineVersion", machine.path("version").asLong());
+        payload.put("warehouseId", machine.path("warehouseId").asLong());
         payload.put("customerId", customer.path("id").asLong());
         payload.put("salesDate", "2026-05-26");
         payload.put("settlementPrice", "118000.00");
@@ -627,6 +637,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("partCode", part.path("partCode").asText());
         payload.put("partVersion", part.path("version").asLong());
+        payload.put("warehouseId", part.path("warehouseId").asLong());
         payload.put("quantity", 1);
         payload.put("customerId", customer.path("id").asLong());
         payload.put("settlementPrice", "180.00");
@@ -644,6 +655,18 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         JsonNode order = objectMapper.readTree(response).path("data");
         ordersToCleanup.add(order.path("id").asLong());
         return order;
+    }
+
+    private JsonNode loadFinanceDashboard() throws Exception {
+        String response = mockMvc.perform(get("/api/statistics/finance")
+                        .param("year", "2026")
+                        .header("Authorization", bearer(superToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readTree(response).path("data");
     }
 
     private JsonNode createCustomer(String companyName) throws Exception {
@@ -679,6 +702,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("applicationNumber", "APP-" + unique("apply"));
         payload.put("materialNumber", "MAT-" + unique("material"));
         payload.put("inventoryCount", 1);
+        payload.put("warehouseId", defaultWarehouseId());
         payload.put("remarks", "整机进出库台账测试数据");
 
         String response = mockMvc.perform(post("/api/inventory")
@@ -706,6 +730,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("partCategory", "测试配件");
         payload.put("quantity", 5);
         payload.put("unit", "件");
+        payload.put("warehouseId", defaultWarehouseId());
 
         String response = mockMvc.perform(post("/api/parts")
                         .header("Authorization", bearer(superToken))

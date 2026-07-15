@@ -24,20 +24,27 @@ public class DataImportVehicleImporter {
     private final MachineInventoryService machineInventoryService;
     private final OutboundOrderService outboundOrderService;
     private final DataImportVehicleRowMapper rowMapper;
+    private final DataImportIdempotencyService idempotencyService;
 
     public DataImportVehicleImporter(
             CustomerService customerService,
             MachineInventoryService machineInventoryService,
             OutboundOrderService outboundOrderService,
-            DataImportVehicleRowMapper rowMapper
+            DataImportVehicleRowMapper rowMapper,
+            DataImportIdempotencyService idempotencyService
     ) {
         this.customerService = customerService;
         this.machineInventoryService = machineInventoryService;
         this.outboundOrderService = outboundOrderService;
         this.rowMapper = rowMapper;
+        this.idempotencyService = idempotencyService;
     }
 
-    ImportResult importWorkbook(WorkbookSnapshot snapshot) {
+    ImportResult importWorkbook(WorkbookSnapshot snapshot, ImportContext context) {
+        if (context.masterData()) {
+            return new ImportResult(0, snapshot.totalRows(),
+                    "Vehicle workbook contains inventory/business sheets; MASTER_DATA mode intentionally makes no stock changes");
+        }
         Map<String, MachineInventory> machinesByNumber = machineInventoryService.findAll().stream()
                 .filter(machine -> rowMapper.hasText(machine.getVehicleProductNumber()))
                 .collect(Collectors.toMap(MachineInventory::getVehicleProductNumber, machine -> machine, (left, right) -> left, LinkedHashMap::new));
@@ -57,10 +64,15 @@ public class DataImportVehicleImporter {
         int importedOrders = 0;
         int skippedRows = 0;
 
+        if (context.businessDocument()) {
         for (WorkbookRow salesRow : snapshot.sheetRows("Sales")) {
             String vehicleNumber = rowMapper.cleanVehicleNumber(rowMapper.text(salesRow, 5));
             String customerName = rowMapper.text(salesRow, 14);
             if (!rowMapper.hasText(vehicleNumber) || !rowMapper.hasText(customerName)) {
+                skippedRows++;
+                continue;
+            }
+            if (!idempotencyService.reserve(context, "Sales", salesRow.rowNumber(), "SALES:" + vehicleNumber)) {
                 skippedRows++;
                 continue;
             }
@@ -79,22 +91,33 @@ public class DataImportVehicleImporter {
                 importedCustomers++;
             }
         }
+        }
 
         for (WorkbookRow inboundRow : snapshot.sheetRows("Inbound")) {
             String vehicleNumber = rowMapper.cleanVehicleNumber(rowMapper.text(inboundRow, 8));
             if (!rowMapper.hasText(vehicleNumber) || machinesByNumber.containsKey(vehicleNumber)) {
                 continue;
             }
+            if (!idempotencyService.reserve(context, "Inbound", inboundRow.rowNumber(), "INBOUND:" + vehicleNumber)) {
+                skippedRows++;
+                continue;
+            }
             upsertMachineFromInboundRow(inboundRow, vehicleNumber, machinesByNumber);
             importedMachines++;
         }
 
+        if (context.businessDocument()) {
         for (WorkbookRow otherBrandRow : snapshot.sheetRows("OtherBrandSales")) {
             String vehicleNumber = rowMapper.cleanVehicleNumber(rowMapper.text(otherBrandRow, 6));
             if (!rowMapper.hasText(vehicleNumber)) {
                 vehicleNumber = rowMapper.generatedVehicleNumber("OTHER-SALE", otherBrandRow.rowNumber(), otherBrandRow);
             }
             if (machinesByNumber.containsKey(vehicleNumber)) {
+                continue;
+            }
+            if (!idempotencyService.reserve(context, "OtherBrandSales", otherBrandRow.rowNumber(),
+                    "OTHER_BRAND_SALE:" + vehicleNumber)) {
+                skippedRows++;
                 continue;
             }
             MachineInventory machine = upsertMachineFromOtherBrandRow(otherBrandRow, vehicleNumber, machinesByNumber);
@@ -116,6 +139,10 @@ public class DataImportVehicleImporter {
             if (machinesByNumber.containsKey(vehicleNumber)) {
                 continue;
             }
+            if (!idempotencyService.reserve(context, "OldSales", oldSalesRow.rowNumber(), "OLD_SALE:" + vehicleNumber)) {
+                skippedRows++;
+                continue;
+            }
             WorkbookRow oldInboundRow = oldInboundByVehicle.get(vehicleNumber);
             MachineInventory machine = oldInboundRow != null
                     ? upsertMachineFromOldInboundRow(oldInboundRow, vehicleNumber, machinesByNumber)
@@ -129,10 +156,15 @@ public class DataImportVehicleImporter {
             importedMachines++;
             importedCustomers++;
         }
+        }
 
         for (WorkbookRow oldInboundRow : snapshot.sheetRows("OldInbound")) {
             String vehicleNumber = rowMapper.cleanVehicleNumber(rowMapper.text(oldInboundRow, 6));
             if (!rowMapper.hasText(vehicleNumber) || machinesByNumber.containsKey(vehicleNumber)) {
+                continue;
+            }
+            if (!idempotencyService.reserve(context, "OldInbound", oldInboundRow.rowNumber(), "OLD_INBOUND:" + vehicleNumber)) {
+                skippedRows++;
                 continue;
             }
             upsertMachineFromOldInboundRow(oldInboundRow, vehicleNumber, machinesByNumber);
@@ -142,7 +174,8 @@ public class DataImportVehicleImporter {
         return new ImportResult(
                 importedCustomers + importedMachines + importedOrders,
                 skippedRows,
-                "Imported customers=" + importedCustomers + ", machines=" + importedMachines + ", orders=" + importedOrders
+                "Mode=" + context.importMode() + ", imported customers=" + importedCustomers
+                        + ", machines=" + importedMachines + ", orders=" + importedOrders
         );
     }
 
@@ -155,11 +188,10 @@ public class DataImportVehicleImporter {
             machinesByNumber.put(vehicleNumber, machine);
             return machine;
         }
-        dto.setVersion(existing.getVersion());
-        machineInventoryService.update(existing.getId(), dto);
-        MachineInventory machine = machineInventoryService.findById(existing.getId()).orElseThrow();
-        machinesByNumber.put(vehicleNumber, machine);
-        return machine;
+        // A spreadsheet snapshot must never rewrite an existing serial asset's
+        // stock, warehouse or posted cost. Reuse the authoritative profile.
+        machinesByNumber.put(vehicleNumber, existing);
+        return existing;
     }
 
     private MachineInventory upsertMachineFromSalesRow(WorkbookRow row, String vehicleNumber, Map<String, MachineInventory> machinesByNumber) {
@@ -173,6 +205,14 @@ public class DataImportVehicleImporter {
         }
         machinesByNumber.put(vehicleNumber, existing);
         return existing;
+    }
+
+    private boolean isOperational(MachineInventory machine) {
+        return machine != null
+                && (machine.getInventoryCount() == null || machine.getInventoryCount() <= 0
+                || com.example.forklift_erp.constant.MachineStockStatus.OUTBOUND.code().equals(machine.getStockStatus())
+                || com.example.forklift_erp.constant.MachineStockStatus.RENTED.code().equals(machine.getStockStatus())
+                || machine.getSalesDate() != null);
     }
 
     private MachineInventory upsertMachineFromOtherBrandRow(WorkbookRow row, String vehicleNumber, Map<String, MachineInventory> machinesByNumber) {

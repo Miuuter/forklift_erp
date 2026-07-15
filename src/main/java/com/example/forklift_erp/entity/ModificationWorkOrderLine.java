@@ -49,11 +49,41 @@ public class ModificationWorkOrderLine {
     @Column(name = "quantity", nullable = false)
     private Integer quantity = 1;
 
+    @Column(name = "warehouse_id")
+    private Long warehouseId;
+
     @Column(name = "old_part_action", nullable = false, length = 30)
     private String oldPartAction = PartChangeAction.STOCK_IN.code();
 
     @Column(name = "price_difference", nullable = false, precision = 12, scale = 2)
     private BigDecimal priceDifference = BigDecimal.ZERO;
+
+    @Column(name = "charge_unit_price", precision = 12, scale = 2)
+    private BigDecimal chargeUnitPrice;
+
+    @Column(name = "discount_amount", precision = 12, scale = 2)
+    private BigDecimal discountAmount = BigDecimal.ZERO;
+
+    @Column(name = "charge_amount", precision = 14, scale = 2)
+    private BigDecimal chargeAmount;
+
+    @Column(name = "cost_amount", precision = 14, scale = 2)
+    private BigDecimal costAmount;
+
+    @Column(name = "old_part_disposition", length = 30)
+    private String oldPartDisposition;
+
+    @Column(name = "old_part_warehouse_id")
+    private Long oldPartWarehouseId;
+
+    @Column(name = "old_part_condition", length = 50)
+    private String oldPartCondition;
+
+    @Column(name = "old_part_valuation_source", length = 100)
+    private String oldPartValuationSource;
+
+    @Column(name = "old_part_unit_cost", precision = 12, scale = 2)
+    private BigDecimal oldPartUnitCost;
 
     @Column(name = "replace_log_id")
     private Long replaceLogId;

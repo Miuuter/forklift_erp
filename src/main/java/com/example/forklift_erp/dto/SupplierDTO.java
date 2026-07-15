@@ -11,6 +11,7 @@ public class SupplierDTO {
     private String supplierName;
 
     private String supplierType;
+    private Boolean active;
     private String contactName;
     private String contactPhone;
     private String address;

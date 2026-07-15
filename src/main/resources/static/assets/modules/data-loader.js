@@ -28,6 +28,7 @@ export function createDataLoaders({
   sortById,
   sortLogs,
   prepareVehicleModelSummary,
+  todayInputDate,
   loadVehicleDetail,
   loadVehicleModelDetail,
   renderCurrentTab,
@@ -58,6 +59,7 @@ export function createDataLoaders({
         await loadStatistics(state.selectedStatsYear);
       } else {
         state.data.statistics = null;
+        state.data.dailyReconciliation = null;
       }
       return;
     }
@@ -227,7 +229,20 @@ export function createDataLoaders({
 
   async function loadStatistics(year) {
     state.selectedStatsYear = Number(year || new Date().getFullYear());
-    state.data.statistics = await api(`${endpoints.statistics}?year=${state.selectedStatsYear}`);
+    const reconciliationDate = state.selectedReconciliationDate || todayInputDate();
+    state.selectedReconciliationDate = reconciliationDate;
+    const [statistics, reconciliation] = await Promise.all([
+      api(`${endpoints.statistics}?year=${state.selectedStatsYear}`),
+      api(`${endpoints.dailyReconciliation}?date=${encodeURIComponent(reconciliationDate)}`)
+    ]);
+    state.data.statistics = statistics;
+    state.data.dailyReconciliation = reconciliation;
+  }
+
+  async function loadDailyReconciliation(date) {
+    const selectedDate = String(date || state.selectedReconciliationDate || todayInputDate());
+    state.selectedReconciliationDate = selectedDate;
+    state.data.dailyReconciliation = await api(`${endpoints.dailyReconciliation}?date=${encodeURIComponent(selectedDate)}`);
   }
 
   async function fetchConfigValues(itemId) {
@@ -297,6 +312,7 @@ export function createDataLoaders({
     loadListSummary,
     loadPagedTab,
     loadStatistics,
+    loadDailyReconciliation,
     loadTodoCenter,
     loadVehicleFlowReferences,
     loadVehicleModelData

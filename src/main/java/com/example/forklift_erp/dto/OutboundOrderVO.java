@@ -16,6 +16,7 @@ public class OutboundOrderVO {
     private String orderNo;
     private String resourceType;
     private Long resourceId;
+    private Long sourceWarehouseId;
     private String resourceCode;
     private String resourceName;
     private String specificationModel;
@@ -28,6 +29,8 @@ public class OutboundOrderVO {
     private String contactPhone;
     private String taxOrIdNumber;
     private BigDecimal settlementPrice;
+    private BigDecimal unitSalePrice;
+    private BigDecimal lineAmount;
     private LocalDate salesDate;
     private BigDecimal salePrice;
     private BigDecimal receivableAmount;
@@ -59,6 +62,7 @@ public class OutboundOrderVO {
     private String orderRemark;
     private String operator;
     private Long stockOperationLogId;
+    private Boolean financialPosted;
     private Boolean isLocked;
     private Boolean resourceLockedByOrder;
     private LocalDateTime createdAt;
@@ -71,6 +75,7 @@ public class OutboundOrderVO {
         vo.setOrderNo(entity.getOrderNo());
         vo.setResourceType(entity.getResourceType());
         vo.setResourceId(entity.getResourceId());
+        vo.setSourceWarehouseId(entity.getSourceWarehouseId());
         vo.setResourceCode(entity.getResourceCode());
         vo.setResourceName(entity.getResourceName());
         vo.setSpecificationModel(entity.getSpecificationModel());
@@ -83,6 +88,8 @@ public class OutboundOrderVO {
         vo.setContactPhone(entity.getContactPhone());
         vo.setTaxOrIdNumber(entity.getTaxOrIdNumber());
         vo.setSettlementPrice(entity.getSettlementPrice());
+        vo.setUnitSalePrice(entity.getUnitSalePrice());
+        vo.setLineAmount(entity.getLineAmount());
         vo.setSalesDate(entity.getSalesDate());
         vo.setSalePrice(entity.getSalePrice());
         vo.setReceivableAmount(defaultAmount(entity.getReceivableAmount(), entity.getSettlementPrice()));
@@ -114,6 +121,7 @@ public class OutboundOrderVO {
         vo.setOrderRemark(entity.getOrderRemark());
         vo.setOperator(entity.getOperator());
         vo.setStockOperationLogId(entity.getStockOperationLogId());
+        vo.setFinancialPosted(Boolean.TRUE.equals(entity.getFinancialPosted()));
         vo.setIsLocked(Boolean.TRUE.equals(entity.getIsLocked()));
         vo.setResourceLockedByOrder(Boolean.TRUE.equals(entity.getResourceLockedByOrder()));
         vo.setCreatedAt(entity.getCreatedAt());

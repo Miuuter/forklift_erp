@@ -5,7 +5,8 @@ export function createActionRegistry({
   escapeHtml,
   icon,
   canWriteEntity,
-  hasPermission
+  hasPermission,
+  hasAnyRole
 }) {
   const definitions = new Map();
 
@@ -20,10 +21,10 @@ export function createActionRegistry({
 
   register("stockIn", ({ kind, row }) => defineDrawerAction({
     id: "stockIn",
-    label: "入库",
+    label: "入库调整",
     icon: "plus",
     action: kind === "vehicle" ? "vehicle-stock" : "part-stock",
-    visible: ["vehicle", "part"].includes(kind) && hasPermission("stock:adjust"),
+    visible: ["vehicle", "part"].includes(kind) && !Boolean(row?.isLocked) && hasPermission("stock:adjust"),
     data: {
       direction: "inbound",
       id: kind === "vehicle" ? row?.id : undefined,
@@ -33,11 +34,40 @@ export function createActionRegistry({
 
   register("stockOut", ({ kind, row }) => defineDrawerAction({
     id: "stockOut",
-    label: "出库",
+    label: "销售出库",
     icon: "minus",
     action: "part-stock",
-    visible: kind === "part" && hasPermission("stock:adjust"),
+    visible: kind === "part" && !Boolean(row?.isLocked) && hasPermission("stock:adjust"),
     data: { direction: "outbound", partCode: row?.partCode }
+  }));
+
+  register("stockAdjustOut", ({ kind, row }) => defineDrawerAction({
+    id: "stockAdjustOut",
+    label: "库存减少",
+    icon: "minus",
+    action: kind === "vehicle" ? "vehicle-stock" : "part-stock",
+    visible: ["vehicle", "part"].includes(kind)
+      && hasPermission("stock:adjust")
+      && hasAnyRole("ADMIN", "SUPER_ADMIN")
+      && !Boolean(row?.isLocked)
+      && Number(kind === "vehicle" ? row?.inventoryCount : row?.quantity) > 0,
+    data: {
+      direction: "adjustOutbound",
+      id: kind === "vehicle" ? row?.id : undefined,
+      partCode: kind === "part" ? row?.partCode : undefined
+    }
+  }));
+
+  register("valueRemovedPart", ({ kind, row }) => defineDrawerAction({
+    id: "valueRemovedPart",
+    label: "确认旧件估值",
+    icon: "money",
+    action: "value-removed-part",
+    visible: kind === "part"
+      && row?.source === "REMOVED"
+      && Boolean(row?.isLocked)
+      && hasAnyRole("ADMIN", "SUPER_ADMIN"),
+    data: { id: row?.id }
   }));
 
   register("edit", ({ kind, row }) => defineDrawerAction({

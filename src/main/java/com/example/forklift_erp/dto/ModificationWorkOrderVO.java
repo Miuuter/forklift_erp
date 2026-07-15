@@ -6,6 +6,7 @@ import com.example.forklift_erp.entity.MachineInventory;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
 
 @Data
@@ -19,6 +20,10 @@ public class ModificationWorkOrderVO {
     private String specificationModel;
     private String customerName;
     private String salesOrderNo;
+    private String workOrderType;
+    private Long warehouseId;
+    private LocalDate businessDate;
+    private Boolean financialPosted;
     private String status;
     private String operator;
     private String remark;
@@ -36,6 +41,10 @@ public class ModificationWorkOrderVO {
         vo.setMachineId(entity.getMachineId());
         vo.setCustomerName(entity.getCustomerName());
         vo.setSalesOrderNo(entity.getSalesOrderNo());
+        vo.setWorkOrderType(entity.getWorkOrderType());
+        vo.setWarehouseId(entity.getWarehouseId());
+        vo.setBusinessDate(entity.getBusinessDate());
+        vo.setFinancialPosted(entity.getFinancialPosted());
         vo.setStatus(entity.getStatus());
         vo.setOperator(entity.getOperator());
         vo.setRemark(entity.getRemark());

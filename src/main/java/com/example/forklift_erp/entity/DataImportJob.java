@@ -37,6 +37,9 @@ public class DataImportJob {
     @Column(name = "import_type", nullable = false, length = 60)
     private String importType;
 
+    @Column(name = "import_mode", nullable = false, length = 30)
+    private String importMode = "BUSINESS_DOCUMENT";
+
     @Column(name = "template_name", length = 120)
     private String templateName;
 
@@ -45,6 +48,9 @@ public class DataImportJob {
 
     @Column(name = "staged_file_name", length = 255)
     private String stagedFileName;
+
+    @Column(name = "file_fingerprint", length = 64)
+    private String fileFingerprint;
 
     @Column(name = "status", nullable = false, length = 30)
     private String status;

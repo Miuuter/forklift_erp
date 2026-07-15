@@ -13,7 +13,7 @@ public interface DataImportService {
 
     DataImportTemplateFile template(String importType);
 
-    DataImportValidationVO validate(String importType, MultipartFile file);
+    DataImportValidationVO validate(String importType, String importMode, MultipartFile file);
 
     DataImportValidationVO confirm(Long jobId);
 }

@@ -150,6 +150,9 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("RETURNED"));
 
+        outboundPayload.put("machineVersion", machineRepository.findById(machine.path("id").asLong())
+                .orElseThrow()
+                .getVersion());
         String orderResponse = mockMvc.perform(post("/api/outbound-orders/vehicle")
                         .header("Authorization", bearer(superToken))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -285,6 +288,7 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("machineId", machine.path("id").asLong());
         payload.put("machineVersion", machine.path("version").asLong());
+        payload.put("warehouseId", machine.path("warehouseId").asLong());
         payload.put("customerId", customer.path("id").asLong());
         payload.put("destination", destination);
         payload.put("monthlyRentalPrice", "3200.00");
@@ -311,6 +315,7 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("machineId", machine.path("id").asLong());
         payload.put("machineVersion", machine.path("version").asLong());
+        payload.put("warehouseId", machine.path("warehouseId").asLong());
         payload.put("customerId", customer.path("id").asLong());
         payload.put("salesDate", "2026-05-27");
         payload.put("settlementPrice", "118000.00");
@@ -352,6 +357,7 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("applicationNumber", "APP-" + unique("apply"));
         payload.put("materialNumber", "MAT-" + unique("material"));
         payload.put("inventoryCount", 1);
+        payload.put("warehouseId", defaultWarehouseId());
         payload.put("remarks", "租赁集成测试数据");
 
         String response = mockMvc.perform(post("/api/inventory")

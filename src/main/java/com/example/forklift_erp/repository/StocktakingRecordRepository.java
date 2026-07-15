@@ -15,6 +15,8 @@ import java.util.Optional;
 @Repository
 public interface StocktakingRecordRepository extends JpaRepository<StocktakingRecord, Long> {
     boolean existsByStocktakingNo(String stocktakingNo);
+    boolean existsByResourceTypeAndResourceId(String resourceType, Long resourceId);
+    boolean existsByWarehouseId(Long warehouseId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from StocktakingRecord s where s.id = :id")

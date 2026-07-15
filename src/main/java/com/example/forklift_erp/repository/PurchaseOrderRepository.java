@@ -15,6 +15,10 @@ import java.util.Optional;
 
 @Repository
 public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, Long> {
+    boolean existsByResourceTypeAndResourceId(String resourceType, Long resourceId);
+
+    boolean existsByWarehouseId(Long warehouseId);
+
     boolean existsBySupplierId(Long supplierId);
 
     boolean existsByPurchaseNo(String purchaseNo);

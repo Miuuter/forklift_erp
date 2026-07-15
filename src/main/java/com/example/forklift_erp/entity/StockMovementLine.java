@@ -51,11 +51,38 @@ public class StockMovementLine {
     @Column(name = "unit_cost", precision = 12, scale = 2)
     private BigDecimal unitCost;
 
+    @Column(name = "unit_revenue", precision = 12, scale = 2)
+    private BigDecimal unitRevenue;
+
+    @Column(name = "line_amount", precision = 14, scale = 2)
+    private BigDecimal lineAmount;
+
+    @Column(name = "cost_amount", precision = 14, scale = 2)
+    private BigDecimal costAmount;
+
+    @Column(name = "stock_lot_id")
+    private Long stockLotId;
+
+    @Column(name = "source_line_id")
+    private Long sourceLineId;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
     @PrePersist
     public void prePersist() {
         this.createdAt = LocalDateTime.now();
+        if (this.unitCost == null) {
+            this.unitCost = BigDecimal.ZERO;
+        }
+        if (this.unitRevenue == null) {
+            this.unitRevenue = BigDecimal.ZERO;
+        }
+        if (this.costAmount == null) {
+            this.costAmount = this.unitCost.multiply(BigDecimal.valueOf(Math.abs(this.quantityDelta == null ? 0 : this.quantityDelta)));
+        }
+        if (this.lineAmount == null) {
+            this.lineAmount = this.unitRevenue.multiply(BigDecimal.valueOf(Math.abs(this.quantityDelta == null ? 0 : this.quantityDelta)));
+        }
     }
 }

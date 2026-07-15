@@ -80,7 +80,13 @@ class StockOperationRecorderTests {
                 eq("actual-user"),
                 eq("repair use"),
                 eq("STOCK_LOG"),
-                eq(17L)
+                eq(17L),
+                eq(null),
+                eq(java.time.LocalDate.now()),
+                eq("OTHER_OUTBOUND"),
+                eq(BigDecimal.ZERO),
+                eq(null),
+                eq(null)
         );
         verify(auditService).record(
                 eq("Part stock"),
@@ -142,7 +148,13 @@ class StockOperationRecorderTests {
                 eq("actual-user"),
                 eq("stocktaking"),
                 eq("STOCKTAKING"),
-                eq(99L)
+                eq(99L),
+                eq(null),
+                eq(java.time.LocalDate.now()),
+                eq("OTHER_INBOUND"),
+                eq(BigDecimal.ZERO),
+                eq(null),
+                eq(null)
         );
     }
 }

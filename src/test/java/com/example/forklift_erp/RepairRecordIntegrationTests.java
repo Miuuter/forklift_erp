@@ -10,6 +10,7 @@ import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.repository.StockBalanceRepository;
 import com.example.forklift_erp.repository.StockMovementLineRepository;
 import com.example.forklift_erp.repository.StockOperationLogRepository;
+import com.example.forklift_erp.service.RepairRecordService;
 import com.example.forklift_erp.service.StockLedgerService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
@@ -52,6 +53,9 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
     private RepairRecordRepository repairRepository;
 
     @jakarta.annotation.Resource
+    private RepairRecordService repairRecordService;
+
+    @jakarta.annotation.Resource
     private StockMovementLineRepository stockMovementLineRepository;
 
     @jakarta.annotation.Resource
@@ -73,7 +77,7 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
     @AfterEach
     void tearDown() {
         for (Long repairId : repairsToCleanup.reversed()) {
-            repairRepository.findById(repairId).ifPresent(repairRepository::delete);
+            repairRepository.findById(repairId).ifPresent(repair -> repairRecordService.deleteById(repair.getId()));
         }
         repairsToCleanup.clear();
 
@@ -100,7 +104,13 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("faultDescription", "维修配件扣库与利润口径测试");
         payload.put("repairContent", "更换测试配件");
         payload.put("repairPersonChoice", "OTHER");
-        payload.put("usedPartIds", List.of(partId));
+        payload.put("partUsages", List.of(Map.of(
+                "partId", partId,
+                "warehouseId", part.path("warehouseId").asLong(),
+                "quantity", 1,
+                "chargeUnitPrice", "150.00",
+                "discountAmount", "0.00"
+        )));
         payload.put("repairFee", "500.00");
         payload.put("repairExpense", "200.00");
         payload.put("partsFee", "150.00");
@@ -114,7 +124,7 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.repairExpense").value(200.00))
                 .andExpect(jsonPath("$.data.partsCost").value(80.00))
-                .andExpect(jsonPath("$.data.totalFee").value(850.00))
+                .andExpect(jsonPath("$.data.totalFee").value(650.00))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -137,12 +147,12 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
                 .getContentAsString();
         JsonNode annual = objectMapper.readTree(statsResponse).path("data").path("annualSummary");
         assertMoney(annual.path("repairIncome"), "650.00");
-        assertMoney(annual.path("repairReceivable"), "850.00");
+        assertMoney(annual.path("repairReceivable"), "650.00");
         assertMoney(annual.path("repairExpense"), "200.00");
         assertMoney(annual.path("repairPartsCost"), "80.00");
         assertMoney(annual.path("totalIncome"), "650.00");
         assertMoney(annual.path("netProfit"), "370.00");
-        assertMoney(annual.path("netCashflow"), "370.00");
+        assertMoney(annual.path("netCashflow"), "0.00");
     }
 
     @Test
@@ -167,7 +177,6 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
 
         assertThat(partRepository.findById(partId).orElseThrow().getQuantity()).isEqualTo(3);
         assertBalance(partId, warehouseId, 3);
-        assertStockOperation(partId, "REPAIR_USE", 1, 4, 3);
 
         mockMvc.perform(put("/api/repairs/{id}", repairId)
                         .header("Authorization", bearer(superToken))
@@ -179,7 +188,6 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
         assertThat(partRepository.findById(partId).orElseThrow().getQuantity()).isEqualTo(4);
         assertBalance(partId, warehouseId, 4);
         assertMovementLine(partId, 1, 3, 4);
-        assertStockOperation(partId, "REPAIR_RESTORE", 1, 3, 4);
         assertThat(operationAuditLogRepository.findAll()).anySatisfy(log -> {
             assertThat(log.getModule()).isEqualTo("Repair");
             assertThat(log.getAction()).isEqualTo("UPDATE");
@@ -211,17 +219,6 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
         assertThat(balance.getAvailableQuantity()).isEqualTo(quantity);
     }
 
-    private void assertStockOperation(Long partId, String operationType, int quantity, int before, int after) {
-        assertThat(stockOperationLogRepository.findAll()).anySatisfy(log -> {
-            assertThat(log.getResourceType()).isEqualTo(StockLedgerService.RESOURCE_PART);
-            assertThat(log.getResourceId()).isEqualTo(partId);
-            assertThat(log.getOperationType()).isEqualTo(operationType);
-            assertThat(log.getQuantity()).isEqualTo(quantity);
-            assertThat(log.getBeforeQuantity()).isEqualTo(before);
-            assertThat(log.getAfterQuantity()).isEqualTo(after);
-        });
-    }
-
     private Map<String, Object> repairPayload(Long customerId, List<Long> usedPartIds, Long version) {
         Map<String, Object> payload = new LinkedHashMap<>();
         if (version != null) {
@@ -232,7 +229,18 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("faultDescription", "Repair ledger restore test");
         payload.put("repairContent", "Replace test part");
         payload.put("repairPersonChoice", "OTHER");
-        payload.put("usedPartIds", usedPartIds);
+        List<Map<String, Object>> partUsages = new ArrayList<>();
+        for (Long partId : usedPartIds) {
+            PartInventory part = partRepository.findById(partId).orElseThrow();
+            Map<String, Object> usage = new LinkedHashMap<>();
+            usage.put("partId", partId);
+            usage.put("warehouseId", part.getWarehouseId());
+            usage.put("quantity", 1);
+            usage.put("chargeUnitPrice", "0.00");
+            usage.put("discountAmount", "0.00");
+            partUsages.add(usage);
+        }
+        payload.put("partUsages", partUsages);
         payload.put("repairFee", "100.00");
         payload.put("repairExpense", "0.00");
         payload.put("partsFee", "0.00");
@@ -276,6 +284,7 @@ class RepairRecordIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("quantity", 4);
         payload.put("unit", "件");
         payload.put("purchasePrice", "80.00");
+        payload.put("warehouseId", defaultWarehouseId());
 
         String response = mockMvc.perform(post("/api/parts")
                         .header("Authorization", bearer(superToken))

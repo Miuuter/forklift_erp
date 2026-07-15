@@ -5,6 +5,7 @@ import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.dto.PartInventoryCreateDTO;
 import com.example.forklift_erp.dto.PartInventoryVO;
 import com.example.forklift_erp.dto.PartStockAdjustRequestDTO;
+import com.example.forklift_erp.dto.RemovedPartValuationDTO;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.security.PermissionCodes;
 import com.example.forklift_erp.service.PartInventoryService;
@@ -73,6 +74,15 @@ public class PartInventoryController {
     @PreAuthorize(PermissionCodes.HAS_PART_WRITE)
     public Result<PartInventoryVO> update(@PathVariable Long id, @Valid @RequestBody PartInventoryCreateDTO dto) {
         return Result.success("更新成功", partService.update(id, dto));
+    }
+
+    @PutMapping("/{id}/valuation")
+    @PreAuthorize(PermissionCodes.HAS_ADMIN_OR_SUPER_ADMIN)
+    public Result<PartInventoryVO> valueRemovedPart(
+            @PathVariable Long id,
+            @Valid @RequestBody RemovedPartValuationDTO dto
+    ) {
+        return Result.success("旧件估值已确认", partService.valueRemovedPart(id, dto));
     }
 
     @DeleteMapping("/{id}")

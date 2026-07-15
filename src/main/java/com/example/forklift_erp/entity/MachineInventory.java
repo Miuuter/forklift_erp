@@ -87,6 +87,12 @@ public class MachineInventory implements CollaborativeResource {
     @Column(length = 50)
     private String supplier; // 供应商
 
+    @Column(name = "supplier_id")
+    private Long supplierId;
+
+    @Column(name = "supplier_name_snapshot", length = 120)
+    private String supplierNameSnapshot;
+
     @Column(name = "warehouse_name", length = 100)
     private String warehouseName; // 所在仓库 (龙工或二级经销商等)
 
@@ -98,6 +104,9 @@ public class MachineInventory implements CollaborativeResource {
 
     @Column(name = "purchase_price", precision = 12, scale = 2) // 价格类型使用BigDecimal，精度更高
     private BigDecimal purchasePrice;// 采购单价
+
+    @Column(name = "landed_unit_cost", precision = 12, scale = 2)
+    private BigDecimal landedUnitCost;
 
     @Column(name = "sale_price", precision = 12, scale = 2)
     private BigDecimal salePrice; // 销售单价

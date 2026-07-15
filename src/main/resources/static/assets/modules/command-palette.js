@@ -16,7 +16,6 @@ export function createCommandPalette({
   loadCurrentTab,
   loadVehicleDetail,
   renderCurrentTab,
-  scrollToVehicleDetail,
   repairStatusText,
   handleActionError
 }) {
@@ -121,6 +120,7 @@ export function createCommandPalette({
     commandPalette.results.innerHTML = commandPalette.items.length
       ? commandPalette.items.map((item, index) => `
         <button class="command-item${index === commandPalette.activeIndex ? " is-active" : ""}" type="button" data-command-index="${escapeAttr(index)}" role="option" aria-selected="${index === commandPalette.activeIndex ? "true" : "false"}">
+          <span class="command-item-icon" aria-hidden="true">${icons[item.icon] || icons.search}</span>
           <span class="command-item-main">
             <strong>${escapeHtml(item.title)}</strong>
             <span>${escapeHtml(item.detail || item.group || "")}</span>
@@ -144,16 +144,17 @@ export function createCommandPalette({
   function commandItems(query = "") {
     const normalized = normalizeText(query);
     const items = [
-      { group: "日常操作", title: "整车入库", detail: "新车号入库", action: () => openEntityModal("vehicleInbound", vehicleInboundDefaultsForModel({})) },
-      { group: "日常操作", title: "配件入库", detail: "增加配件库存", action: () => openEntityModal("partStock", { direction: "inbound" }) },
-      { group: "日常操作", title: "销售出库", detail: "创建整车出库订单", action: () => openEntityModal("vehicleOutbound", defaultEntity("vehicleOutbound")) },
-      { group: "日常操作", title: "租赁登记", detail: "创建租赁记录", action: () => openEntityModal("rental", defaultEntity("rental")) },
-      { group: "日常操作", title: "维修登记", detail: "创建维修记录", action: () => openEntityModal("repair", defaultEntity("repair")) },
-      { group: "日常操作", title: "库存调拨", detail: "整车或配件转仓", action: () => openEntityModal("stockTransfer", defaultEntity("stockTransfer")) },
+      { group: "日常操作", icon: "inbound", title: "整车入库", detail: "新车号入库", action: () => openEntityModal("vehicleInbound", vehicleInboundDefaultsForModel({})) },
+      { group: "日常操作", icon: "packageIn", title: "配件入库", detail: "增加配件库存", action: () => openEntityModal("partStock", { direction: "inbound" }) },
+      { group: "日常操作", icon: "outbound", title: "销售出库", detail: "创建整车出库订单", action: () => openEntityModal("vehicleOutbound", defaultEntity("vehicleOutbound")) },
+      { group: "日常操作", icon: "rental", title: "租赁登记", detail: "创建租赁记录", action: () => openEntityModal("rental", defaultEntity("rental")) },
+      { group: "日常操作", icon: "repair", title: "维修登记", detail: "创建维修记录", action: () => openEntityModal("repair", defaultEntity("repair")) },
+      { group: "日常操作", icon: "transfer", title: "库存调拨", detail: "整车或配件转仓", action: () => openEntityModal("stockTransfer", defaultEntity("stockTransfer")) },
       ...Object.entries(tabs)
         .filter(([tab]) => canAccessTab(tab))
         .map(([tab, config]) => ({
           group: "模块",
+          icon: commandIconForTab(tab),
           title: config.title,
           detail: config.subtitle,
           action: () => goToTab(tab)
@@ -168,7 +169,6 @@ export function createCommandPalette({
           await loadCurrentTab({ force: true });
           await loadVehicleDetail(row.id);
           renderCurrentTab();
-          scrollToVehicleDetail();
         }
       })),
       ...commandRows("配件", state.data.parts, row => ({
@@ -197,7 +197,41 @@ export function createCommandPalette({
   }
 
   function commandRows(group, rows = [], factory) {
-    return (rows || []).slice(0, 80).map(row => ({ group, ...factory(row) }));
+    return (rows || []).slice(0, 80).map(row => ({ group, icon: commandIconForGroup(group), ...factory(row) }));
+  }
+
+  function commandIconForGroup(group) {
+    return {
+      车辆: "forklift",
+      配件: "package",
+      客户: "customer",
+      订单: "receipt",
+      维修: "repair"
+    }[group] || "search";
+  }
+
+  function commandIconForTab(tab) {
+    return {
+      overview: "dashboard",
+      vehicles: "forklift",
+      parts: "package",
+      modifications: "tools",
+      outboundOrders: "outbound",
+      rentals: "rental",
+      warehouses: "warehouse",
+      repairs: "repair",
+      customers: "customer",
+      suppliers: "supplier",
+      purchases: "purchase",
+      stocktakes: "checklist",
+      stats: "chart",
+      logs: "audit",
+      attachments: "paperclip",
+      imports: "fileUp",
+      configs: "sliders",
+      users: "users",
+      maintenance: "database"
+    }[tab] || "dashboard";
   }
 
   async function goToSearchedTab(tab, searchKey, value) {

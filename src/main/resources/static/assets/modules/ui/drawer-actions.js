@@ -16,10 +16,10 @@ export function createDrawerActions({
 }) {
   function render(kind, item) {
     const actions = {
-      part: rowActions("part", item, ["stockIn", "stockOut", "edit", "delete"]),
+      part: rowActions("part", item, ["valueRemovedPart", "stockIn", "stockOut", "stockAdjustOut", "edit", "delete"]),
       modificationOrder: modificationOrderActions(item),
       outboundOrder: orderActions(item),
-      rental: rowActions("rental", item, ["edit", "delete"]),
+      rental: rentalActions(item),
       customer: `${customerActions(item)}${rowActions("customer", item, ["edit", "delete"])}`,
       supplier: rowActions("supplier", item, ["edit", "delete"]),
       purchaseOrder: purchaseActions(item),
@@ -54,11 +54,15 @@ export function createDrawerActions({
     if (!hasPermission("stock:adjust")) return "";
     const received = item.status === "RECEIVED";
     const receivable = ["ORDERED", "PARTIAL", "ARRIVED"].includes(item.status);
+    const payable = item.status !== "CANCELED";
+    const editableActions = received ? "" : rowActions("purchaseOrder", item, ["edit", "delete"]);
     return `
       <div class="action-row">
         ${received || receivable ? `<button class="btn btn-sm${received ? " btn-ghost" : " btn-primary"}" type="button" data-action="toggle-purchase-received" data-id="${escapeAttr(item.id)}">${icon(received ? "refresh" : "download")}${received ? "撤销收货" : "标记收货"}</button>` : ""}
-        ${received ? `<button class="btn btn-sm" type="button" data-action="purchase-freight" data-id="${escapeAttr(item.id)}">${icon("edit")}修改运费</button>` : ""}
-        ${rowActions("purchaseOrder", item, ["edit", "delete"])}
+        ${payable ? `<button class="btn btn-sm btn-primary" type="button" data-action="record-payment" data-source-type="PURCHASE_ORDER" data-source-id="${escapeAttr(item.id)}" data-direction="PAYMENT">${icon("money")}登记付款</button>` : ""}
+        <button class="btn btn-sm" type="button" data-action="reverse-payment" data-source-type="PURCHASE_ORDER" data-source-id="${escapeAttr(item.id)}">${icon("refresh")}付款冲销</button>
+        ${!received ? `<button class="btn btn-sm" type="button" data-action="purchase-freight" data-id="${escapeAttr(item.id)}">${icon("edit")}修改运费</button>` : ""}
+        ${editableActions}
       </div>
     `;
   }
@@ -67,7 +71,21 @@ export function createDrawerActions({
     return `
       <div class="action-row">
         ${hasPermission("repair:write") ? `<button class="btn btn-sm${item.status === "COMPLETED" ? " btn-ghost" : " btn-primary"}" type="button" data-action="toggle-repair-status" data-id="${escapeAttr(item.id)}">${icon("swap")}${item.status === "COMPLETED" ? "恢复待处理" : "标记完成"}</button>` : ""}
+        ${item.status === "COMPLETED" && hasPermission("stock:adjust") ? `<button class="btn btn-sm btn-primary" type="button" data-action="record-payment" data-source-type="REPAIR" data-source-id="${escapeAttr(item.id)}" data-direction="RECEIPT">${icon("money")}登记收款</button>` : ""}
+        ${item.status === "COMPLETED" && item.repairExternal && Number(item.repairExpense || 0) > 0 && hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="record-payment" data-source-type="REPAIR" data-source-id="${escapeAttr(item.id)}" data-direction="PAYMENT">${icon("money")}登记外协付款</button>` : ""}
+        ${item.status === "COMPLETED" && hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="reverse-payment" data-source-type="REPAIR" data-source-id="${escapeAttr(item.id)}">${icon("refresh")}收付款冲销</button>` : ""}
         ${rowActions("repair", item, ["edit", "delete"])}
+      </div>
+    `;
+  }
+
+  function rentalActions(item = {}) {
+    const canDelete = item.status !== "ACTIVE" && !item.financialPosted;
+    return `
+      <div class="action-row">
+        ${item.financialPosted && hasPermission("stock:adjust") ? `<button class="btn btn-sm btn-primary" type="button" data-action="record-rental-payment" data-rental-id="${escapeAttr(item.id)}">${icon("money")}登记租金收款</button>` : ""}
+        ${item.financialPosted && hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="reverse-rental-payment" data-rental-id="${escapeAttr(item.id)}">${icon("refresh")}租金冲销</button>` : ""}
+        ${rowActions("rental", item, canDelete ? ["edit", "delete"] : ["edit"])}
       </div>
     `;
   }

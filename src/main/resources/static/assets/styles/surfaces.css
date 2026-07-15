@@ -18,6 +18,12 @@
   margin-top: 16px;
 }
 
+.grid-two > .surface + .surface,
+.grid-three > .surface + .surface,
+.vehicle-master-detail .surface + .surface {
+  margin-top: 0;
+}
+
 .surface-head {
   display: flex;
   align-items: center;
@@ -617,4 +623,74 @@
 
 .legend-dot.net {
   background: var(--accent);
+}
+
+.repair-part-usage-field {
+  display: grid;
+  gap: 10px;
+}
+
+.repair-part-usage-head,
+.repair-part-usage-row {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+}
+
+.repair-part-usage-head {
+  justify-content: space-between;
+  align-items: center;
+}
+
+.repair-part-usage-list {
+  display: grid;
+  gap: 10px;
+}
+
+.repair-part-usage-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1.5fr) minmax(130px, 1fr) 78px 100px 88px 100px minmax(130px, 1fr) auto;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.repair-part-usage-row label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.repair-part-usage-row select,
+.repair-part-usage-row input,
+.repair-part-usage-row output {
+  width: 100%;
+  min-height: 34px;
+  box-sizing: border-box;
+}
+
+.repair-part-usage-row output {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.repair-part-usage-empty {
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+@media (max-width: 980px) {
+  .repair-part-usage-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

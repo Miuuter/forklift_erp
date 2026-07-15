@@ -50,6 +50,12 @@ public interface ModificationWorkOrderRepository extends JpaRepository<Modificat
 
     List<ModificationWorkOrder> findByMachineIdOrderByCreatedAtDesc(Long machineId);
 
+    boolean existsByMachineIdAndStatusIn(Long machineId, List<String> statuses);
+
+    boolean existsByMachineId(Long machineId);
+
+    boolean existsByWarehouseId(Long warehouseId);
+
     Optional<ModificationWorkOrder> findByWorkOrderNo(String workOrderNo);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)

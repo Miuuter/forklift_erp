@@ -37,6 +37,9 @@ public class RentalRecord implements CollaborativeResource {
     @Column(name = "machine_id", nullable = false)
     private Long machineId;
 
+    @Column(name = "warehouse_id")
+    private Long warehouseId;
+
     @Column(name = "customer_id")
     private Long customerId;
 
@@ -70,8 +73,14 @@ public class RentalRecord implements CollaborativeResource {
     @Column(name = "end_date")
     private LocalDate endDate;
 
+    @Column(name = "return_date")
+    private LocalDate returnDate;
+
     @Column(name = "status", length = 30)
     private String status = STATUS_ACTIVE;
+
+    @Column(name = "financial_posted")
+    private Boolean financialPosted = false;
 
     @Column(name = "operator", length = 50)
     private String operator;

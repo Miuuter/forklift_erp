@@ -1,0 +1,130 @@
+/* Overlay and responsive refinements kept separate to preserve stylesheet limits. */
+
+.modal-card,
+.detail-drawer {
+  box-shadow: 0 28px 70px rgba(15, 30, 44, 0.24);
+}
+
+.btn-icon-only {
+  border-radius: 8px;
+}
+
+.btn-icon-only:hover {
+  color: var(--primary);
+}
+
+@media (max-width: 1320px) {
+  .finance-trend-layout {
+    grid-template-columns: minmax(0, 1.35fr) minmax(350px, 0.85fr);
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+}
+
+@media (max-width: 1180px) {
+  .nav-quick-actions {
+    display: none !important;
+  }
+
+  .sidebar {
+    overflow-x: hidden;
+  }
+
+  .nav-group {
+    gap: 4px;
+    padding: 5px 0;
+  }
+
+  .nav-item {
+    width: 46px;
+    min-height: 38px;
+    display: grid;
+    place-items: center;
+    gap: 0;
+    padding: 0;
+    font-size: 13px;
+  }
+
+  .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .nav-icon {
+    width: 21px;
+    height: 21px;
+    color: #c4d4e1;
+  }
+
+  .nav-item.is-active {
+    box-shadow:
+      inset 3px 0 var(--sidebar-active-line),
+      0 3px 8px rgba(4, 18, 30, 0.18);
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finance-trend-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .finance-inline-report h3 {
+    min-height: 0;
+  }
+
+  .maintenance-guidance {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .maintenance-guidance > .badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+@media (max-height: 760px) {
+  .login-shell {
+    min-height: 560px;
+  }
+
+  .login-showcase {
+    padding-block: 30px 26px;
+  }
+
+  .login-showcase-copy {
+    margin-top: 32px;
+  }
+
+  .login-illustration {
+    min-height: 205px;
+  }
+
+  .login-panel {
+    padding-block: 34px;
+  }
+
+  .login-panel-brand {
+    margin-bottom: 26px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  .summary-card,
+  .surface,
+  .filter-chip,
+  .status-toggle,
+  .vehicle-model-card,
+  .config-item {
+    transition: none;
+  }
+}

@@ -13,6 +13,8 @@ import java.util.List;
 @Repository
 public interface StockMovementLineRepository extends JpaRepository<StockMovementLine, Long> {
     List<StockMovementLine> findByResourceTypeAndResourceIdOrderByCreatedAtDesc(String resourceType, Long resourceId);
+    List<StockMovementLine> findByMovementIdOrderByIdAsc(Long movementId);
+    boolean existsByWarehouseId(Long warehouseId);
 
     @Query("""
             select l from StockMovementLine l

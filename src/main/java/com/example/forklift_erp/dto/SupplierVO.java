@@ -11,6 +11,7 @@ public class SupplierVO {
     private Long version;
     private String supplierName;
     private String supplierType;
+    private Boolean active;
     private String contactName;
     private String contactPhone;
     private String address;
@@ -26,6 +27,7 @@ public class SupplierVO {
         vo.setVersion(entity.getVersion());
         vo.setSupplierName(entity.getSupplierName());
         vo.setSupplierType(entity.getSupplierType());
+        vo.setActive(Boolean.TRUE.equals(entity.getActive()));
         vo.setContactName(entity.getContactName());
         vo.setContactPhone(entity.getContactPhone());
         vo.setAddress(entity.getAddress());

@@ -4,6 +4,7 @@ import com.example.forklift_erp.common.PageResult;
 import com.example.forklift_erp.dto.PartInventoryCreateDTO;
 import com.example.forklift_erp.dto.PartInventoryVO;
 import com.example.forklift_erp.dto.PartStockAdjustRequestDTO;
+import com.example.forklift_erp.dto.RemovedPartValuationDTO;
 import com.example.forklift_erp.entity.PartInventory;
 
 import java.util.List;
@@ -45,6 +46,8 @@ public interface PartInventoryService {
     PartInventoryVO create(PartInventoryCreateDTO dto);
 
     PartInventoryVO update(Long id, PartInventoryCreateDTO dto);
+
+    PartInventoryVO valueRemovedPart(Long id, RemovedPartValuationDTO dto);
 
     void delete(Long id, Long version);
 

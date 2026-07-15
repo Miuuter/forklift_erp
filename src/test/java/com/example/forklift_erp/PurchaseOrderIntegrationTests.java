@@ -2,8 +2,12 @@ package com.example.forklift_erp;
 
 import com.example.forklift_erp.entity.ConfigItem;
 import com.example.forklift_erp.entity.ConfigValue;
+import com.example.forklift_erp.entity.MachineInventory;
+import com.example.forklift_erp.entity.PartInventory;
 import com.example.forklift_erp.repository.ConfigItemRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
+import com.example.forklift_erp.repository.MachineInventoryRepository;
+import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.PurchaseOrderRepository;
 import com.example.forklift_erp.repository.SupplierRepository;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -41,10 +45,18 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
     @Autowired
     private ConfigValueRepository configValueRepository;
 
+    @Autowired
+    private PartInventoryRepository partInventoryRepository;
+
+    @Autowired
+    private MachineInventoryRepository machineInventoryRepository;
+
     private final List<Long> purchaseOrderIdsToCleanup = new ArrayList<>();
     private final List<Long> supplierIdsToCleanup = new ArrayList<>();
     private final List<Long> configValueIdsToCleanup = new ArrayList<>();
     private final List<Long> configItemIdsToCleanup = new ArrayList<>();
+    private final List<Long> partResourceIdsToCleanup = new ArrayList<>();
+    private final List<Long> machineResourceIdsToCleanup = new ArrayList<>();
 
     private String superToken;
 
@@ -76,6 +88,16 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
             configItemRepository.findById(itemId).ifPresent(configItemRepository::delete);
         }
         configItemIdsToCleanup.clear();
+
+        for (Long partId : partResourceIdsToCleanup.reversed()) {
+            partInventoryRepository.findById(partId).ifPresent(partInventoryRepository::delete);
+        }
+        partResourceIdsToCleanup.clear();
+
+        for (Long machineId : machineResourceIdsToCleanup.reversed()) {
+            machineInventoryRepository.findById(machineId).ifPresent(machineInventoryRepository::delete);
+        }
+        machineResourceIdsToCleanup.clear();
     }
 
     @Test
@@ -84,10 +106,13 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
         Long supplierId = createSupplier("配件供应商-" + marker);
         Long configItemId = createConfigItem(marker);
         Long configValueId = createConfigValue(configItemId, marker);
+        Long partResourceId = createPartResource(marker);
+        Long machineResourceId = createMachineResource(marker);
 
         JsonNode partOrder = createPurchaseOrder(Map.of(
                 "supplierId", supplierId,
                 "resourceType", "PART",
+                "resourceId", partResourceId,
                 "configItemId", configItemId,
                 "configValueId", configValueId,
                 "quantity", 2,
@@ -96,21 +121,11 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 "remark", marker
         ));
 
-        JsonNode machineOrder = createPurchaseOrder(Map.of(
-                "supplierName", "整车供应商-" + marker,
-                "resourceType", "MACHINE",
-                "resourceCode", "MACHINE-" + marker,
-                "resourceName", "测试整车-" + marker,
-                "specificationModel", "CPCD30-" + marker,
-                "quantity", 1,
-                "unitPrice", "88000.00",
-                "status", "RECEIVED",
-                "remark", marker
-        ));
+        JsonNode machineOrder = createPurchaseOrder(
+                machineOrderPayload(marker, "ORDERED", supplierId, machineResourceId));
 
         assertThat(partOrder.path("resourceType").asText()).isEqualTo("PART");
         assertThat(machineOrder.path("resourceType").asText()).isEqualTo("MACHINE");
-        assertThat(machineOrder.path("statusBeforeReceived").asText()).isEqualTo("ORDERED");
 
         mockMvc.perform(get("/api/purchase-orders")
                         .header("Authorization", bearer(superToken))
@@ -143,13 +158,16 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
                         .param("resourceType", "MACHINE"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.cards[0].value").value(1))
-                .andExpect(jsonPath("$.data.cards[2].value").value(1));
+                .andExpect(jsonPath("$.data.cards[2].value").value(0));
     }
 
     @Test
     void receiptToggleRestoresPartialStatusAndRejectsCanceledOrders() throws Exception {
         String marker = unique("receipt");
-        Map<String, Object> partialPayload = machineOrderPayload(marker + "-partial", "PARTIAL");
+        Long supplierId = createSupplier("Machine supplier " + marker);
+        Long machineResourceId = createMachineResource(marker);
+        Map<String, Object> partialPayload = machineOrderPayload(
+                marker + "-partial", "PARTIAL", supplierId, machineResourceId);
         JsonNode partialOrder = createPurchaseOrder(partialPayload);
 
         String receivedResponse = mockMvc.perform(put("/api/purchase-orders/{id}/received", partialOrder.path("id").asLong())
@@ -176,7 +194,8 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
         JsonNode restoredOrder = objectMapper.readTree(restoredResponse).path("data");
         assertThat(restoredOrder.path("statusBeforeReceived").isNull()).isTrue();
 
-        Map<String, Object> canceledPayload = machineOrderPayload(marker + "-canceled", "CANCELED");
+        Map<String, Object> canceledPayload = machineOrderPayload(
+                marker + "-canceled", "CANCELED", supplierId, machineResourceId);
         JsonNode canceledOrder = createPurchaseOrder(canceledPayload);
         mockMvc.perform(put("/api/purchase-orders/{id}/received", canceledOrder.path("id").asLong())
                         .header("Authorization", bearer(superToken))
@@ -198,7 +217,10 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
 
     @Test
     void legacyReceivedOrderWithoutHistoryFallsBackToOrdered() throws Exception {
-        JsonNode created = createPurchaseOrder(machineOrderPayload(unique("legacy"), "ORDERED"));
+        String marker = unique("legacy");
+        Long supplierId = createSupplier("Machine supplier " + marker);
+        Long machineResourceId = createMachineResource(marker);
+        JsonNode created = createPurchaseOrder(machineOrderPayload(marker, "ORDERED", supplierId, machineResourceId));
         var legacyOrder = purchaseOrderRepository.findById(created.path("id").asLong()).orElseThrow();
         legacyOrder.setStatus("RECEIVED");
         legacyOrder.setStatusBeforeReceived(null);
@@ -213,18 +235,45 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 .andExpect(jsonPath("$.data.statusBeforeReceived").isEmpty());
     }
 
-    private Map<String, Object> machineOrderPayload(String marker, String status) {
+    private Map<String, Object> machineOrderPayload(String marker, String status, Long supplierId, Long machineResourceId) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("supplierName", "Machine supplier " + marker);
+        payload.put("supplierId", supplierId);
         payload.put("resourceType", "MACHINE");
-        payload.put("resourceCode", "MACHINE-" + marker);
-        payload.put("resourceName", "Test machine " + marker);
-        payload.put("specificationModel", "CPCD30-" + marker);
+        payload.put("resourceId", machineResourceId);
         payload.put("quantity", 1);
         payload.put("unitPrice", "88000.00");
         payload.put("status", status);
         payload.put("remark", marker);
         return payload;
+    }
+
+    private Long createPartResource(String marker) {
+        PartInventory part = new PartInventory();
+        part.setPartCode("PO-PART-" + marker);
+        part.setPartName("配件-" + marker);
+        part.setSpecification("PART-SPEC-" + marker);
+        part.setPartCategory("PURCHASE_TEST");
+        part.setQuantity(0);
+        part.setUnit("件");
+        part.setWarehouseId(defaultWarehouseId());
+        Long id = partInventoryRepository.saveAndFlush(part).getId();
+        partResourceIdsToCleanup.add(id);
+        return id;
+    }
+
+    private Long createMachineResource(String marker) {
+        MachineInventory machine = new MachineInventory();
+        machine.setVehicleProductNumber("PO-MACHINE-" + marker);
+        machine.setName("测试整车-" + marker);
+        machine.setSpecificationModel("CPCD30-" + marker);
+        machine.setMachineType("TEST");
+        machine.setInventoryCount(0);
+        machine.setWarehouseId(defaultWarehouseId());
+        machine.setStockStatus("PENDING_INBOUND");
+        machine.setModelOnly(false);
+        Long id = machineInventoryRepository.saveAndFlush(machine).getId();
+        machineResourceIdsToCleanup.add(id);
+        return id;
     }
 
     private Long createSupplier(String supplierName) throws Exception {
@@ -294,10 +343,12 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
     }
 
     private JsonNode createPurchaseOrder(Map<String, Object> payload) throws Exception {
+        Map<String, Object> request = new LinkedHashMap<>(payload);
+        request.putIfAbsent("warehouseId", defaultWarehouseId());
         String response = mockMvc.perform(post("/api/purchase-orders")
                         .header("Authorization", bearer(superToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(payload)))
+                        .content(json(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn()

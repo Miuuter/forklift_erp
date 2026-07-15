@@ -70,7 +70,21 @@ export function display(value) {
 }
 
 export function emptyState(message) {
-  return `<div class="empty-state"><strong>暂无内容</strong><span>${escapeHtml(message)}</span></div>`;
+  return `
+    <div class="empty-state">
+      <span class="empty-state-visual" aria-hidden="true">
+        <svg viewBox="0 0 64 64" fill="none" focusable="false">
+          <path d="M15 23.5 22 13h20l7 10.5V47a4 4 0 0 1-4 4H19a4 4 0 0 1-4-4V23.5Z" stroke="currentColor" stroke-width="3" stroke-linejoin="round"/>
+          <path d="M15 29h11l3 5h6l3-5h11" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M25 20h14M24 43h16" stroke="currentColor" stroke-width="3" stroke-linecap="round" opacity=".62"/>
+          <circle cx="46" cy="17" r="6" fill="currentColor" opacity=".12"/>
+          <path d="M46 13.5v7M42.5 17h7" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
+        </svg>
+      </span>
+      <strong>暂无内容</strong>
+      <span>${escapeHtml(message)}</span>
+    </div>
+  `;
 }
 
 export function escapeHtml(value) {

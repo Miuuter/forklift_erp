@@ -5,6 +5,7 @@ import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.constant.MachineStockStatus;
 import com.example.forklift_erp.constant.ModificationWorkOrderStatus;
 import com.example.forklift_erp.constant.PartChangeAction;
+import com.example.forklift_erp.constant.FinancialEventType;
 import com.example.forklift_erp.dto.ModificationWorkOrderActionDTO;
 import com.example.forklift_erp.dto.ModificationWorkOrderCreateDTO;
 import com.example.forklift_erp.dto.ModificationWorkOrderVO;
@@ -16,6 +17,7 @@ import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.ModificationWorkOrder;
 import com.example.forklift_erp.entity.ModificationWorkOrderLine;
 import com.example.forklift_erp.entity.PartInventory;
+import com.example.forklift_erp.entity.StockLotConsumption;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.MachineConfigRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
@@ -24,11 +26,15 @@ import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.ConfigItemRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
+import com.example.forklift_erp.repository.StockLotConsumptionRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.ConfigReplaceService;
+import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.ModificationWorkOrderService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
+import com.example.forklift_erp.service.StockLedgerService;
+import com.example.forklift_erp.service.StockLotService;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
 import com.example.forklift_erp.util.ListPageSupport;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +44,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -80,6 +87,18 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
 
     @Autowired
     private ResourceVisibilityPolicy visibilityPolicy;
+
+    @Autowired
+    private StockLedgerService stockLedgerService;
+
+    @Autowired
+    private StockLotService stockLotService;
+
+    @Autowired
+    private StockLotConsumptionRepository stockLotConsumptionRepository;
+
+    @Autowired
+    private FinancialEventService financialEventService;
 
     @Override
     @Transactional(readOnly = true)
@@ -128,22 +147,44 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot create modification work order");
         collaborationService.validateWrite(machine, request.getMachineVersion());
-        int machineQuantity = machine.getInventoryCount() == null ? 0 : machine.getInventoryCount();
+        if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot enter a modification work order");
+        }
+        if (!MachineStockStatus.canSell(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle status does not allow a modification work order: " + machine.getStockStatus());
+        }
+        if (workOrderRepository.existsByMachineIdAndStatusIn(
+                machine.getId(),
+                List.of(
+                        ModificationWorkOrderStatus.WAITING_PARTS.code(),
+                        ModificationWorkOrderStatus.IN_PROGRESS.code()
+                ))) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle already has an active modification work order");
+        }
+        Long workOrderWarehouseId = stockLedgerService.resolveWarehouseId(
+                request.getWarehouseId() == null ? machine.getWarehouseId() : request.getWarehouseId());
+        int machineQuantity = stockLedgerService.availableQuantity(
+                StockLedgerService.RESOURCE_MACHINE, machine.getId(), workOrderWarehouseId);
         if (machineQuantity < 1) {
             throw new BusinessException(ResultCode.INSUFFICIENT_STOCK, "Vehicle is not in stock and cannot create modification work order");
         }
 
-        Map<Long, Integer> requestedPartQuantities = new HashMap<>();
+        Map<PartWarehouseKey, Integer> requestedPartQuantities = new HashMap<>();
         Map<Long, PartInventory> parts = new HashMap<>();
         List<ModificationWorkOrderLine> preparedLines = request.getLines().stream()
-                .map(lineRequest -> prepareLine(machine, lineRequest, requestedPartQuantities, parts))
+                .map(lineRequest -> prepareLine(
+                        machine, lineRequest, workOrderWarehouseId, requestedPartQuantities, parts))
                 .toList();
-        requestedPartQuantities.forEach((partId, quantity) -> {
-            PartInventory part = parts.get(partId);
-            int available = part.getQuantity() == null ? 0 : part.getQuantity();
+        requestedPartQuantities.forEach((key, quantity) -> {
+            PartInventory part = parts.get(key.partId());
+            int available = stockLedgerService.availableQuantity(
+                    StockLedgerService.RESOURCE_PART, key.partId(), key.warehouseId());
             if (available < quantity) {
                 throw new BusinessException(ResultCode.INSUFFICIENT_STOCK,
-                        "Part stock is insufficient: " + part.getPartName() + ", required " + quantity + ", available " + available);
+                        "Part stock is insufficient in selected warehouse: " + part.getPartName()
+                                + ", required " + quantity + ", available " + available);
             }
         });
 
@@ -152,6 +193,9 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         workOrder.setMachineId(machine.getId());
         workOrder.setCustomerName(blankToNull(request.getCustomerName()));
         workOrder.setSalesOrderNo(blankToNull(request.getSalesOrderNo()));
+        workOrder.setWorkOrderType(blankToDefault(request.getWorkOrderType(), "PRE_SALE").toUpperCase(Locale.ROOT));
+        workOrder.setWarehouseId(workOrderWarehouseId);
+        workOrder.setBusinessDate(request.getBusinessDate() == null ? LocalDate.now() : request.getBusinessDate());
         workOrder.setOperator(blankToNull(request.getOperator()));
         workOrder.setRemark(blankToNull(request.getRemark()));
         workOrder.setStatus(ModificationWorkOrderStatus.WAITING_PARTS.code());
@@ -215,12 +259,37 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             replaceRequest.setNewPartVersion(resolvedLine.part().getVersion());
             replaceRequest.setQuantity(line.getQuantity());
             replaceRequest.setOldPartAction(line.getOldPartAction());
+            replaceRequest.setOldPartDisposition(line.getOldPartDisposition());
+            replaceRequest.setOldPartWarehouseId(line.getOldPartWarehouseId());
+            replaceRequest.setOldPartCondition(line.getOldPartCondition());
+            replaceRequest.setOldPartValuationSource(line.getOldPartValuationSource());
+            replaceRequest.setOldPartUnitCost(line.getOldPartUnitCost());
+            replaceRequest.setWarehouseId(line.getWarehouseId() == null ? workOrder.getWarehouseId() : line.getWarehouseId());
+            replaceRequest.setBusinessDate(workOrder.getBusinessDate());
+            replaceRequest.setWorkOrderType(workOrder.getWorkOrderType());
             replaceRequest.setOperator(operator);
             replaceRequest.setRemark(joinRemark("Modification work order " + workOrder.getWorkOrderNo(), line.getRemark(), actionRemark));
             replaceRequest.setStockMovementSourceType(MOVEMENT_SOURCE_TYPE);
             replaceRequest.setStockMovementSourceId(workOrder.getId());
+            replaceRequest.setStockMovementSourceLineId(line.getId());
             ConfigReplaceLog replaceLog = configReplaceService.performPartReplace(replaceRequest);
             line.setReplaceLogId(replaceLog.getId());
+            line.setCostAmount(fifoCostForLine(workOrder.getId(), line.getId()));
+            BigDecimal capitalizationAmount = capitalizationAmount(line);
+            if ("PRE_SALE".equalsIgnoreCase(workOrder.getWorkOrderType())
+                    && capitalizationAmount.signum() != 0) {
+                stockLotService.capitalizeSerializedAssetCost(
+                        StockLedgerService.RESOURCE_MACHINE,
+                        workOrder.getMachineId(),
+                        workOrder.getWarehouseId(),
+                        capitalizationAmount,
+                        MOVEMENT_SOURCE_TYPE,
+                        workOrder.getId(),
+                        line.getId(),
+                        workOrder.getBusinessDate(),
+                        "MODIFICATION-CAPITALIZATION:" + workOrder.getId() + ":" + line.getId()
+                );
+            }
             }
             lineRepository.save(line);
         }
@@ -234,9 +303,24 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             workOrder.setRemark(joinRemark(workOrder.getRemark(), actionRemark));
         }
         ModificationWorkOrder savedOrder = workOrderRepository.save(workOrder);
+        postModificationFinancial(savedOrder, lines);
 
         MachineInventory completedMachine = machineRepository.findByIdForUpdate(workOrder.getMachineId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
+        if ("PRE_SALE".equalsIgnoreCase(savedOrder.getWorkOrderType())) {
+            BigDecimal capitalizedCost = lines.stream()
+                    .map(this::capitalizationAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            if (capitalizedCost.signum() != 0) {
+                BigDecimal updatedLandedCost =
+                        amountOrZero(completedMachine.getLandedUnitCost()).add(capitalizedCost);
+                if (updatedLandedCost.signum() < 0) {
+                    throw new BusinessException(ResultCode.CONFLICT,
+                            "Modification would make the vehicle landed cost negative");
+                }
+                completedMachine.setLandedUnitCost(updatedLandedCost);
+            }
+        }
         completedMachine.setStockStatus(MachineStockStatus.PENDING_OUTBOUND.code());
         collaborationService.stampWrite(completedMachine);
         machineRepository.save(completedMachine);
@@ -285,7 +369,8 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
     private ModificationWorkOrderLine prepareLine(
             MachineInventory machine,
             ModificationWorkOrderCreateDTO.Line lineRequest,
-            Map<Long, Integer> requestedPartQuantities,
+            Long workOrderWarehouseId,
+            Map<PartWarehouseKey, Integer> requestedPartQuantities,
             Map<Long, PartInventory> parts
     ) {
         MachineConfig config = machineConfigRepository.findByIdForUpdate(lineRequest.getMachineConfigId())
@@ -319,6 +404,17 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             line.setQuantity(discountQuantity);
             line.setOldPartAction(oldPartAction);
             line.setPriceDifference(amountOrZero(lineRequest.getPriceDifference()));
+            line.setWarehouseId(stockLedgerService.resolveWarehouseId(
+                    lineRequest.getWarehouseId() == null ? workOrderWarehouseId : lineRequest.getWarehouseId()));
+            line.setChargeUnitPrice(amountOrZero(lineRequest.getChargeUnitPrice()));
+            line.setDiscountAmount(amountOrZero(lineRequest.getDiscountAmount()));
+            line.setChargeAmount(chargeAmount(
+                    line.getChargeUnitPrice(), discountQuantity, line.getDiscountAmount()));
+            line.setOldPartDisposition(blankToNull(lineRequest.getOldPartDisposition()));
+            line.setOldPartWarehouseId(lineRequest.getOldPartWarehouseId());
+            line.setOldPartCondition(blankToNull(lineRequest.getOldPartCondition()));
+            line.setOldPartValuationSource(blankToNull(lineRequest.getOldPartValuationSource()));
+            line.setOldPartUnitCost(amountOrNull(lineRequest.getOldPartUnitCost()));
             line.setRemark(blankToNull(lineRequest.getRemark()));
             return line;
         }
@@ -335,7 +431,9 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         if (quantity < 1) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Quantity must be greater than 0");
         }
-        requestedPartQuantities.merge(part.getId(), quantity, Integer::sum);
+        Long lineWarehouseId = stockLedgerService.resolveWarehouseId(
+                lineRequest.getWarehouseId() == null ? workOrderWarehouseId : lineRequest.getWarehouseId());
+        requestedPartQuantities.merge(new PartWarehouseKey(part.getId(), lineWarehouseId), quantity, Integer::sum);
         parts.put(part.getId(), part);
 
         ModificationWorkOrderLine line = new ModificationWorkOrderLine();
@@ -348,8 +446,17 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         line.setNewPartName(part.getPartName());
         line.setNewValue(partDisplayName(part));
         line.setQuantity(quantity);
+        line.setWarehouseId(lineWarehouseId);
         line.setOldPartAction(oldPartAction);
         line.setPriceDifference(amountOrZero(lineRequest.getPriceDifference()));
+        line.setChargeUnitPrice(amountOrZero(lineRequest.getChargeUnitPrice()));
+        line.setDiscountAmount(amountOrZero(lineRequest.getDiscountAmount()));
+        line.setChargeAmount(chargeAmount(line.getChargeUnitPrice(), quantity, line.getDiscountAmount()));
+        line.setOldPartDisposition(blankToNull(lineRequest.getOldPartDisposition()));
+        line.setOldPartWarehouseId(lineRequest.getOldPartWarehouseId());
+        line.setOldPartCondition(blankToNull(lineRequest.getOldPartCondition()));
+        line.setOldPartValuationSource(blankToNull(lineRequest.getOldPartValuationSource()));
+        line.setOldPartUnitCost(amountOrNull(lineRequest.getOldPartUnitCost()));
         line.setRemark(blankToNull(lineRequest.getRemark()));
         return line;
     }
@@ -375,6 +482,9 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
     }
 
     private record ResolvedLine(MachineInventory machine, MachineConfig config, PartInventory part) {
+    }
+
+    private record PartWarehouseKey(Long partId, Long warehouseId) {
     }
 
     private void applyDiscountLine(
@@ -419,16 +529,92 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
                 MOVEMENT_SOURCE_TYPE, workOrder.getId());
     }
 
+    private void postModificationFinancial(ModificationWorkOrder order, List<ModificationWorkOrderLine> lines) {
+        if (Boolean.TRUE.equals(order.getFinancialPosted())) {
+            return;
+        }
+        BigDecimal charge = lines.stream()
+                .map(ModificationWorkOrderLine::getChargeAmount)
+                .map(this::amountOrZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal cost = lines.stream()
+                .map(ModificationWorkOrderLine::getCostAmount)
+                .map(this::amountOrZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal returnedPartValue = lines.stream()
+                .map(this::returnedPartValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        String sourceType = "MODIFICATION_WORK_ORDER";
+        LocalDate date = order.getBusinessDate() == null ? LocalDate.now() : order.getBusinessDate();
+        if ("AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()) && charge.signum() > 0) {
+            financialEventService.post(FinancialEventType.ACCOUNTS_RECEIVABLE, charge, date,
+                    sourceType, order.getId(), null, "CUSTOMER", null, order.getCustomerName(),
+                    "After-sale modification receivable", "MODIFICATION:" + order.getId() + ":AR");
+            financialEventService.post(FinancialEventType.REVENUE, charge, date,
+                    sourceType, order.getId(), null, "CUSTOMER", null, order.getCustomerName(),
+                    "After-sale modification revenue", "MODIFICATION:" + order.getId() + ":REV");
+        }
+        if ("AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()) && cost.signum() > 0) {
+            financialEventService.post(
+                    FinancialEventType.OPERATING_COST,
+                    cost,
+                    date,
+                    sourceType,
+                    order.getId(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    "Modification FIFO cost",
+                    "MODIFICATION:" + order.getId() + ":COST"
+            );
+        }
+        if ("AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()) && returnedPartValue.signum() > 0) {
+            financialEventService.post(
+                    FinancialEventType.INVENTORY_GAIN,
+                    returnedPartValue,
+                    date,
+                    sourceType,
+                    order.getId(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    "Recovered old-part inventory value",
+                    "MODIFICATION:" + order.getId() + ":OLD-PART-RECOVERY"
+            );
+        }
+        order.setFinancialPosted(true);
+        workOrderRepository.save(order);
+    }
+
+    private BigDecimal fifoCostForLine(Long workOrderId, Long workOrderLineId) {
+        return stockLotConsumptionRepository
+                .findBySourceTypeAndSourceIdAndSourceLineIdOrderByIdAsc(
+                        MOVEMENT_SOURCE_TYPE, workOrderId, workOrderLineId)
+                .stream()
+                .filter(consumption -> consumption.getReversalOfConsumptionId() == null)
+                .map(StockLotConsumption::getTotalCost)
+                .map(this::amountOrZero)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
     private void restoreMachineStatusIfNoActiveOrder(Long machineId, Long canceledOrderId) {
-        boolean hasActive = workOrderRepository.findByMachineIdOrderByCreatedAtDesc(machineId).stream()
+        List<ModificationWorkOrder> machineOrders =
+                workOrderRepository.findByMachineIdOrderByCreatedAtDesc(machineId);
+        boolean hasActive = machineOrders.stream()
                 .anyMatch(order -> !order.getId().equals(canceledOrderId)
                         && !ModificationWorkOrderStatus.COMPLETED.code().equals(order.getStatus())
                         && !ModificationWorkOrderStatus.CANCELED.code().equals(order.getStatus()));
         if (hasActive) {
             return;
         }
+        boolean hasCompleted = machineOrders.stream()
+                .anyMatch(order -> ModificationWorkOrderStatus.COMPLETED.code().equals(order.getStatus()));
         machineRepository.findByIdForUpdate(machineId).ifPresent(machine -> {
-            machine.setStockStatus(MachineStockStatus.IN_STOCK.code());
+            machine.setStockStatus(hasCompleted
+                    ? MachineStockStatus.PENDING_OUTBOUND.code()
+                    : MachineStockStatus.IN_STOCK.code());
             collaborationService.stampWrite(machine);
             machineRepository.save(machine);
         });
@@ -459,11 +645,53 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         return PartChangeAction.DISCOUNT.code().equals(line.getOldPartAction());
     }
 
+    private BigDecimal chargeAmount(BigDecimal unitPrice, int quantity, BigDecimal discountAmount) {
+        BigDecimal gross = amountOrZero(unitPrice).multiply(BigDecimal.valueOf(quantity));
+        BigDecimal discount = amountOrZero(discountAmount);
+        if (gross.signum() < 0 || discount.signum() < 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Modification charges and discounts cannot be negative");
+        }
+        if (discount.compareTo(gross) > 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Modification discount cannot exceed the line charge");
+        }
+        return gross.subtract(discount);
+    }
+
+    private BigDecimal capitalizationAmount(ModificationWorkOrderLine line) {
+        return amountOrZero(line.getCostAmount()).subtract(returnedPartValue(line));
+    }
+
+    private BigDecimal returnedPartValue(ModificationWorkOrderLine line) {
+        if (!oldPartReturnsToInventory(line)) {
+            return BigDecimal.ZERO;
+        }
+        int quantity = line.getQuantity() == null || line.getQuantity() < 1 ? 1 : line.getQuantity();
+        BigDecimal unitCost = amountOrZero(line.getOldPartUnitCost());
+        return unitCost.signum() < 0 ? BigDecimal.ZERO : unitCost.multiply(BigDecimal.valueOf(quantity));
+    }
+
+    private boolean oldPartReturnsToInventory(ModificationWorkOrderLine line) {
+        String disposition = blankToNull(line.getOldPartDisposition());
+        if (disposition != null) {
+            disposition = disposition.toUpperCase(Locale.ROOT);
+            if ("SCRAP".equals(disposition) || "DISCARD".equals(disposition) || "NONE".equals(disposition)) {
+                return false;
+            }
+        }
+        return PartChangeAction.STOCK_IN.code().equalsIgnoreCase(line.getOldPartAction());
+    }
+
     private BigDecimal amountOrZero(BigDecimal value) {
         if (value == null) {
             return BigDecimal.ZERO;
         }
         return value;
+    }
+
+    private BigDecimal amountOrNull(BigDecimal value) {
+        return value == null || value.signum() < 0 ? null : value;
     }
 
     private ModificationWorkOrderVO toVO(ModificationWorkOrder workOrder) {

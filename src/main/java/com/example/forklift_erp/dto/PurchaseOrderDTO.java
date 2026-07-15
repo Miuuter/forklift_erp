@@ -20,6 +20,9 @@ public class PurchaseOrderDTO {
     private Long configValueId;
     private String resourceType;
 
+    private Long warehouseId;
+    private Long resourceId;
+
     private String resourceCode;
     private String resourceName;
     private String specificationModel;
@@ -37,6 +40,7 @@ public class PurchaseOrderDTO {
     private BigDecimal freightAmount;
     private LocalDate orderDate;
     private LocalDate expectedArrivalDate;
+    private LocalDate receivedDate;
     private String status;
     private String operator;
     private String remark;

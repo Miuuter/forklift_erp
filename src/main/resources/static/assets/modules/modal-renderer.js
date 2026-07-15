@@ -12,6 +12,7 @@ export function createModalRenderer({
   canSaveAndContinue,
   formWorkspaceConfig,
   confirmDiscard,
+  icon,
   escapeAttr,
   escapeHtml
 }) {
@@ -51,7 +52,7 @@ export function createModalRenderer({
           <h2 class="surface-title" id="${titleId}">${escapeHtml(title)}</h2>
           <div class="helper">${escapeHtml(modalSubtitle(kind))}</div>
         </div>
-        <button class="btn btn-icon-only btn-ghost" type="button" data-close-modal aria-label="关闭表单">×</button>
+        <button class="btn btn-icon-only btn-ghost" type="button" data-close-modal aria-label="关闭表单">${icon("close")}</button>
       </div>
       <form data-kind="${escapeAttr(kind)}" data-form-workspace="${workspace.workspace ? "true" : "false"}">
         <div class="modal-body">

@@ -14,6 +14,7 @@ public class RentalRecordCreateDTO {
     private Long machineId;
 
     private Long machineVersion;
+    private Long warehouseId;
 
     @NotNull(message = "租赁去向不能为空")
     private Long customerId;
@@ -30,6 +31,7 @@ public class RentalRecordCreateDTO {
     private LocalDate startDate;
 
     private LocalDate endDate;
+    private LocalDate returnDate;
 
     private String operator;
 

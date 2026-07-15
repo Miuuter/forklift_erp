@@ -1,4 +1,4 @@
-const CACHE_NAME = "forklift-erp-client-20260713-industrial-ui";
+const CACHE_NAME = "forklift-erp-client-20260715-polish-v2";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -27,7 +27,9 @@ const SHELL_ASSETS = [
   "/assets/modules/ui/drawer-actions.js",
   "/assets/modules/ui/form-workspace.js",
   "/assets/modules/ui/overlay-manager.js",
+  "/assets/modules/ui/shell-decorator.js",
   "/assets/modules/ui/state-utils.js",
+  "/assets/modules/ui/summary-card.js",
   "/assets/modules/workflows/attachments-workflow.js",
   "/assets/modules/workflows/configs-workflow.js",
   "/assets/modules/workflows/imports-workflow.js",
@@ -46,6 +48,8 @@ const SHELL_ASSETS = [
   "/assets/styles/overlays.css",
   "/assets/styles/industrial-ui.css",
   "/assets/styles/responsive.css",
+  "/assets/styles/polish.css",
+  "/assets/styles/polish-responsive.css",
   "/assets/icon.svg",
   "/manifest.webmanifest"
 ];

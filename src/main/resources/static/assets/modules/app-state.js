@@ -80,6 +80,7 @@ export function createInitialState({ token = "", user = null } = {}) {
       stockMovements: [],
       repairs: [],
       statistics: null,
+      dailyReconciliation: null,
       operationLogs: [],
       summaries: {},
       configItems: [],
@@ -120,6 +121,9 @@ export function createInitialState({ token = "", user = null } = {}) {
     },
     selectedVehicleId: null,
     vehicleDetail: null,
+    vehicleDetailLoading: false,
+    pendingVehicleModelKey: "",
+    vehicleDetailScrollTop: 0,
     selectedConfigItemId: null,
     selectedVehicleConfigItemId: null,
     configItemScrollTop: 0,
@@ -135,6 +139,8 @@ export function createInitialState({ token = "", user = null } = {}) {
     statisticsReport: "yearly",
     importValidation: null,
     importSelectedType: "vehicle-workbook",
+    importSelectedMode: "BUSINESS_DOCUMENT",
+    selectedReconciliationDate: "",
     vehicleDetailTab: "archive",
     modal: null
   };

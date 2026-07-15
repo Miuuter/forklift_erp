@@ -17,6 +17,8 @@ public class StocktakingRecordDTO {
     @NotNull(message = "盘点资源不能为空")
     private Long resourceId;
 
+    private Long warehouseId;
+
     @NotNull(message = "实盘数量不能为空")
     @Min(value = 0, message = "实盘数量不能小于0")
     private Integer actualQuantity;

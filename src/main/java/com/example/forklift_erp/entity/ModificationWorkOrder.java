@@ -4,6 +4,7 @@ import com.example.forklift_erp.constant.ModificationWorkOrderStatus;
 import jakarta.persistence.*;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -31,8 +32,20 @@ public class ModificationWorkOrder {
     @Column(name = "sales_order_no", length = 100)
     private String salesOrderNo;
 
+    @Column(name = "work_order_type", length = 30)
+    private String workOrderType = "PRE_SALE";
+
+    @Column(name = "warehouse_id")
+    private Long warehouseId;
+
+    @Column(name = "business_date")
+    private LocalDate businessDate;
+
     @Column(name = "status", nullable = false, length = 30)
     private String status = ModificationWorkOrderStatus.WAITING_PARTS.code();
+
+    @Column(name = "financial_posted")
+    private Boolean financialPosted = false;
 
     @Column(length = 50)
     private String operator;

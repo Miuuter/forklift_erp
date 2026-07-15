@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 @Data
@@ -19,6 +20,9 @@ public class ModificationWorkOrderCreateDTO {
 
     private String customerName;
     private String salesOrderNo;
+    private String workOrderType = "PRE_SALE";
+    private Long warehouseId;
+    private LocalDate businessDate;
     private String operator;
     private String remark;
 
@@ -43,6 +47,14 @@ public class ModificationWorkOrderCreateDTO {
 
         private String oldPartAction = PartChangeAction.STOCK_IN.code();
         private BigDecimal priceDifference = BigDecimal.ZERO;
+        private Long warehouseId;
+        private BigDecimal chargeUnitPrice;
+        private BigDecimal discountAmount = BigDecimal.ZERO;
+        private String oldPartDisposition;
+        private Long oldPartWarehouseId;
+        private String oldPartCondition;
+        private String oldPartValuationSource;
+        private BigDecimal oldPartUnitCost;
         private String remark;
     }
 }

@@ -60,24 +60,24 @@ public class RepairRecordController {
             return Result.success(repairService.findPage(keyword, page, size, machineId, repairPerson, status, startDate, endDate));
         }
         if (machineId != null) {
-            return Result.success(repairService.findByMachineId(machineId).stream().map(RepairRecordVO::fromEntity).toList());
+            return Result.success(repairService.findByMachineId(machineId).stream().map(repairService::toVO).toList());
         }
         if (repairPerson != null) {
-            return Result.success(repairService.findByRepairPerson(repairPerson).stream().map(RepairRecordVO::fromEntity).toList());
+            return Result.success(repairService.findByRepairPerson(repairPerson).stream().map(repairService::toVO).toList());
         }
         if (status != null) {
-            return Result.success(repairService.findByStatus(status).stream().map(RepairRecordVO::fromEntity).toList());
+            return Result.success(repairService.findByStatus(status).stream().map(repairService::toVO).toList());
         }
         if (startDate != null && endDate != null) {
-            return Result.success(repairService.findByDateRange(startDate, endDate).stream().map(RepairRecordVO::fromEntity).toList());
+            return Result.success(repairService.findByDateRange(startDate, endDate).stream().map(repairService::toVO).toList());
         }
-        return Result.success(repairService.findAll().stream().map(RepairRecordVO::fromEntity).toList());
+        return Result.success(repairService.findAll().stream().map(repairService::toVO).toList());
     }
 
     @GetMapping("/{id}")
     public Result<RepairRecordVO> getById(@PathVariable Long id) {
         return repairService.findById(id)
-                .map(RepairRecordVO::fromEntity)
+                .map(repairService::toVO)
                 .map(Result::success)
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Repair record not found"));
     }

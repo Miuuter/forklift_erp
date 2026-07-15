@@ -16,15 +16,28 @@ import com.example.forklift_erp.entity.MachineConfig;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.exception.BusinessException;
+import com.example.forklift_erp.repository.ConfigReplaceLogRepository;
 import com.example.forklift_erp.repository.ConfigItemRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
+import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
+import com.example.forklift_erp.repository.OutboundOrderRepository;
+import com.example.forklift_erp.repository.PartInventoryRepository;
+import com.example.forklift_erp.repository.PurchaseOrderRepository;
+import com.example.forklift_erp.repository.RentalRecordRepository;
+import com.example.forklift_erp.repository.RepairRecordRepository;
+import com.example.forklift_erp.repository.ResourceAttachmentRepository;
+import com.example.forklift_erp.repository.StocktakingRecordRepository;
+import com.example.forklift_erp.repository.StockLotRepository;
+import com.example.forklift_erp.repository.SupplierRepository;
 import com.example.forklift_erp.service.CollaborationService;
+import com.example.forklift_erp.service.InventoryAdjustmentAccountingService;
 import com.example.forklift_erp.service.MachineConfigService;
 import com.example.forklift_erp.service.MachineInventoryService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
 import com.example.forklift_erp.service.StockLedgerService;
+import com.example.forklift_erp.service.StockLotService;
 import com.example.forklift_erp.util.InventoryQuantities;
 import com.example.forklift_erp.util.ListPageSupport;
 import com.example.forklift_erp.util.MoneyValues;
@@ -36,9 +49,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -57,6 +72,15 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
     private StockLedgerService stockLedgerService;
 
     @Autowired
+    private StockLotService stockLotService;
+
+    @Autowired
+    private StockLotRepository stockLotRepository;
+
+    @Autowired
+    private InventoryAdjustmentAccountingService inventoryAdjustmentAccountingService;
+
+    @Autowired
     private MachineConfigService machineConfigService;
 
     @Autowired
@@ -73,6 +97,36 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
 
     @Autowired
     private ResourceVisibilityPolicy visibilityPolicy;
+
+    @Autowired
+    private SupplierRepository supplierRepository;
+
+    @Autowired
+    private PurchaseOrderRepository purchaseOrderRepository;
+
+    @Autowired
+    private OutboundOrderRepository outboundOrderRepository;
+
+    @Autowired
+    private RentalRecordRepository rentalRecordRepository;
+
+    @Autowired
+    private RepairRecordRepository repairRecordRepository;
+
+    @Autowired
+    private ModificationWorkOrderRepository modificationWorkOrderRepository;
+
+    @Autowired
+    private ConfigReplaceLogRepository configReplaceLogRepository;
+
+    @Autowired
+    private PartInventoryRepository partInventoryRepository;
+
+    @Autowired
+    private StocktakingRecordRepository stocktakingRecordRepository;
+
+    @Autowired
+    private ResourceAttachmentRepository resourceAttachmentRepository;
 
     @Override
     public List<MachineInventory> findAll() {
@@ -220,17 +274,21 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
                     : MachineStockStatus.PENDING_INBOUND.code());
         }
         machineInventory.setPurchasePrice(MoneyValues.zeroIfNegative(machineInventory.getPurchasePrice()));
+        machineInventory.setLandedUnitCost(MoneyValues.zeroIfNegative(machineInventory.getLandedUnitCost()));
         machineInventory.setSalePrice(MoneyValues.zeroIfNegative(machineInventory.getSalePrice()));
         machineInventory.setSettlementPrice(MoneyValues.zeroIfNegative(machineInventory.getSettlementPrice()));
+        normalizeSupplier(machineInventory);
 
         collaborationService.stampWrite(machineInventory);
         MachineInventory saved = repository.save(machineInventory);
-        stockLedgerService.reconcileAvailableQuantity(
-                StockLedgerService.RESOURCE_MACHINE,
-                saved.getId(),
-                saved.getWarehouseId(),
-                saved.getInventoryCount()
-        );
+        if (creating) {
+            stockLedgerService.reconcileAvailableQuantity(
+                    StockLedgerService.RESOURCE_MACHINE,
+                    saved.getId(),
+                    saved.getWarehouseId(),
+                    saved.getInventoryCount()
+            );
+        }
         return saved;
     }
 
@@ -240,6 +298,7 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
         MachineInventory saved = save(dto.toEntity());
         int quantity = saved.getInventoryCount() == null ? 0 : saved.getInventoryCount();
         if (quantity > 0) {
+            createInitialLot(saved, quantity, "INITIAL_BALANCE", businessDate(saved.getInboundDate()), "INITIAL-LOT:MACHINE:" + saved.getId());
             saveStockLog(saved, "INITIAL", quantity, 0, quantity, null, "Initial machine stock");
         }
         String summary = Boolean.TRUE.equals(saved.getModelOnly()) ? "Create machine model" : "Create machine";
@@ -255,13 +314,31 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND));
         collaborationService.validateWrite(machine, dto.getVersion());
         int beforeQuantity = machine.getInventoryCount() == null ? 0 : machine.getInventoryCount();
+        Long beforeWarehouseId = machine.getWarehouseId();
+        String beforeStockStatus = machine.getStockStatus();
+        BigDecimal beforePurchasePrice = machine.getPurchasePrice();
+        BigDecimal beforeLandedUnitCost = machine.getLandedUnitCost();
         dto.updateEntity(machine);
-        MachineInventory saved = save(machine);
-        int afterQuantity = saved.getInventoryCount() == null ? 0 : saved.getInventoryCount();
-        if (beforeQuantity != afterQuantity) {
-            saveStockLog(saved, "ADJUST", Math.abs(afterQuantity - beforeQuantity),
-                    beforeQuantity, afterQuantity, null, "Machine stock adjusted from profile edit");
+        if (!Objects.equals(beforeQuantity, machine.getInventoryCount())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Inventory quantity must be changed through an explicit stock adjustment");
         }
+        if (!Objects.equals(beforeWarehouseId, machine.getWarehouseId())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle warehouse must be changed through a warehouse transfer");
+        }
+        if (!Boolean.TRUE.equals(machine.getModelOnly())
+                && !Objects.equals(beforeStockStatus, machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle stock status is managed by inventory workflows and cannot be edited directly");
+        }
+        if (stockLotRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_MACHINE, machine.getId())
+                && (!sameMoney(beforePurchasePrice, machine.getPurchasePrice())
+                || !sameMoney(beforeLandedUnitCost, machine.getLandedUnitCost()))) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Posted vehicle cost cannot be edited directly; create a cost correction or reversal");
+        }
+        MachineInventory saved = save(machine);
         operationAuditService.record("Machine", "UPDATE", "MACHINE", saved.getId(),
                 saved.getVehicleProductNumber(), saved.getName(), "Update machine", null, saved.getRemarks());
         return MachineInventoryVO.fromEntity(saved);
@@ -273,7 +350,6 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
         MachineInventory machine = findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND));
         collaborationService.validateWrite(machine, version);
-        machineConfigService.deleteByMachineId(id);
         deleteById(id);
         operationAuditService.record("Machine", "DELETE", "MACHINE", machine.getId(),
                 machine.getVehicleProductNumber(), machine.getName(), "Delete machine", null, machine.getRemarks());
@@ -327,6 +403,8 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
         }
         int quantity = savedMachine.getInventoryCount() == null ? 0 : savedMachine.getInventoryCount();
         if (quantity > 0) {
+            createInitialLot(savedMachine, quantity, "MACHINE_INBOUND", businessDate(savedMachine.getInboundDate()),
+                    "MACHINE-INBOUND-LOT:" + savedMachine.getId());
             saveStockLog(savedMachine, "INBOUND", quantity, 0, quantity, null, "Machine inbound profile created");
         }
         return MachineInventoryVO.fromEntity(savedMachine);
@@ -395,16 +473,54 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
 
     private void normalizeInventoryCount(MachineInventory machineInventory, boolean creating) {
         Integer inventoryCount = machineInventory.getInventoryCount();
+        if (Boolean.TRUE.equals(machineInventory.getModelOnly())) {
+            machineInventory.setInventoryCount(0);
+            return;
+        }
         if (inventoryCount == null) {
             machineInventory.setInventoryCount(creating ? 1 : 0);
             return;
         }
         InventoryQuantities.requireNonNegative(inventoryCount, "Inventory count cannot be negative");
+        if (creating && inventoryCount > 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "A concrete vehicle is serialized and can only be created with zero or one unit of stock");
+        }
+    }
+
+    static void normalizeAvailableStock(MachineInventory machineInventory) {
+        // Deliberately no-op. A zero balance while marked in stock is a data
+        // quality issue that must be corrected with an explicit adjustment,
+        // never silently turned into a phantom vehicle.
     }
 
     private boolean isManualForklift(String machineType) {
         String normalized = trimToNull(machineType);
         return normalized != null && normalized.contains("手动");
+    }
+
+    private void normalizeSupplier(MachineInventory machine) {
+        if (machine.getSupplierId() != null) {
+            var supplier = supplierRepository.findById(machine.getSupplierId())
+                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Supplier not found"));
+            if (!Boolean.TRUE.equals(supplier.getActive())) {
+                throw new BusinessException(ResultCode.CONFLICT, "Inactive supplier cannot be selected for vehicle inventory");
+            }
+            machine.setSupplierNameSnapshot(supplier.getSupplierName());
+            machine.setSupplier(supplier.getSupplierName());
+            return;
+        }
+        String supplierName = trimToNull(machine.getSupplierNameSnapshot());
+        if (supplierName == null) {
+            supplierName = trimToNull(machine.getSupplier());
+        }
+        if (supplierName != null) {
+            supplierRepository.findBySupplierName(supplierName).ifPresent(supplier -> {
+                machine.setSupplierId(supplier.getId());
+                machine.setSupplierNameSnapshot(supplier.getSupplierName());
+                machine.setSupplier(supplier.getSupplierName());
+            });
+        }
     }
 
     private String trimToNull(String value) {
@@ -434,29 +550,123 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
         }
         MachineInventory existing = existingOpt.get();
         visibilityPolicy.ensureWritable(existing.getIsLocked(), "该记录已被锁定，您无权删除");
+        ensureNoHistoricalReferences(id);
         stockLedgerService.deleteEmptyBalances(StockLedgerService.RESOURCE_MACHINE, id);
+        machineConfigService.deleteByMachineId(id);
         repository.deleteById(id);
+    }
+
+    private void ensureNoHistoricalReferences(Long id) {
+        if (purchaseOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_MACHINE, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has purchase records and cannot be deleted");
+        }
+        if (outboundOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_MACHINE, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has outbound records and cannot be deleted");
+        }
+        if (rentalRecordRepository.existsByMachineId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has rental records and cannot be deleted");
+        }
+        if (repairRecordRepository.existsByMachineId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has repair records and cannot be deleted");
+        }
+        if (modificationWorkOrderRepository.existsByMachineId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has modification records and cannot be deleted");
+        }
+        if (configReplaceLogRepository.existsByMachineId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has configuration replacement records and cannot be deleted");
+        }
+        if (partInventoryRepository.existsBySourceMachineId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle is referenced as the source of a part and cannot be deleted");
+        }
+        if (stocktakingRecordRepository.existsByResourceTypeAndResourceId(
+                StockLedgerService.RESOURCE_MACHINE, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has stocktaking records and cannot be deleted");
+        }
+        if (resourceAttachmentRepository.existsByResourceTypeAndResourceIdAndDeletedFalse(
+                StockLedgerService.RESOURCE_MACHINE, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has active attachments and cannot be deleted");
+        }
+        if (stockLotRepository.existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
+                StockLedgerService.RESOURCE_MACHINE, id, 0)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle has remaining FIFO inventory and cannot be deleted");
+        }
     }
 
     private MachineInventory adjustStock(Long id, StockAdjustRequestDTO request, boolean inbound) {
         MachineInventory machine = findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
-        Integer quantity = request.getQuantity();
-        int current = machine.getInventoryCount() == null ? 0 : machine.getInventoryCount();
-        collaborationService.validateWrite(machine, request.getVersion());
-        InventoryQuantities.QuantityChange change = inbound
-                ? InventoryQuantities.inbound(current, quantity, "Quantity must be greater than 0")
-                : InventoryQuantities.outbound(current, quantity, "Quantity must be greater than 0", "Insufficient vehicle stock: ");
-        machine.setInventoryCount(change.afterQuantity());
-        machine.setStockStatus(change.afterQuantity() > 0 ? MachineStockStatus.IN_STOCK.code()
-                : (inbound ? MachineStockStatus.PENDING_INBOUND.code() : MachineStockStatus.OUTBOUND.code()));
-        if (inbound) {
-            machine.setInboundDate(LocalDateTime.now());
+        if (Boolean.TRUE.equals(machine.getModelOnly())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Vehicle model templates cannot be adjusted as physical stock");
         }
-        MachineInventory saved = save(machine);
-        saveStockLog(saved, inbound ? "INBOUND" : "OUTBOUND", change.quantity(),
-                change.beforeQuantity(), change.afterQuantity(), request.getOperator(), request.getRemark());
-        return saved;
+        if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be adjusted with a normal stock operation");
+        }
+        if (MachineStockStatus.isActiveModification(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "A vehicle in an active modification workflow cannot be adjusted");
+        }
+        Integer quantity = request.getQuantity();
+        if (quantity == null || quantity != 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "A serialized vehicle adjustment must be exactly one unit");
+        }
+        collaborationService.validateWrite(machine, request.getVersion());
+        Long warehouseId = stockLedgerService.resolveWarehouseId(request.getWarehouseId());
+        int before = stockLedgerService.availableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId(), warehouseId);
+        if (inbound && stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId()) > 0) {
+            throw new BusinessException(ResultCode.CONFLICT, "A concrete vehicle cannot have more than one unit of stock");
+        }
+        if (!inbound && before < 1) {
+            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK, "Vehicle is not available in the selected warehouse");
+        }
+        int after = inbound ? before + 1 : before - 1;
+        LocalDate businessDate = request.getBusinessDate() == null ? LocalDate.now() : request.getBusinessDate();
+        BigDecimal unitCost = stockUnitCost(machine);
+        String idempotencyBase = "MACHINE-ADJUST:" + machine.getId() + ":" + request.getVersion()
+                + ":" + businessDate + ":" + (inbound ? "IN" : "OUT");
+        if (inbound) {
+            machine.setInboundDate(businessDate.atStartOfDay());
+        }
+        boolean openingBalance = Boolean.TRUE.equals(request.getOpeningBalance());
+        inventoryAdjustmentAccountingService.post(new InventoryAdjustmentAccountingService.Command(
+                "Machine stock",
+                StockLedgerService.RESOURCE_MACHINE,
+                machine.getId(),
+                machine.getVehicleProductNumber(),
+                machine.getName(),
+                warehouseId,
+                before,
+                after,
+                unitCost,
+                request.getOperator(),
+                explicitAdjustmentRemark(request),
+                openingBalance ? "OPENING_MIGRATION" : "STOCK_ADJUSTMENT",
+                machine.getId(),
+                openingBalance
+                        ? "Opening machine balance"
+                        : inbound ? "Explicit machine inbound adjustment" : "Explicit machine outbound adjustment",
+                businessDate,
+                openingBalance
+                        ? com.example.forklift_erp.constant.StockBusinessType.INITIAL_BALANCE
+                        : com.example.forklift_erp.constant.StockBusinessType.STOCK_ADJUSTMENT,
+                idempotencyBase,
+                !openingBalance
+        ));
+        machine.setWarehouseId(warehouseId);
+        machine.setInventoryCount(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId()));
+        machine.setStockStatus(machine.getInventoryCount() > 0 ? MachineStockStatus.IN_STOCK.code()
+                : (inbound ? MachineStockStatus.PENDING_INBOUND.code() : MachineStockStatus.OUTBOUND.code()));
+        collaborationService.stampWrite(machine);
+        return repository.saveAndFlush(machine);
     }
 
     private StockOperationLog saveStockLog(MachineInventory machine, String operationType, Integer quantity,
@@ -467,7 +677,49 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
     }
 
     private BigDecimal stockUnitCost(MachineInventory machine) {
-        return MoneyValues.firstNonNegativeOrZero(machine.getSettlementPrice(), machine.getPurchasePrice());
+        return MoneyValues.firstNonNegativeOrZero(machine.getLandedUnitCost(), machine.getPurchasePrice());
+    }
+
+    private void createInitialLot(
+            MachineInventory machine,
+            int quantity,
+            String sourceType,
+            LocalDate businessDate,
+            String idempotencyKey
+    ) {
+        if (Boolean.TRUE.equals(machine.getModelOnly()) || quantity <= 0) {
+            return;
+        }
+        stockLotService.createReceiptLot(
+                StockLedgerService.RESOURCE_MACHINE,
+                machine.getId(),
+                machine.getWarehouseId(),
+                quantity,
+                stockUnitCost(machine),
+                BigDecimal.ZERO,
+                sourceType,
+                machine.getId(),
+                null,
+                businessDate,
+                idempotencyKey
+        );
+    }
+
+    private LocalDate businessDate(LocalDateTime dateTime) {
+        return dateTime == null ? LocalDate.now() : dateTime.toLocalDate();
+    }
+
+    private boolean sameMoney(BigDecimal left, BigDecimal right) {
+        return MoneyValues.zeroIfNullOrNegative(left).compareTo(MoneyValues.zeroIfNullOrNegative(right)) == 0;
+    }
+
+    private String explicitAdjustmentRemark(StockAdjustRequestDTO request) {
+        String reason = request.getReason() == null ? "" : request.getReason().trim();
+        String remark = request.getRemark() == null ? "" : request.getRemark().trim();
+        if (reason.isBlank() && remark.isBlank()) {
+            return "Explicit inventory adjustment";
+        }
+        return reason.isBlank() ? remark : remark.isBlank() ? reason : reason + "; " + remark;
     }
 
     private String normalizeModelField(String value) {

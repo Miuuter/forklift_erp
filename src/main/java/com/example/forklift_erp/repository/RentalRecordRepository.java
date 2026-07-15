@@ -115,6 +115,12 @@ public interface RentalRecordRepository extends JpaRepository<RentalRecord, Long
 
     boolean existsByMachineIdAndStatus(Long machineId, String status);
 
+    boolean existsByMachineId(Long machineId);
+
+    boolean existsByCustomerId(Long customerId);
+
+    boolean existsByWarehouseId(Long warehouseId);
+
     long countByStatus(String status);
 
     List<RentalRecord> findByStatusOrderByUpdatedAtDescIdDesc(String status, Pageable pageable);

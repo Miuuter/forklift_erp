@@ -2,6 +2,7 @@ package com.example.forklift_erp.service;
 
 import com.example.forklift_erp.common.PageResult;
 import com.example.forklift_erp.common.ResultCode;
+import com.example.forklift_erp.constant.MachineStockStatus;
 import com.example.forklift_erp.dto.StockTransferDTO;
 import com.example.forklift_erp.dto.WarehouseDTO;
 import com.example.forklift_erp.dto.WarehouseVO;
@@ -12,8 +13,18 @@ import com.example.forklift_erp.entity.StockMovement;
 import com.example.forklift_erp.entity.Warehouse;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
+import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
+import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
+import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
+import com.example.forklift_erp.repository.PurchaseOrderRepository;
+import com.example.forklift_erp.repository.RentalRecordRepository;
+import com.example.forklift_erp.repository.RepairPartUsageRepository;
 import com.example.forklift_erp.repository.StockBalanceRepository;
+import com.example.forklift_erp.repository.StockLotConsumptionRepository;
+import com.example.forklift_erp.repository.StockLotRepository;
+import com.example.forklift_erp.repository.StockMovementLineRepository;
+import com.example.forklift_erp.repository.StocktakingRecordRepository;
 import com.example.forklift_erp.repository.WarehouseRepository;
 import com.example.forklift_erp.util.ListPageSupport;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,6 +34,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -44,7 +57,40 @@ public class WarehouseService {
     private PartInventoryRepository partInventoryRepository;
 
     @Autowired
+    private PurchaseOrderRepository purchaseOrderRepository;
+
+    @Autowired
+    private RentalRecordRepository rentalRecordRepository;
+
+    @Autowired
+    private StocktakingRecordRepository stocktakingRecordRepository;
+
+    @Autowired
+    private ModificationWorkOrderRepository modificationWorkOrderRepository;
+
+    @Autowired
+    private ModificationWorkOrderLineRepository modificationWorkOrderLineRepository;
+
+    @Autowired
+    private RepairPartUsageRepository repairPartUsageRepository;
+
+    @Autowired
+    private OutboundOrderRepository outboundOrderRepository;
+
+    @Autowired
+    private StockMovementLineRepository stockMovementLineRepository;
+
+    @Autowired
+    private StockLotRepository stockLotRepository;
+
+    @Autowired
+    private StockLotConsumptionRepository stockLotConsumptionRepository;
+
+    @Autowired
     private StockLedgerService stockLedgerService;
+
+    @Autowired
+    private StockLotService stockLotService;
 
     @Autowired
     private CollaborationService collaborationService;
@@ -119,12 +165,46 @@ public class WarehouseService {
         if (machineInventoryRepository.countByWarehouseId(id) > 0 || partInventoryRepository.countByWarehouseId(id) > 0) {
             throw new BusinessException(ResultCode.CONFLICT, "Warehouse is used by inventory profiles");
         }
-        boolean hasStock = stockBalanceRepository.findByWarehouseId(id).stream()
-                .anyMatch(balance -> nonZero(balance.getAvailableQuantity())
-                        || nonZero(balance.getReservedQuantity())
-                        || nonZero(balance.getLockedQuantity()));
-        if (hasStock) {
-            throw new BusinessException(ResultCode.CONFLICT, "Warehouse still has stock balance");
+        List<StockBalance> balances = stockBalanceRepository.findByWarehouseId(id);
+        if (!balances.isEmpty()) {
+            boolean hasStock = balances.stream()
+                    .anyMatch(balance -> nonZero(balance.getAvailableQuantity())
+                            || nonZero(balance.getReservedQuantity())
+                            || nonZero(balance.getLockedQuantity()));
+            throw new BusinessException(ResultCode.CONFLICT, hasStock
+                    ? "Warehouse still has stock balance"
+                    : "Warehouse has inventory ledger history and cannot be deleted");
+        }
+        if (purchaseOrderRepository.existsByWarehouseId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse is referenced by purchase orders and cannot be deleted");
+        }
+        if (rentalRecordRepository.existsByWarehouseId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse is referenced by rental records and cannot be deleted");
+        }
+        if (stocktakingRecordRepository.existsByWarehouseId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse is referenced by stocktaking records and cannot be deleted");
+        }
+        if (modificationWorkOrderRepository.existsByWarehouseId(id)
+                || modificationWorkOrderLineRepository.existsByWarehouseIdOrOldPartWarehouseId(id, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse is referenced by modification work orders and cannot be deleted");
+        }
+        if (repairPartUsageRepository.existsByWarehouseId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse is referenced by repair material usage and cannot be deleted");
+        }
+        if (outboundOrderRepository.existsBySourceWarehouseId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse is referenced by outbound orders and cannot be deleted");
+        }
+        if (stockMovementLineRepository.existsByWarehouseId(id)
+                || stockLotRepository.existsByWarehouseId(id)
+                || stockLotConsumptionRepository.existsByWarehouseId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Warehouse has inventory ledger or FIFO history and cannot be deleted");
         }
         warehouseRepository.delete(warehouse);
         operationAuditService.record("Warehouse", "DELETE", "WAREHOUSE", id,
@@ -146,6 +226,27 @@ public class WarehouseService {
         return enrichOne(target);
     }
 
+    @Transactional(readOnly = true)
+    public int availableQuantity(String resourceType, Long resourceId, Long warehouseId) {
+        String normalizedType = normalizeResourceType(resourceType);
+        if (resourceId == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Resource ID is required");
+        }
+        Long resolvedWarehouseId = stockLedgerService.resolveWarehouseId(warehouseId);
+        if (StockLedgerService.RESOURCE_MACHINE.equals(normalizedType)) {
+            if (!machineInventoryRepository.existsById(resourceId)) {
+                throw new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found");
+            }
+        } else if (StockLedgerService.RESOURCE_PART.equals(normalizedType)) {
+            if (!partInventoryRepository.existsById(resourceId)) {
+                throw new BusinessException(ResultCode.PART_NOT_FOUND, "Part not found");
+            }
+        } else {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Unsupported resource type: " + resourceType);
+        }
+        return stockLedgerService.availableQuantity(normalizedType, resourceId, resolvedWarehouseId);
+    }
+
     private void transferMachine(StockTransferDTO request) {
         MachineInventory machine = machineInventoryRepository.findByIdForUpdate(request.getResourceId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
@@ -154,11 +255,27 @@ public class WarehouseService {
         if (Boolean.TRUE.equals(machine.getModelOnly())) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Model templates cannot be transferred");
         }
+        if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be transferred");
+        }
+        if (!MachineStockStatus.canTransfer(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle status does not allow warehouse transfer: " + machine.getStockStatus());
+        }
+        if (request.getQuantity() == null || request.getQuantity() != 1) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "A serialized vehicle must be transferred as exactly one unit");
+        }
         int currentQuantity = machine.getInventoryCount() == null ? 0 : machine.getInventoryCount();
+        if (currentQuantity > 1) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Concrete vehicle inventory is invalid (greater than one); create an explicit correction before transfer");
+        }
         if (Objects.equals(machine.getWarehouseId(), request.getFromWarehouseId())) {
             ensureBalanceIfMissing(StockLedgerService.RESOURCE_MACHINE, machine.getId(),
                     request.getFromWarehouseId(), currentQuantity);
         }
+        int sourceAvailableBeforeTransfer = stockLedgerService.availableQuantity(
+                StockLedgerService.RESOURCE_MACHINE, machine.getId(), request.getFromWarehouseId());
         StockMovement movement = stockLedgerService.transferBalance(
                 StockLedgerService.RESOURCE_MACHINE,
                 machine.getId(),
@@ -171,6 +288,17 @@ public class WarehouseService {
                 request.getRemark(),
                 "STOCK_TRANSFER",
                 machine.getId()
+        );
+        stockLotService.transferFifo(
+                StockLedgerService.RESOURCE_MACHINE,
+                machine.getId(),
+                request.getFromWarehouseId(),
+                request.getToWarehouseId(),
+                request.getQuantity(),
+                machineCost(machine),
+                sourceAvailableBeforeTransfer,
+                movement.getId(),
+                LocalDate.now()
         );
         if (Objects.equals(currentQuantity, request.getQuantity())) {
             Warehouse target = warehouseRepository.findById(request.getToWarehouseId())
@@ -195,6 +323,8 @@ public class WarehouseService {
         if (Objects.equals(part.getWarehouseId(), request.getFromWarehouseId())) {
             ensureBalanceIfMissing(StockLedgerService.RESOURCE_PART, part.getId(), request.getFromWarehouseId(), currentQuantity);
         }
+        int sourceAvailableBeforeTransfer = stockLedgerService.availableQuantity(
+                StockLedgerService.RESOURCE_PART, part.getId(), request.getFromWarehouseId());
         StockMovement movement = stockLedgerService.transferBalance(
                 StockLedgerService.RESOURCE_PART,
                 part.getId(),
@@ -207,6 +337,17 @@ public class WarehouseService {
                 request.getRemark(),
                 "STOCK_TRANSFER",
                 part.getId()
+        );
+        stockLotService.transferFifo(
+                StockLedgerService.RESOURCE_PART,
+                part.getId(),
+                request.getFromWarehouseId(),
+                request.getToWarehouseId(),
+                request.getQuantity(),
+                partCost(part),
+                sourceAvailableBeforeTransfer,
+                movement.getId(),
+                LocalDate.now()
         );
         if (Objects.equals(currentQuantity, request.getQuantity())) {
             part.setWarehouseId(request.getToWarehouseId());
@@ -321,5 +462,19 @@ public class WarehouseService {
 
     private int value(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private BigDecimal partCost(PartInventory part) {
+        if (part.getLandedUnitCost() != null && part.getLandedUnitCost().signum() >= 0) {
+            return part.getLandedUnitCost();
+        }
+        return part.getPurchasePrice() == null ? BigDecimal.ZERO : part.getPurchasePrice().max(BigDecimal.ZERO);
+    }
+
+    private BigDecimal machineCost(MachineInventory machine) {
+        if (machine.getLandedUnitCost() != null && machine.getLandedUnitCost().signum() >= 0) {
+            return machine.getLandedUnitCost();
+        }
+        return machine.getPurchasePrice() == null ? BigDecimal.ZERO : machine.getPurchasePrice().max(BigDecimal.ZERO);
     }
 }

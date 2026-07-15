@@ -19,6 +19,8 @@ import { createDataTable } from "./modules/ui/data-table.js";
 import { buildFormWorkspaceConfig } from "./modules/ui/form-workspace.js";
 import { createActionRegistry } from "./modules/ui/action-registry.js";
 import { createDrawerActions } from "./modules/ui/drawer-actions.js";
+import { decorateShell, syncUserShell } from "./modules/ui/shell-decorator.js";
+import { createSummaryCardRenderer } from "./modules/ui/summary-card.js";
 import { ensureVehicleDetailTab as normalizeVehicleDetailTab, VEHICLE_DETAIL_TABS } from "./modules/ui/state-utils.js";
 import { createAttachmentWorkflow } from "./modules/workflows/attachments-workflow.js";
 import { createImportWorkflow } from "./modules/workflows/imports-workflow.js";
@@ -32,6 +34,7 @@ import { createVehicleWorkflow } from "./modules/workflows/vehicle-workflow.js";
 import { createConfigWorkflow } from "./modules/workflows/configs-workflow.js";
 import { createOperationsWorkflow } from "./modules/workflows/operations-workflow.js";
 import { createDownloadActions } from "./modules/downloads.js";
+import { createVehicleDetailLoader } from "./modules/vehicle-detail-loader.js";
 
 const LIST_STATE_STORAGE_KEY = "forklift-erp:list-state:v1";
 const DETAIL_DRAWER_TRANSITION_MS = 240;
@@ -45,6 +48,7 @@ const state = createInitialState({
 restorePersistedListState();
 
 const api = createApiClient(() => state.token);
+const summaryCard = createSummaryCardRenderer({ icons, escapeAttr, escapeHtml });
 
 let els;
 let searchReloadTimer = null;
@@ -68,6 +72,7 @@ const dataTable = createDataTable({
   escapeAttr,
   escapeHtml,
   display,
+  icon,
   renderEmptyState: emptyState,
   createListEmptyState,
   entityLabel,
@@ -84,12 +89,29 @@ const {
   renderSelectableAttrs
 } = dataTable;
 
+const {
+  clearVehicleSelection,
+  loadVehicleDetail,
+  loadVehicleModelDetail
+} = createVehicleDetailLoader({
+  state,
+  api,
+  hasPermission,
+  sortById,
+  fetchVehicleModelVehicles,
+  modelSummaryForKey,
+  decodeVehicleModelKey,
+  ensureVehicleDetailTab: () => normalizeVehicleDetailTab(state),
+  renderCurrentTab
+});
+
 const entityActionRegistry = createActionRegistry({
   escapeAttr,
   escapeHtml,
   icon,
   canWriteEntity,
-  hasPermission
+  hasPermission,
+  hasAnyRole
 });
 
 const {
@@ -114,6 +136,7 @@ const {
   loadCurrentTab,
   loadPagedTab,
   loadStatistics,
+  loadDailyReconciliation,
   loadTodoCenter,
   loadVehicleModelData
 } = createDataLoaders({
@@ -127,6 +150,7 @@ const {
   sortById,
   sortLogs,
   prepareVehicleModelSummary,
+  todayInputDate,
   loadVehicleDetail,
   loadVehicleModelDetail,
   renderCurrentTab,
@@ -234,6 +258,7 @@ const userWorkflow = createUserWorkflow({
   state,
   api,
   endpoints,
+  openEntityModal,
   markReferenceDataStale,
   refreshAfterMutation,
   renderCurrentTab,
@@ -292,6 +317,7 @@ const {
 } = importWorkflow;
 
 const {
+  openUserJobTag,
   toggleUserJobTag,
   toggleUserEnabled,
   renderUsers,
@@ -338,8 +364,10 @@ const fields = createFields({
   jobTagOptions,
   rentalStatusOptions,
   purchaseConfigValueOptions,
+  purchaseResourceOptions,
   purchaseSpecificationModelOptions,
   purchaseStatusOptions,
+  paymentReversalOptions,
   stocktakingResourceTypeOptions,
   stocktakingResourceOptions,
   stocktakingStatusOptions,
@@ -363,6 +391,7 @@ const partsWorkflow = createPartsWorkflow({
   renderToolbar,
   partFilterControls,
   hasPermission,
+  hasAnyRole,
   icon,
   renderExportableSurface,
   renderTable,
@@ -533,15 +562,14 @@ const vehicleWorkflow = createVehicleWorkflow({
   yesNoFromText,
   yesNoText,
   renderToolbar,
-  renderExportableSurface,
   renderSurface,
   renderTable,
   renderDetailGrid,
   detailItem,
-  listTableOptions,
   renderPagination,
   filterButtonGroup,
   hasPermission,
+  hasAnyRole,
   icon,
   escapeAttr,
   escapeHtml,
@@ -667,6 +695,7 @@ const { closeModal, requestCloseModal, renderModal } = createModalRenderer({
     impact: "当前表单中尚未保存的输入将丢失。",
     confirmText: "放弃修改"
   }),
+  icon,
   escapeAttr,
   escapeHtml
 });
@@ -700,6 +729,7 @@ const { openDetailDrawer, closeDetailDrawer, renderDetailDrawer } = createDetail
   detailFields,
   renderDetailGrid,
   renderDetailDrawerActions: drawerActions.render,
+  icon,
   escapeHtml
 });
 
@@ -721,7 +751,6 @@ const { openCommandPalette, closeCommandPalette } = createCommandPalette({
   loadCurrentTab,
   loadVehicleDetail,
   renderCurrentTab,
-  scrollToVehicleDetail,
   repairStatusText,
   handleActionError
 });
@@ -737,10 +766,13 @@ document.addEventListener("DOMContentLoaded", () => {
     pageTitle: document.getElementById("pageTitle"),
     pageSubtitle: document.getElementById("pageSubtitle"),
     currentUser: document.getElementById("currentUser"),
+    currentUserRole: document.getElementById("currentUserRole"),
+    userAvatar: document.getElementById("userAvatar"),
     globalSearchBtn: document.getElementById("globalSearchBtn"),
     newBusinessBtn: document.getElementById("newBusinessBtn"),
     newBusinessMenu: document.getElementById("newBusinessMenu"),
     userMenuBtn: document.getElementById("userMenuBtn"),
+    userMenuChevron: document.querySelector("[data-user-menu-chevron]"),
     userMenu: document.getElementById("userMenu"),
     switchUserBtn: document.getElementById("switchUserBtn"),
     logoutBtn: document.getElementById("logoutBtn"),
@@ -752,6 +784,7 @@ document.addEventListener("DOMContentLoaded", () => {
     toastHost: document.getElementById("toastHost")
   };
 
+  decorateShell({ els, icons, escapeHtml });
   els.loginForm.addEventListener("submit", handleLogin);
   els.globalSearchBtn.addEventListener("click", openCommandPalette);
   els.newBusinessBtn.addEventListener("click", () => toggleTopbarMenu(els.newBusinessBtn, els.newBusinessMenu));
@@ -961,8 +994,7 @@ function showLogin() {
 function logout(message) {
   state.token = "";
   state.user = null;
-  state.vehicleDetail = null;
-  state.selectedVehicleId = null;
+  clearVehicleSelection();
   state.detailDrawer = null;
   state.batchModes = {};
   state.batchSelections = {};
@@ -987,52 +1019,18 @@ function restoreVehicleConfigItemScroll() {
   });
 }
 
-async function loadVehicleDetail(id, shouldRender = true) {
-  state.selectedVehicleId = Number(id);
-  ensureVehicleDetailTab();
-  const [detail, logs, workOrders, parts] = await Promise.all([
-    api(`/api/inventory/${id}/detail`),
-    api(`/api/replace/machine/${id}`),
-    hasPermission("replace:write") ? api(`/api/modification-work-orders/machine/${id}`) : Promise.resolve([]),
-    api(`/api/parts/sourceMachine/${id}`)
-  ]);
-  state.vehicleDetail = { ...detail, logs: sortById(logs), workOrders: sortById(workOrders), parts: sortById(parts) };
-  if (shouldRender) renderCurrentTab();
+function rememberVehicleDetailScroll() {
+  const body = els.content.querySelector(".vehicle-detail-pane > .surface > .surface-body");
+  state.vehicleDetailScrollTop = body ? body.scrollTop : 0;
 }
 
-async function loadVehicleModelDetail(modelKey, selectedMachineId = null, shouldRender = true) {
-  ensureVehicleDetailTab();
-  const vehicles = await fetchVehicleModelVehicles(modelKey);
-  const model = modelSummaryForKey(modelKey) || { ...decodeVehicleModelKey(modelKey), modelKey, vehicles };
-  const selectedId = Number(selectedMachineId || state.selectedVehicleId || vehicles[0]?.id || 0);
-  const selected = vehicles.find(vehicle => Number(vehicle.id) === selectedId) || vehicles[0];
-  if (!selected) {
-    state.selectedVehicleId = null;
-    state.vehicleDetail = {
-      modelKey,
-      model,
-      vehicles,
-      selectedMachineId: null,
-      selectedDetail: { machine: null, configs: [], logs: [], workOrders: [] }
-    };
-    if (shouldRender) renderCurrentTab();
-    return;
-  }
-  state.selectedVehicleId = Number(selected.id);
-  const [detail, logs, workOrders, parts] = await Promise.all([
-    api(`/api/inventory/${selected.id}/detail`),
-    api(`/api/replace/machine/${selected.id}`),
-    hasPermission("replace:write") ? api(`/api/modification-work-orders/machine/${selected.id}`) : Promise.resolve([]),
-    api(`/api/parts/sourceMachine/${selected.id}`)
-  ]);
-  state.vehicleDetail = {
-    modelKey,
-    model,
-    vehicles,
-    selectedMachineId: Number(selected.id),
-    selectedDetail: { ...detail, logs: sortById(logs), workOrders: sortById(workOrders), parts: sortById(parts) }
-  };
-  if (shouldRender) renderCurrentTab();
+function restoreVehicleDetailScroll() {
+  requestAnimationFrame(() => {
+    const body = els.content.querySelector(".vehicle-detail-pane > .surface > .surface-body");
+    if (!body) return;
+    body.scrollTop = state.vehicleDetailScrollTop || 0;
+    body.querySelector(".detail-tab.is-active")?.focus({ preventScroll: true });
+  });
 }
 
 async function handleNav(event) {
@@ -1084,12 +1082,16 @@ async function handleContentClick(event) {
       if (tab && tab === activePagedTab()) {
         resetPage(state.pages[tab]);
         if (tab === "logs" && state.pages.stockMovements) resetPage(state.pages.stockMovements);
-        els.content.innerHTML = renderLoading();
         if (tab === "vehicles") {
-          await loadVehicleModelData({ force: true });
+          clearVehicleSelection();
+          const request = loadVehicleModelData({ force: true });
+          renderCurrentTab();
+          await request;
         } else if (tab === "logs") {
+          els.content.innerHTML = renderLoading();
           await loadCurrentTab({ force: true });
         } else {
+          els.content.innerHTML = renderLoading();
           await loadPagedTab(tab, { force: true });
         }
       }
@@ -1119,8 +1121,15 @@ async function handleContentClick(event) {
       }
       if (state.pages[key]) resetPage(state.pages[key]);
       if (pagedTabs[key] && key === activePagedTab()) {
-        els.content.innerHTML = renderLoading();
-        await loadPagedTab(key, { force: true });
+        if (key === "vehicles") {
+          clearVehicleSelection();
+          const request = loadVehicleModelData({ force: true });
+          renderCurrentTab();
+          await request;
+        } else {
+          els.content.innerHTML = renderLoading();
+          await loadPagedTab(key, { force: true });
+        }
         renderCurrentTab();
         return;
       }
@@ -1210,8 +1219,10 @@ async function handleContentClick(event) {
       if (!pagedTabs[tab]) return;
       state.pages[tab].page = Math.max(0, Number(control.dataset.page || 0));
       if (tab === "vehicles") {
-        els.content.innerHTML = renderLoading();
-        await loadVehicleModelData({ force: true });
+        clearVehicleSelection();
+        const request = loadVehicleModelData({ force: true });
+        renderCurrentTab();
+        await request;
         renderCurrentTab();
         return;
       }
@@ -1258,7 +1269,7 @@ async function handleContentClick(event) {
     }
     if (action === "vehicle-stock") {
       const vehicle = findEntity("vehicle", id || Number(control.dataset.machineId || ""));
-      if (control.dataset.direction === "outbound" && !hasAnyRole("ADMIN", "SUPER_ADMIN")) {
+      if (["outbound", "adjustOutbound"].includes(control.dataset.direction) && !hasAnyRole("ADMIN", "SUPER_ADMIN")) {
         showToast("整车库存纠偏仅管理员可用", "error");
         return;
       }
@@ -1279,9 +1290,23 @@ async function handleContentClick(event) {
       setPrefill(modalItem, "partCode", control.dataset.partCode || "", `预填：${part.partCode || ""} · ${part.partName || ""}`);
       if (control.dataset.direction === "outbound") {
         const price = part.settlementPrice || part.salePrice || "";
-        setPrefill(modalItem, "settlementPrice", price, price ? `预填：${money(price)}` : undefined);
+        setPrefill(modalItem, "unitSalePrice", price, price ? `预填：${money(price)}` : undefined);
       }
       await openEntityModal("partStock", modalItem);
+      return;
+    }
+    if (action === "value-removed-part") {
+      const part = findEntity("part", id);
+      await openEntityModal("removedPartValuation", {
+        id: part.id,
+        version: part.version,
+        sourceKind: "part",
+        partLabel: entityDisplayName("part", part),
+        unitCost: Number(part.landedUnitCost || part.purchasePrice || 0) > 0
+          ? part.landedUnitCost || part.purchasePrice
+          : "",
+        businessDate: todayInputDate()
+      });
       return;
     }
     if (action === "edit") {
@@ -1355,6 +1380,10 @@ async function handleContentClick(event) {
       await toggleRepairStatus(id);
       return;
     }
+    if (action === "set-user-job-tag") {
+      await openUserJobTag(id);
+      return;
+    }
     if (action === "toggle-user-job-tag") {
       await toggleUserJobTag(id);
       return;
@@ -1373,6 +1402,29 @@ async function handleContentClick(event) {
     }
     if (action === "purchase-freight") {
       await openEntityModal("purchaseFreight", findEntity("purchaseOrder", id));
+      return;
+    }
+    if (action === "record-payment") {
+      await openPaymentRecordModal(
+        control.dataset.sourceType,
+        Number(control.dataset.sourceId || id || 0),
+        control.dataset.direction
+      );
+      return;
+    }
+    if (action === "reverse-payment") {
+      await openPaymentReversalModal(
+        control.dataset.sourceType,
+        Number(control.dataset.sourceId || id || 0)
+      );
+      return;
+    }
+    if (action === "record-rental-payment") {
+      await openRentalPaymentModal(Number(control.dataset.rentalId || id || 0));
+      return;
+    }
+    if (action === "reverse-rental-payment") {
+      await openRentalPaymentReversalModal(Number(control.dataset.rentalId || id || 0));
       return;
     }
     if (action === "complete-stocktaking") {
@@ -1399,23 +1451,21 @@ async function handleContentClick(event) {
       }
       if (control.dataset.modelKey) {
         await loadVehicleModelDetail(control.dataset.modelKey);
-        scrollToVehicleDetail();
       } else {
         await loadVehicleDetail(id);
-        scrollToVehicleDetail();
       }
       return;
     }
     if (action === "select-model-vehicle") {
       await loadVehicleModelDetail(control.dataset.modelKey, Number(control.dataset.machineId || 0));
-      scrollToVehicleDetail();
       return;
     }
     if (action === "set-vehicle-detail-tab") {
+      rememberVehicleDetailScroll();
       state.vehicleDetailTab = control.dataset.tab || "archive";
       ensureVehicleDetailTab();
       renderCurrentTab();
-      scrollToVehicleDetail();
+      restoreVehicleDetailScroll();
       return;
     }
     if (action === "set-config-module") {
@@ -1553,6 +1603,15 @@ function handleContentInput(event) {
   if (tab && tab === activePagedTab()) {
     resetPage(state.pages[tab]);
     if (tab === "logs" && state.pages.stockMovements) resetPage(state.pages.stockMovements);
+    if (tab === "vehicles") {
+      clearVehicleSelection();
+      renderCurrentTab();
+      const nextInput = els.content.querySelector(`[data-search-for="${input.dataset.searchFor}"]`);
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.setSelectionRange(input.value.length, input.value.length);
+      }
+    }
     schedulePagedReload(tab);
     return;
   }
@@ -1578,7 +1637,9 @@ function schedulePagedReload(tab) {
   searchReloadTimer = window.setTimeout(async () => {
     try {
       if (tab === "vehicles") {
-        await loadVehicleModelData({ force: true });
+        const request = loadVehicleModelData({ force: true });
+        renderCurrentTab();
+        await request;
       } else if (tab === "logs") {
         await loadCurrentTab({ force: true });
       } else {
@@ -1600,6 +1661,18 @@ async function handleContentChange(event) {
   const importTypeSelect = event.target.closest("[data-import-type-select]");
   if (importTypeSelect) {
     state.importSelectedType = importTypeSelect.value || "vehicle-workbook";
+    state.importSelectedMode = String(state.importSelectedType).toLowerCase().includes("part")
+      ? "OPENING_MIGRATION"
+      : "BUSINESS_DOCUMENT";
+    state.importValidation = null;
+    renderCurrentTab();
+    return;
+  }
+
+  const importModeSelect = event.target.closest("[data-import-mode-select]");
+  if (importModeSelect) {
+    state.importSelectedMode = importModeSelect.value || "BUSINESS_DOCUMENT";
+    state.importValidation = null;
     renderCurrentTab();
     return;
   }
@@ -1616,6 +1689,14 @@ async function handleContentChange(event) {
       state.filters.attachments.resourceId = "";
     }
     if (state.pages[key]) resetPage(state.pages[key]);
+    if (key === "vehicles") {
+      clearVehicleSelection();
+      const request = loadVehicleModelData({ force: true });
+      renderCurrentTab();
+      await request;
+      renderCurrentTab();
+      return;
+    }
     if (["attachments", "imports"].includes(key) && key === activePagedTab()) {
       els.content.innerHTML = renderLoading();
       await loadPagedTab(key, { force: true });
@@ -1631,6 +1712,18 @@ async function handleContentChange(event) {
     try {
       els.content.innerHTML = renderLoading();
       await loadStatistics(statsSelect.value);
+      renderCurrentTab();
+    } catch (error) {
+      handleActionError(error);
+    }
+    return;
+  }
+
+  const reconciliationDate = event.target.closest("[data-action='select-reconciliation-date']");
+  if (reconciliationDate) {
+    try {
+      els.content.innerHTML = renderLoading();
+      await loadDailyReconciliation(reconciliationDate.value);
       renderCurrentTab();
     } catch (error) {
       handleActionError(error);
@@ -1688,6 +1781,27 @@ async function handleModalClick(event) {
     return;
   }
   if (handleFormWorkspaceNavigation(event)) return;
+  const repairPartAction = event.target.closest("[data-repair-part-action]");
+  if (repairPartAction) {
+    event.preventDefault();
+    const form = repairPartAction.closest("form");
+    const rows = ensureRepairPartUsageRows(state.modal.item);
+    const currentRows = collectRepairPartUsages(form);
+    state.modal.item.partUsages = currentRows;
+    if (repairPartAction.dataset.repairPartAction === "add") {
+      state.modal.item.partUsages.push({
+        quantity: 1,
+        warehouseId: null,
+        chargeUnitPrice: null,
+        discountAmount: null,
+        remark: ""
+      });
+    } else if (repairPartAction.dataset.repairPartAction === "remove") {
+      state.modal.item.partUsages.splice(Number(repairPartAction.dataset.index || -1), 1);
+    }
+    renderModal();
+    return;
+  }
   const configAction = event.target.closest("[data-config-action]");
   if (configAction) {
     event.preventDefault();
@@ -1740,7 +1854,11 @@ function handleModalInput(event) {
   const input = event.target.closest("[data-combo-input]");
   if (!input) {
     const form = event.target.closest("form");
-    if (form?.dataset.kind === "repair" && ["repairFee", "repairExpense", "partsFee"].includes(event.target.name)) {
+    if (form?.dataset.kind === "repair" && event.target.closest("[data-repair-part-field]")) {
+      syncRepairPartUsageEditor(form, event.target.closest("[data-repair-part-row]"));
+      return;
+    }
+    if (form?.dataset.kind === "repair" && ["repairFee", "repairExpense", "partsFee", "passThroughAmount"].includes(event.target.name)) {
       syncRepairTotalFee(form);
     }
     if (["vehicleOutbound", "partStock", "outboundOrder"].includes(form?.dataset.kind) && isPaymentField(event.target.name)) {
@@ -1845,6 +1963,10 @@ async function handleModalChange(event) {
   const form = event.target.closest("form");
   if (!form) return;
   const kind = form.dataset.kind;
+  if (kind === "repair" && event.target.closest("[data-repair-part-field]")) {
+    syncRepairPartUsageEditor(form, event.target.closest("[data-repair-part-row]"));
+    return;
+  }
   if (usesVehicleInboundConfigEditor(kind, state.modal?.item) && event.target.dataset.configField) {
     const rows = ensureConfigSelections(state.modal.item);
     const index = Number(event.target.dataset.configIndex);
@@ -1866,6 +1988,7 @@ async function handleModalChange(event) {
   if (state.modal?.item && event.target.name) {
     state.modal.item[event.target.name] = event.target.type === "checkbox" ? event.target.checked : event.target.value;
   }
+  if (kind === "vehicle" && event.target.name === "stockStatus" && event.target.value === "IN_STOCK" && Number(form.elements.inventoryCount?.value || 0) <= 0) { setFormFieldValue(form, "inventoryCount", 1, false); state.modal.item.inventoryCount = 1; }
 
   if (kind === "vehicleConfigChange" && event.target.name === "changeMode") {
     await resetVehicleConfigChangeMode(event.target.value);
@@ -1901,7 +2024,7 @@ async function handleModalChange(event) {
   }
 
   if (kind === "repair") {
-    if (["repairFee", "repairExpense", "partsFee"].includes(event.target.name)) {
+    if (["repairFee", "repairExpense", "partsFee", "passThroughAmount"].includes(event.target.name)) {
       syncRepairTotalFee(form);
     }
     if (event.target.name === "repairPersonChoice") {
@@ -1933,13 +2056,18 @@ async function handleModalChange(event) {
 
   if (kind === "stocktaking" && event.target.name === "resourceType") {
     state.modal.item.resourceId = null;
+    state.modal.item.warehouseId = null;
     state.modal.item.actualQuantity = 0;
     renderModal();
     return;
   }
 
   if (kind === "stocktaking" && event.target.name === "resourceId") {
-    syncStocktakingQuantity(form, Number(event.target.value || 0));
+    await syncStocktakingQuantity(form, Number(event.target.value || 0));
+  }
+
+  if (kind === "stocktaking" && event.target.name === "warehouseId") {
+    await syncStocktakingQuantity(form, Number(form.elements.resourceId?.value || 0));
   }
 
   if (kind === "stockTransfer" && event.target.name === "resourceType") {
@@ -1978,6 +2106,10 @@ async function handleModalChange(event) {
     syncPurchaseResourceDefaults(form);
   }
 
+  if (kind === "purchaseOrder" && event.target.name === "resourceId") {
+    syncPurchaseSkuDefaults(form);
+  }
+
   if (usesVehicleInboundConfigEditor(kind, state.modal?.item) && event.target.name === "machineType") {
     renderModal();
     return;
@@ -2001,8 +2133,12 @@ async function handleModalChange(event) {
     syncPaymentFields(form, event.target.name);
   }
 
-  if (kind === "partStock" && state.modal?.item?.direction === "outbound" && event.target.name === "partCode") {
-    syncPartOutboundDefaults(event.target.value);
+  if (kind === "partStock" && event.target.name === "partCode") {
+    if (state.modal?.item?.direction === "outbound") {
+      syncPartOutboundDefaults(event.target.value);
+    } else {
+      syncPartAdjustmentDefaults(event.target.value);
+    }
     renderModal();
     return;
   }
@@ -2136,22 +2272,54 @@ async function handleModalSubmit(event) {
   }
   const payload = serializeForm(kind, form);
   let mutationKind = kind;
+  if (kind === "paymentRecord" || kind === "paymentReversal") {
+    mutationKind = item.sourceKind || kind;
+  }
+  if (kind === "removedPartValuation") {
+    mutationKind = "part";
+  }
   if (kind === "vehicleConfigChange") {
     payload.changeMode = vehicleConfigChangeMode(payload);
     mutationKind = vehicleConfigChangeTargetKind(payload.changeMode);
   }
   if (kind === "purchaseOrder") {
-    enrichPurchaseOrderPayload(payload, form);
+    enrichPurchaseOrderPayload(payload, form, item);
   }
   attachVersion(payload, item);
-  const dangerConfirmation = modalDangerConfirmation(mutationKind, item, payload);
+  if (kind === "userJobTag" && normalizeJobTag(payload.jobTag, item.roles) === normalizeJobTag(item.jobTag, item.roles)) {
+    closeModal();
+    showToast("职务未变更", "info");
+    return;
+  }
+  const confirmationKind = kind === "vehicleConfigChange" ? mutationKind : kind;
+  const dangerConfirmation = modalDangerConfirmation(confirmationKind, item, payload);
   if (dangerConfirmation && !(await confirmDanger(dangerConfirmation))) {
     setModalSubmitting(form, false);
     return;
   }
 
   try {
-    if (kind === "switchUser") {
+    if (kind === "paymentRecord") {
+      await api(endpoints.payment.create, {
+        method: "POST",
+        body: payload
+      });
+      showContextSuccess(
+        payload.direction === "PAYMENT" ? "付款已登记" : "收款已登记",
+        item.sourceLabel,
+        money(payload.amount)
+      );
+    } else if (kind === "paymentReversal") {
+      const url = `${endpoints.payment.reverse(payload.paymentId)}?remark=${encodeURIComponent(payload.remark || "")}`;
+      await api(url, { method: "POST" });
+      showContextSuccess("收付款记录已冲销", item.sourceLabel, "原记录保留，已生成反向流水");
+    } else if (kind === "removedPartValuation") {
+      await api(endpoints.part.valuation(item.id), {
+        method: "PUT",
+        body: payload
+      });
+      showContextSuccess("旧件估值已确认", item.partLabel, `单位成本 ${money(payload.unitCost)}`);
+    } else if (kind === "switchUser") {
       const data = await api("/api/auth/login", {
         method: "POST",
         body: payload,
@@ -2241,10 +2409,12 @@ async function handleModalSubmit(event) {
         machineId: payload.machineId || item.machineId,
         machineVersion: machine.version,
         customerId: payload.customerId,
+        warehouseId: payload.warehouseId,
         destination: payload.destination,
         monthlyRentalPrice: payload.monthlyRentalPrice,
         startDate: payload.startDate,
         endDate: payload.endDate,
+        returnDate: payload.returnDate,
         status: payload.status,
         operator: payload.operator,
         remark: payload.remark,
@@ -2259,11 +2429,20 @@ async function handleModalSubmit(event) {
       }
     } else if (kind === "vehicleStock") {
       attachStockVersion(payload, "vehicle");
-      await api(`/api/inventory/${payload.machineId}/${item.direction}`, {
+      const adjustmentDirection = item.direction === "adjustOutbound" ? "outbound" : item.direction;
+      await api(`/api/inventory/${payload.machineId}/${adjustmentDirection}`, {
         method: "PUT",
-        body: { quantity: payload.quantity, operator: payload.operator, remark: payload.remark, version: payload.version }
+        body: {
+          quantity: payload.quantity,
+          warehouseId: payload.warehouseId,
+          businessDate: payload.businessDate,
+          reason: payload.reason,
+          operator: payload.operator,
+          remark: payload.remark,
+          version: payload.version
+        }
       });
-      showContextSuccess(item.direction === "inbound" ? "整车入库成功" : "整车出库成功", entityDisplayName("vehicle", findEntity("vehicle", Number(payload.machineId || 0))), `数量：${payload.quantity || 0}`);
+      showContextSuccess(item.direction === "inbound" ? "整车入库调整成功" : "整车库存减少成功", entityDisplayName("vehicle", findEntity("vehicle", Number(payload.machineId || 0))), `数量：${payload.quantity || 0}`);
     } else if (kind === "partStock") {
       attachStockVersion(payload, "part");
       if (item.direction === "outbound") {
@@ -2274,24 +2453,36 @@ async function handleModalSubmit(event) {
             partVersion: payload.version,
             quantity: payload.quantity,
             customerId: payload.customerId,
-            settlementPrice: payload.settlementPrice,
-            receivableAmount: payload.receivableAmount,
+            warehouseId: payload.warehouseId,
+            unitSalePrice: payload.unitSalePrice,
+            lineAmount: payload.lineAmount,
             receivedAmount: payload.receivedAmount,
             paymentDueDate: payload.paymentDueDate,
             lastPaymentDate: payload.lastPaymentDate,
             paymentSettled: payload.paymentSettled,
             paymentRemark: payload.paymentRemark,
+            salesDate: payload.salesDate,
             operator: payload.operator,
             orderRemark: payload.orderRemark
           }
         });
         showContextSuccess("配件出库订单已创建", payload.partCode, `数量：${payload.quantity || 0}`);
       } else {
-        await api(`/api/parts/${item.direction}`, {
+        const adjustmentDirection = item.direction === "adjustOutbound" ? "outbound" : item.direction;
+        await api(`/api/parts/${adjustmentDirection}`, {
           method: "PUT",
-          body: { partCode: payload.partCode, quantity: payload.quantity, operator: payload.operator, remark: payload.remark, version: payload.version }
+          body: {
+            partCode: payload.partCode,
+            quantity: payload.quantity,
+            warehouseId: payload.warehouseId,
+            businessDate: payload.businessDate,
+            reason: payload.reason,
+            operator: payload.operator,
+            remark: payload.remark,
+            version: payload.version
+          }
         });
-        showContextSuccess("配件入库成功", payload.partCode, `数量：${payload.quantity || 0}`);
+        showContextSuccess(item.direction === "inbound" ? "配件入库调整成功" : "配件库存减少成功", payload.partCode, `数量：${payload.quantity || 0}`);
       }
     } else if (kind === "partReplace" || (kind === "vehicleConfigChange" && payload.changeMode === "REPLACE")) {
       enrichPartReplacePayload(payload);
@@ -2317,6 +2508,9 @@ async function handleModalSubmit(event) {
     } else if (kind === "userPassword") {
       await api(endpoints.user.updatePassword(item.id), { method: "PUT", body: payload });
       showContextSuccess("用户密码修改成功", entityDisplayName("user", item), "请使用新密码登录");
+    } else if (kind === "userJobTag") {
+      await api(endpoints.user.updateJobTag(item.id), { method: "PUT", body: payload });
+      showContextSuccess("用户职务设置成功", entityDisplayName("user", item), jobTagLabel(payload.jobTag));
     } else if (kind === "outboundOrder") {
       await api(endpoints.outboundOrder.update(item.id), { method: "PUT", body: payload });
       showContextSuccess("订单状态已更新", entityDisplayName("outboundOrder", item), "收款、报销售和发票状态已保存");
@@ -2340,7 +2534,7 @@ async function handleModalSubmit(event) {
     markReferenceDataStale(referenceKindsForMutation(mutationKind));
     await refreshAfterMutation(mutationKind, {
       activeModelKey,
-      machineId: payload.machineId || item.machineId || state.selectedVehicleId
+      machineId: payload.machineId || item.machineId || item.sourceMachineId || state.selectedVehicleId
     });
     renderCurrentTab();
     if (nextEntity) {
@@ -2467,6 +2661,154 @@ async function setPurchaseReceivedDirect(order, received) {
   await api(url, { method: "PUT" });
 }
 
+async function openPaymentRecordModal(sourceType, sourceId, direction, sourceOverride = null) {
+  const normalizedSourceType = String(sourceType || "").trim().toUpperCase();
+  const normalizedDirection = String(direction || "").trim().toUpperCase();
+  if (!normalizedSourceType || !sourceId || !["RECEIPT", "PAYMENT"].includes(normalizedDirection)) {
+    throw new Error("收付款来源信息不完整");
+  }
+  const records = await api(endpoints.payment.list(normalizedSourceType, sourceId));
+  const source = sourceOverride || paymentSourceContext(normalizedSourceType, sourceId);
+  const target = paymentTargetAmount(normalizedSourceType, source, normalizedDirection);
+  const posted = (records || [])
+    .filter(record => record.direction === normalizedDirection)
+    .reduce((total, record) => total + Number(record.amount || 0), 0);
+  const remaining = Math.max(0, target - posted);
+  await openEntityModal("paymentRecord", {
+    sourceType: normalizedSourceType,
+    sourceId,
+    sourceKind: source.kind,
+    sourceLabel: source.label,
+    sourceMachineId: source.machineId,
+    direction: normalizedDirection,
+    amount: remaining > 0 ? formatDecimal(remaining) : "",
+    paymentDate: todayInputDate(),
+    paymentRecords: records || []
+  });
+}
+
+async function openRentalPaymentModal(rentalId) {
+  const rental = findEntity("rental", rentalId);
+  const bills = await api(endpoints.rental.bills(rentalId));
+  if (!bills?.length) {
+    showToast("当前租赁尚未生成账单；办理归还后会按租期生成应收账单", "info");
+    return;
+  }
+  const bill = bills.find(item => Number(item.outstandingAmount || 0) > 0);
+  if (!bill) {
+    showToast("当前租赁账单已全部收清", "success");
+    return;
+  }
+  await openPaymentRecordModal("RENTAL_BILL", bill.id, "RECEIPT", {
+    kind: "rental",
+    item: rental,
+    label: `${rental.rentalNo || `租赁 #${rental.id}`} · ${dateValue(bill.billPeriod) || "租金账单"}`,
+    machineId: rental.machineId,
+    targetAmount: amountValue(bill.amount)
+  });
+}
+
+async function openRentalPaymentReversalModal(rentalId) {
+  const rental = findEntity("rental", rentalId);
+  const bills = await api(endpoints.rental.bills(rentalId));
+  const recordGroups = await Promise.all((bills || []).map(async bill => {
+    const records = await api(endpoints.payment.list("RENTAL_BILL", bill.id));
+    return (records || []).map(record => ({
+      ...record,
+      sourceLabel: dateValue(bill.billPeriod) || `账单 #${bill.id}`
+    }));
+  }));
+  const records = recordGroups.flat();
+  const reversedIds = new Set(records.map(record => record.reversalOfPaymentId).filter(Boolean).map(String));
+  const reversible = records.filter(record =>
+    Number(record.amount || 0) > 0
+    && !record.reversalOfPaymentId
+    && !reversedIds.has(String(record.id))
+  );
+  if (!reversible.length) {
+    showToast("当前租赁没有可冲销的收款记录", "info");
+    return;
+  }
+  await openEntityModal("paymentReversal", {
+    sourceType: "RENTAL_BILL",
+    sourceId: reversible[reversible.length - 1].sourceId,
+    sourceKind: "rental",
+    sourceLabel: rental.rentalNo || `租赁 #${rental.id}`,
+    sourceMachineId: rental.machineId,
+    paymentId: reversible[reversible.length - 1].id,
+    paymentRecords: records
+  });
+}
+
+async function openPaymentReversalModal(sourceType, sourceId) {
+  const normalizedSourceType = String(sourceType || "").trim().toUpperCase();
+  if (!normalizedSourceType || !sourceId) {
+    throw new Error("收付款来源信息不完整");
+  }
+  const records = await api(endpoints.payment.list(normalizedSourceType, sourceId));
+  const reversedIds = new Set((records || [])
+    .map(record => record.reversalOfPaymentId)
+    .filter(Boolean)
+    .map(String));
+  const reversible = (records || []).filter(record =>
+    Number(record.amount || 0) > 0
+    && !record.reversalOfPaymentId
+    && !reversedIds.has(String(record.id))
+  );
+  if (!reversible.length) {
+    showToast("当前业务单据没有可冲销的收付款记录", "info");
+    return;
+  }
+  const source = paymentSourceContext(normalizedSourceType, sourceId);
+  await openEntityModal("paymentReversal", {
+    sourceType: normalizedSourceType,
+    sourceId,
+    sourceKind: source.kind,
+    sourceLabel: source.label,
+    sourceMachineId: source.machineId,
+    paymentId: reversible[reversible.length - 1].id,
+    paymentRecords: records || []
+  });
+}
+
+function paymentSourceContext(sourceType, sourceId) {
+  const mapping = {
+    OUTBOUND_ORDER: ["outboundOrder", findEntity("outboundOrder", sourceId)],
+    PURCHASE_ORDER: ["purchaseOrder", findEntity("purchaseOrder", sourceId)],
+    REPAIR: ["repair", findEntity("repair", sourceId)],
+    MODIFICATION_WORK_ORDER: ["modificationOrder", findModificationOrder(sourceId)]
+  };
+  const [kind, item] = mapping[sourceType] || ["", {}];
+  return {
+    kind,
+    item,
+    label: kind ? entityDisplayName(kind, item) : `${sourceType} #${sourceId}`,
+    machineId: item?.machineId || (item?.resourceType === "MACHINE" ? item.resourceId : null)
+  };
+}
+
+function paymentTargetAmount(sourceType, source = {}, direction) {
+  const item = source.item || {};
+  if (sourceType === "OUTBOUND_ORDER" && direction === "RECEIPT") {
+    return amountValue(item.receivableAmount ?? item.lineAmount);
+  }
+  if (sourceType === "PURCHASE_ORDER" && direction === "PAYMENT") {
+    return amountValue(item.totalAmount) + amountValue(item.freightAmount);
+  }
+  if (sourceType === "REPAIR") {
+    return direction === "PAYMENT"
+      ? amountValue(item.repairExpense)
+      : amountValue(item.receivableAmount ?? item.totalFee);
+  }
+  if (sourceType === "MODIFICATION_WORK_ORDER" && direction === "RECEIPT") {
+    return (item.lines || []).reduce((total, line) => total + amountValue(line.chargeAmount), 0);
+  }
+  if (sourceType === "RENTAL_BILL" && direction === "RECEIPT") {
+    return amountValue(source.targetAmount ?? item.amount);
+  }
+  return 0;
+}
+
 async function cancelModificationOrder(id) {
   const order = findModificationOrder(id);
   if (!order.id) {
@@ -2534,6 +2876,15 @@ function enrichPartReplacePayload(payload) {
   if (payload.newConfigValueVersion === undefined && configValue?.version !== undefined) {
     payload.newConfigValueVersion = configValue.version;
   }
+  if (!payload.warehouseId && part?.warehouseId) {
+    payload.warehouseId = part.warehouseId;
+  }
+  if (!payload.oldPartWarehouseId && payload.oldPartDisposition !== "SCRAP" && payload.oldPartDisposition !== "DISCARD") {
+    payload.oldPartWarehouseId = payload.warehouseId;
+  }
+  if (!payload.businessDate) {
+    payload.businessDate = todayInputDate();
+  }
 }
 
 function enrichVehiclePartInstallPayload(payload) {
@@ -2545,6 +2896,12 @@ function enrichVehiclePartInstallPayload(payload) {
   if (payload.newPartVersion === undefined && part?.version !== undefined) {
     payload.newPartVersion = part.version;
   }
+  if (!payload.warehouseId && part?.warehouseId) {
+    payload.warehouseId = part.warehouseId;
+  }
+  if (!payload.businessDate) {
+    payload.businessDate = todayInputDate();
+  }
 }
 
 function buildModificationOrderPayload(payload) {
@@ -2553,6 +2910,9 @@ function buildModificationOrderPayload(payload) {
     machineVersion: payload.machineVersion,
     customerName: payload.customerName,
     salesOrderNo: payload.salesOrderNo,
+    workOrderType: payload.workOrderType || "PRE_SALE",
+    warehouseId: payload.warehouseId,
+    businessDate: payload.businessDate || todayInputDate(),
     operator: payload.operator,
     remark: payload.remark,
     lines: [
@@ -2566,6 +2926,14 @@ function buildModificationOrderPayload(payload) {
         quantity: payload.quantity || 1,
         oldPartAction: payload.oldPartAction || "STOCK_IN",
         priceDifference: payload.priceDifference || 0,
+        warehouseId: payload.warehouseId,
+        chargeUnitPrice: payload.chargeUnitPrice || 0,
+        discountAmount: payload.discountAmount || 0,
+        oldPartDisposition: payload.oldPartDisposition,
+        oldPartWarehouseId: payload.oldPartWarehouseId,
+        oldPartCondition: payload.oldPartCondition,
+        oldPartValuationSource: payload.oldPartValuationSource,
+        oldPartUnitCost: payload.oldPartUnitCost,
         remark: payload.remark
       }
     ]
@@ -2703,6 +3071,20 @@ async function toggleRepairStatus(id) {
   const repair = findEntity("repair", id);
   if (!repair?.id || !hasPermission("repair:write")) return;
   const nextStatus = repair.status === "COMPLETED" ? "PENDING" : "COMPLETED";
+  if (nextStatus === "PENDING") {
+    const paymentRecords = await api(endpoints.payment.list("REPAIR", repair.id));
+    const paymentTotals = (paymentRecords || []).reduce((totals, record) => {
+      const direction = String(record.direction || "").toUpperCase();
+      if (direction === "RECEIPT" || direction === "PAYMENT") {
+        totals[direction] += Number(record.amount || 0);
+      }
+      return totals;
+    }, { RECEIPT: 0, PAYMENT: 0 });
+    if (Math.abs(paymentTotals.RECEIPT) > 0.005 || Math.abs(paymentTotals.PAYMENT) > 0.005) {
+      showToast("该维修已有未冲销收付款，请先在详情中执行收付款冲销", "info");
+      return;
+    }
+  }
   await api(endpoints.repair.updateStatus(repair.id), {
     method: "PUT",
     body: {
@@ -2912,10 +3294,10 @@ function orderStatusToggleOverrides(order, field) {
 function buildOutboundOrderStatusPayload(order, overrides) {
   return {
     version: order.version,
-    settlementPrice: order.settlementPrice,
+    unitSalePrice: order.unitSalePrice ?? order.settlementPrice,
+    lineAmount: order.lineAmount ?? order.receivableAmount,
     salesDate: order.salesDate,
     salePrice: order.salePrice,
-    receivableAmount: order.receivableAmount,
     receivedAmount: order.receivedAmount,
     paymentDueDate: order.paymentDueDate,
     lastPaymentDate: order.lastPaymentDate,
@@ -2978,7 +3360,12 @@ async function ensureModalDependencies(kind) {
   const needsSuppliers = kind === "purchaseOrder";
   const needsRentals = ["vehicleOutbound", "rental", "repair"].includes(kind);
   const needsRepairUsers = kind === "repair";
-  const needsWarehouses = ["warehouse", "stockTransfer"].includes(kind);
+  const needsWarehouses = [
+    "vehicle", "vehicleInbound", "vehicleStock", "vehicleOutbound",
+    "part", "partStock", "rental", "repair", "purchaseOrder",
+    "stocktaking", "stockTransfer", "partReplace", "vehiclePartInstall",
+    "modificationOrder", "vehicleConfigChange", "warehouse"
+  ].includes(kind);
   const needsRepairs = kind === "attachmentUpload";
   const needsOutboundOrders = kind === "attachmentUpload";
   const needsConfigItems = ["configValue", "vehicleInbound", "vehicleConfigValue", "vehicleConfigItem", "purchaseOrder"].includes(kind);
@@ -3088,6 +3475,7 @@ function updateCompatibleParts(machineConfigId) {
   state.modal.item.machineConfigId = machineConfigId;
   const expectedTypes = configTypeCandidates(config);
   state.modal.context.compatibleParts = state.data.parts
+    .filter(part => !part.isLocked)
     .filter(part => Number(part.quantity || 0) > 0)
     .filter(part => expectedTypes.includes(normalizeText(part.partCategory)));
 }
@@ -3272,13 +3660,6 @@ function scrollToWorkspaceTop() {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-function scrollToVehicleDetail() {
-  requestAnimationFrame(() => {
-    const target = document.getElementById("vehicleDetailSurface");
-    if (target) target.scrollIntoView({ block: "start", behavior: "smooth" });
-  });
-}
-
 function detailTitle(kind, item) {
   return {
     part: item.partName || item.partCode,
@@ -3306,8 +3687,10 @@ function detailFields(kind, item) {
       ["适配车型", item.applicableModels],
       ["库存", `${item.quantity ?? 0}${item.unit || ""}`],
       ["采购价", money(item.purchasePrice)],
+      ["落地成本", money(item.landedUnitCost)],
       ["销售价", money(item.salePrice)],
       ["结算价", money(item.settlementPrice)],
+      ["库存状态", item.isLocked ? "隔离待估值" : "可用"],
       ["来源", item.source],
       ["备注", item.remarks]
     ],
@@ -3326,7 +3709,7 @@ function detailFields(kind, item) {
       ["出库项", [item.resourceCode, item.resourceName].filter(Boolean).join(" / ")],
       ["客户", item.customerName],
       ["销售日期", dateValue(item.salesDate)],
-      ["应收", money(item.receivableAmount ?? item.settlementPrice)],
+      ["应收", money(item.receivableAmount ?? item.lineAmount)],
       ["已收", money(item.receivedAmount)],
       ["欠款", money(receivableOutstanding(item))],
       ["车款结清", yesNoText(item.paymentSettled)],
@@ -3449,18 +3832,17 @@ async function syncShell() {
     state.activeTab = "overview";
   }
   const tab = tabs[state.activeTab] || tabs.overview;
+  els.content.dataset.activeTab = state.activeTab;
   els.pageTitle.textContent = tab.title;
   els.pageSubtitle.textContent = tab.subtitle;
-  els.currentUser.textContent = state.user
-    ? `${state.user.username}${state.user.roles?.length ? " · " + state.user.roles.join("/") : ""}`
-    : "未登录";
-  els.mainNav.querySelectorAll("[data-tab]").forEach(button => {
+  syncUserShell(els, state.user);
+  els.mainNav.querySelectorAll(".nav-item").forEach(button => {
     const requiredRoles = (button.dataset.roles || button.dataset.role || "").split(",").map(role => role.trim()).filter(Boolean);
     const requiredPermissions = (button.dataset.permissions || button.dataset.permission || "").split(",").map(permission => permission.trim()).filter(Boolean);
     const allowed = (!requiredRoles.length || hasAnyRole(...requiredRoles))
       && (!requiredPermissions.length || hasAnyPermission(...requiredPermissions));
     button.classList.toggle("is-hidden", !allowed);
-    button.classList.toggle("is-active", button.dataset.tab === state.activeTab);
+    button.classList.toggle("is-active", Boolean(button.dataset.tab) && button.dataset.tab === state.activeTab);
     if (button.dataset.tab === state.activeTab) {
       button.setAttribute("aria-current", "page");
     } else {
@@ -3477,11 +3859,8 @@ async function syncShell() {
   const hasBusinessAction = [...(els.newBusinessMenu?.querySelectorAll("button") || [])]
     .some(button => !button.classList.contains("is-hidden"));
   els.newBusinessBtn?.classList.toggle("is-hidden", !hasBusinessAction);
-  els.mainNav.querySelectorAll(".nav-item").forEach(button => {
-    if (!button.title) button.title = button.textContent.trim();
-  });
   els.mainNav.querySelectorAll("[data-nav-group]").forEach(group => {
-    const hasVisibleItem = [...group.querySelectorAll("[data-tab]")]
+    const hasVisibleItem = [...group.querySelectorAll(".nav-item")]
       .some(button => !button.classList.contains("is-hidden"));
     group.classList.toggle("is-hidden", !hasVisibleItem);
   });
@@ -3579,7 +3958,7 @@ function searchBox(key, placeholder) {
     <label class="search-box">
       <span class="search-icon">${icons.search}</span>
       <input class="input" type="search" data-search-for="${escapeAttr(key)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(placeholder)}" aria-label="${escapeAttr(placeholder)}" autocomplete="off" spellcheck="false">
-      ${value ? `<button class="search-clear" type="button" data-action="clear-search" data-search-for="${escapeAttr(key)}" aria-label="清空搜索">×</button>` : ""}
+      ${value ? `<button class="search-clear" type="button" data-action="clear-search" data-search-for="${escapeAttr(key)}" aria-label="清空搜索">${icons.close}</button>` : ""}
     </label>
   `;
 }
@@ -3711,6 +4090,8 @@ function renderMonthlyFinanceTable(rows) {
     { label: "租赁收入", key: "rentalIncome", formatter: money },
     { label: "折价收入", key: "modificationIncome", formatter: money },
     { label: "折价支出", key: "modificationExpense", formatter: money },
+    { label: "盘盈收益", key: "inventoryGain", formatter: money },
+    { label: "盘亏损失", key: "inventoryLoss", formatter: money },
     { label: "成本/支出", key: "totalExpense", formatter: money },
     { label: "经营毛利", key: "netProfit", formatter: money },
     { label: "净现金流", key: "netCashflow", formatter: money }
@@ -3732,6 +4113,8 @@ function renderFinanceBars(rows) {
     rentalIncome: financeNumber(row.rentalIncome),
     modificationIncome: financeNumber(row.modificationIncome),
     modificationExpense: financeNumber(row.modificationExpense),
+    inventoryGain: financeNumber(row.inventoryGain),
+    inventoryLoss: financeNumber(row.inventoryLoss),
     totalExpense: financeNumber(row.totalExpense),
     grossProfit: financeNumber(row.grossProfit),
     netProfit: financeNumber(row.netProfit),
@@ -3827,6 +4210,8 @@ function renderFinanceBars(rows) {
                 ${financeTooltipRow("租赁收入", row.rentalIncome)}
                 ${financeTooltipRow("折价收入", row.modificationIncome)}
                 ${financeTooltipRow("折价支出", row.modificationExpense)}
+                ${financeTooltipRow("盘盈收益", row.inventoryGain)}
+                ${financeTooltipRow("盘亏损失", row.inventoryLoss)}
                 ${financeTooltipRow("经营毛利", row.netProfit, "teal")}
                 ${financeTooltipRow("净现金流", row.netCashflow, "teal")}
               </span>
@@ -3902,20 +4287,6 @@ function trimChartNumber(value) {
 
 function roundChart(value) {
   return Math.round(Number(value || 0) * 100) / 100;
-}
-
-function summaryCard(label, value, foot, options = {}) {
-  const attrs = options.action
-    ? `type="button" class="summary-card summary-card-button${options.active ? " is-active" : ""}" data-action="${escapeAttr(options.action)}" ${Object.entries(options.data || {}).map(([key, itemValue]) => `data-${toDataAttrName(key)}="${escapeAttr(itemValue)}"`).join(" ")}`
-    : `class="summary-card${options.active ? " is-active" : ""}"`;
-  const tag = options.action ? "button" : "article";
-  return `
-    <${tag} ${attrs}>
-      <div class="summary-label">${escapeHtml(label)}</div>
-      <div class="summary-value">${escapeHtml(value)}</div>
-      <div class="summary-foot">${escapeHtml(foot)}</div>
-    </${tag}>
-  `;
 }
 
 function renderBackendSummary(tab, fallbackFactory) {
@@ -4276,6 +4647,10 @@ function renderField(field, data) {
     return `<input name="${escapeAttr(field.name)}" type="hidden" data-coerce="${escapeAttr(coerce)}" value="${escapeAttr(value)}"${renderPrefillAttrs(field, prefillValue)}>`;
   }
 
+  if (field.type === "repairPartUsages") {
+    return renderRepairPartUsageEditor(data, span, field.label, fieldHint);
+  }
+
   if (field.type === "checkbox") {
     return `
       <label class="field checkbox-field"${span}>
@@ -4349,6 +4724,81 @@ function renderField(field, data) {
       <span>${escapeHtml(field.label)}${fieldHint}</span>
       <input name="${escapeAttr(field.name)}" type="${escapeAttr(field.type || "text")}" data-coerce="${escapeAttr(coerce)}" value="${escapeAttr(value)}" placeholder="${escapeAttr(fieldPlaceholder(field, [], data))}"${renderPrefillAttrs(field, prefillValue)}${field.step ? ` step="${escapeAttr(field.step)}"` : ""}${field.readOnly ? " readonly" : ""}${required}>
     </label>
+  `;
+}
+
+function renderRepairPartUsageEditor(item = {}, span = "", label = "配件明细", hint = "") {
+  const rows = ensureRepairPartUsageRows(item);
+  const legacyUntracked = item.partUsageTrackingStatus === "LEGACY_UNTRACKED";
+  return `
+    <section class="field repair-part-usage-field"${span}>
+      <div class="repair-part-usage-head">
+        <span>${escapeHtml(label)}${hint}</span>
+        ${legacyUntracked ? "" : `<button class="btn btn-sm" type="button" data-repair-part-action="add">${icon("plus")}添加配件</button>`}
+      </div>
+      <p class="helper-inline">${legacyUntracked
+        ? "此历史维修单缺少可追溯库存流水/FIFO 明细，配件行已锁定；请通过历史纠偏或显式库存调整处理。"
+        : "每行独立选择仓库、数量、收费单价和折扣；后端会按该仓库 FIFO 计算成本。"
+      }</p>
+      <div class="repair-part-usage-list">
+        ${rows.length ? rows.map((row, index) => renderRepairPartUsageRow(row, index, legacyUntracked)).join("") : `
+          <div class="repair-part-usage-empty">未领用配件；如需收费或扣库存，请添加一条配件明细。</div>
+        `}
+      </div>
+    </section>
+  `;
+}
+
+function renderRepairPartUsageRow(row = {}, index, readOnly = false) {
+  const partOptions = repairPartOptions();
+  const warehouseOptionsList = warehouseOptions();
+  const partId = Number(row.partId || 0);
+  const warehouseId = Number(row.warehouseId || 0);
+  const part = state.data.parts.find(item => Number(item.id) === partId);
+  const unitPrice = row.chargeUnitPrice ?? part?.salePrice ?? part?.settlementPrice ?? "";
+  const quantity = Number(row.quantity || 1);
+  const discount = row.discountAmount ?? "";
+  const lineAmount = repairPartUsageLineAmount(unitPrice, quantity, discount);
+  const disabled = readOnly ? " disabled" : "";
+  return `
+    <div class="repair-part-usage-row" data-repair-part-row data-index="${escapeAttr(index)}">
+      <input type="hidden" data-repair-part-field="id" value="${escapeAttr(row.id ?? "")}">
+      <label>
+        <span>配件</span>
+        <select data-repair-part-field="partId"${disabled}>
+          <option value="">请选择配件</option>
+          ${partOptions.map(option => `<option value="${escapeAttr(option.value)}"${Number(option.value) === partId ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>领料仓库</span>
+        <select data-repair-part-field="warehouseId"${disabled}>
+          <option value="">按默认/单仓规则</option>
+          ${warehouseOptionsList.map(option => `<option value="${escapeAttr(option.value)}"${Number(option.value) === warehouseId ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        <span>数量</span>
+        <input type="number" min="1" step="1" data-repair-part-field="quantity" value="${escapeAttr(quantity)}"${disabled}>
+      </label>
+      <label>
+        <span>收费单价</span>
+        <input type="number" min="0" step="0.01" data-repair-part-field="chargeUnitPrice" value="${escapeAttr(unitPrice)}"${disabled}>
+      </label>
+      <label>
+        <span>折扣额</span>
+        <input type="number" min="0" step="0.01" data-repair-part-field="discountAmount" value="${escapeAttr(discount)}"${disabled}>
+      </label>
+      <label>
+        <span>收费金额</span>
+        <output data-repair-part-line-total>${escapeHtml(formatDecimal(lineAmount))}</output>
+      </label>
+      <label class="repair-part-usage-remark">
+        <span>备注</span>
+        <input type="text" data-repair-part-field="remark" value="${escapeAttr(row.remark ?? "")}"${disabled}>
+      </label>
+      ${readOnly ? "" : `<button class="btn btn-sm btn-danger" type="button" data-repair-part-action="remove" data-index="${escapeAttr(index)}">删除</button>`}
+    </div>
   `;
 }
 
@@ -4760,6 +5210,24 @@ function serializeForm(kind, form) {
     payload.roles = payload.role ? [payload.role] : ["USER"];
     delete payload.role;
   }
+  if (kind === "repair") {
+    payload.partUsages = collectRepairPartUsages(form);
+    const legacyUntracked = state.modal?.item?.partUsageTrackingStatus === "LEGACY_UNTRACKED";
+    const legacyPartIds = Array.isArray(state.modal?.item?.usedPartIds)
+      ? state.modal.item.usedPartIds
+      : String(state.modal?.item?.usedPartIds || "").split(",").map(value => value.trim()).filter(Boolean);
+    payload.usedPartIds = legacyUntracked
+      ? legacyPartIds.map(value => Number(value)).filter(Number.isFinite)
+      : payload.partUsages.flatMap(row =>
+        Array.from({ length: Math.max(0, Number(row.quantity || 0)) }, () => row.partId)
+      );
+    if (!legacyUntracked) {
+      payload.partsFee = formatDecimal(payload.partUsages.reduce(
+        (total, row) => total + repairPartUsageLineAmount(row.chargeUnitPrice, row.quantity, row.discountAmount),
+        0
+      ));
+    }
+  }
   return payload;
 }
 
@@ -4830,6 +5298,11 @@ function purchaseOrderDefaults(context = {}) {
   const entity = resourceType === "MACHINE"
     ? vehicleInboundDefaultsForModel(context)
     : { quantity: 1, unit: "件", status: "ORDERED", orderDate: todayInputDate() };
+  if (resourceType === "MACHINE") {
+    entity.status = "RECEIVED";
+    entity.orderDate = todayInputDate();
+    entity.freightAmount = 0;
+  }
   setPrefill(entity, "resourceType", resourceType, `默认：${resourceType === "MACHINE" ? "整车入库" : "配件入库"}`);
   if (context.supplierId) {
     const supplier = findEntity("supplier", Number(context.supplierId || 0));
@@ -5047,11 +5520,12 @@ function vehicleOutboundDefaultsForMachine(machine = {}, modelKey = null, contex
   };
   if (machine?.id) {
     setPrefill(entity, "machineId", machine.id, `预填：${vehicleNumberLabel(machine)}`);
-    const settlement = machine.settlementPrice || machine.salePrice || "";
-    const salePrice = machine.salePrice || machine.settlementPrice || "";
-    setPrefill(entity, "settlementPrice", settlement, settlement ? `预填：${money(settlement)}` : undefined);
-    setPrefill(entity, "salePrice", salePrice, salePrice ? `预填：${money(salePrice)}` : undefined);
-    setPrefill(entity, "receivableAmount", settlement, settlement ? `预填：${money(settlement)}` : undefined);
+    const unitSalePrice = machine.salePrice || machine.settlementPrice || "";
+    setPrefill(entity, "unitSalePrice", unitSalePrice, unitSalePrice ? `预填：${money(unitSalePrice)}` : undefined);
+    setPrefill(entity, "lineAmount", unitSalePrice, unitSalePrice ? `预填：${money(unitSalePrice)}` : undefined);
+    if (machine.warehouseId) {
+      setPrefill(entity, "warehouseId", machine.warehouseId, `预填：${warehouseNameById(machine.warehouseId)}`);
+    }
   } else {
     entity.__placeholders = {
       ...entity.__placeholders,
@@ -5087,14 +5561,15 @@ function vehicleOutboundDefaultsForModel(group = {}) {
 
 function syncVehicleOutboundDefaults(machineId) {
   const machine = findEntity("vehicle", Number(machineId || 0));
-  clearPrefill(state.modal.item, "settlementPrice");
-  clearPrefill(state.modal.item, "salePrice");
-  clearPrefill(state.modal.item, "receivableAmount");
-  const settlement = machine.settlementPrice || machine.salePrice || "";
-  const salePrice = machine.salePrice || machine.settlementPrice || "";
-  setPrefill(state.modal.item, "settlementPrice", settlement, settlement ? `预填：${money(settlement)}` : undefined);
-  setPrefill(state.modal.item, "salePrice", salePrice, salePrice ? `预填：${money(salePrice)}` : undefined);
-  setPrefill(state.modal.item, "receivableAmount", settlement, settlement ? `预填：${money(settlement)}` : undefined);
+  clearPrefill(state.modal.item, "unitSalePrice");
+  clearPrefill(state.modal.item, "lineAmount");
+  clearPrefill(state.modal.item, "warehouseId");
+  const unitSalePrice = machine.salePrice || machine.settlementPrice || "";
+  setPrefill(state.modal.item, "unitSalePrice", unitSalePrice, unitSalePrice ? `预填：${money(unitSalePrice)}` : undefined);
+  setPrefill(state.modal.item, "lineAmount", unitSalePrice, unitSalePrice ? `预填：${money(unitSalePrice)}` : undefined);
+  if (machine.warehouseId) {
+    setPrefill(state.modal.item, "warehouseId", machine.warehouseId, `预填：${warehouseNameById(machine.warehouseId)}`);
+  }
 }
 
 function syncPartOutboundDefaults(partCode) {
@@ -5102,11 +5577,26 @@ function syncPartOutboundDefaults(partCode) {
   if (part.version !== undefined) {
     state.modal.item.version = part.version;
   }
-  clearPrefill(state.modal.item, "settlementPrice");
-  clearPrefill(state.modal.item, "receivableAmount");
-  const price = part.settlementPrice || part.salePrice || "";
-  setPrefill(state.modal.item, "settlementPrice", price, price ? `预填：${money(price)}` : undefined);
-  setPrefill(state.modal.item, "receivableAmount", price, price ? `预填：${money(price)}` : undefined);
+  clearPrefill(state.modal.item, "unitSalePrice");
+  clearPrefill(state.modal.item, "lineAmount");
+  const price = part.salePrice || part.settlementPrice || "";
+  const quantity = Math.max(1, Number(state.modal.item.quantity || 1));
+  setPrefill(state.modal.item, "unitSalePrice", price, price ? `预填：${money(price)}` : undefined);
+  setPrefill(state.modal.item, "lineAmount", price ? formatDecimal(Number(price) * quantity) : "", price ? `预填：${money(Number(price) * quantity)}` : undefined);
+  if (part.warehouseId) {
+    setPrefill(state.modal.item, "warehouseId", part.warehouseId, `预填：${warehouseNameById(part.warehouseId)}`);
+  }
+}
+
+function syncPartAdjustmentDefaults(partCode) {
+  const part = state.data.parts.find(item => String(item.partCode) === String(partCode)) || {};
+  if (part.version !== undefined) {
+    state.modal.item.version = part.version;
+  }
+  clearPrefill(state.modal.item, "warehouseId");
+  if (part.warehouseId) {
+    setPrefill(state.modal.item, "warehouseId", part.warehouseId, `预填：${warehouseNameById(part.warehouseId)}`);
+  }
 }
 
 function modificationOrderDefaults(machine = {}, configId = null) {
@@ -5124,6 +5614,10 @@ function modificationOrderDefaults(machine = {}, configId = null) {
   if (config) {
     setPrefill(entity, "machineConfigId", config.id, `预填：${machineConfigOptionLabel(config)}`);
   }
+  if (machine.warehouseId) {
+    setPrefill(entity, "warehouseId", machine.warehouseId, `预填：${warehouseNameById(machine.warehouseId)}`);
+  }
+  setPrefill(entity, "workOrderType", "PRE_SALE", "默认：售前改装");
   entity.__placeholders = {
     ...(entity.__placeholders || {}),
     quantity: "默认：1",
@@ -5180,8 +5674,8 @@ function repairDefaults() {
     __placeholders: {
       machineId: "请从车辆库存中选择车号",
       customerId: "请从客户列表中选择客户",
-      usedPartIds: "可从配件库存中选择使用配件",
-      totalFee: "客户应收 = 维修收入 + 配件费；外部维修时另含维修支出"
+      partUsages: "按配件明细选择实际领料仓库和收费",
+      totalFee: "客户应收 = 服务费 + 配件收费 + 可转嫁金额；外协成本仅计入内部成本"
     }
   };
   setPrefill(entity, "repairPersonChoice", "OTHER", "预填：其他");
@@ -5219,12 +5713,94 @@ function prepareRepairModalItem(item = {}) {
     item.repairPersonChoice = item.repairExternal ? "OTHER" : (item.repairPersonUserId || "");
   }
   if (item.usedPartIds && typeof item.usedPartIds === "string") {
-    item.usedPartIds = item.usedPartIds.split(",").map(value => value.trim()).filter(Boolean)[0] || "";
+    item.usedPartIds = item.usedPartIds.split(",").map(value => value.trim()).filter(Boolean);
   }
+  ensureRepairPartUsageRows(item);
   if (item.totalFee === undefined || item.totalFee === null || item.totalFee === "") {
     item.totalFee = repairTotalFee(item);
   }
   return item;
+}
+
+function ensureRepairPartUsageRows(item = {}) {
+  if (Array.isArray(item.partUsages)) {
+    item.partUsages = item.partUsages.map(row => ({ ...row, quantity: Number(row.quantity || 1) }));
+    return item.partUsages;
+  }
+  const legacyIds = Array.isArray(item.usedPartIds)
+    ? item.usedPartIds
+    : String(item.usedPartIds || "").split(",").map(value => value.trim()).filter(Boolean);
+  item.partUsages = legacyIds.map(partId => ({
+    partId: Number(partId),
+    quantity: 1,
+    warehouseId: null,
+    chargeUnitPrice: null,
+    discountAmount: null,
+    remark: ""
+  }));
+  return item.partUsages;
+}
+
+function collectRepairPartUsages(form) {
+  if (!form) return [];
+  return [...form.querySelectorAll("[data-repair-part-row]")].map(row => {
+    const value = name => row.querySelector(`[data-repair-part-field="${name}"]`)?.value ?? "";
+    const id = Number.parseInt(value("id"), 10);
+    const partId = Number.parseInt(value("partId"), 10);
+    const warehouseId = Number.parseInt(value("warehouseId"), 10);
+    const quantity = Number.parseInt(value("quantity"), 10);
+    const chargeUnitPrice = value("chargeUnitPrice");
+    const discountAmount = value("discountAmount");
+    return {
+      ...(Number.isFinite(id) ? { id } : {}),
+      partId: Number.isFinite(partId) ? partId : null,
+      warehouseId: Number.isFinite(warehouseId) ? warehouseId : null,
+      quantity: Number.isFinite(quantity) ? quantity : 0,
+      chargeUnitPrice: chargeUnitPrice === "" ? null : chargeUnitPrice,
+      discountAmount: discountAmount === "" ? null : discountAmount,
+      remark: String(value("remark") || "").trim() || null
+    };
+  }).filter(row => row.partId || row.quantity || row.chargeUnitPrice || row.discountAmount || row.remark);
+}
+
+function syncRepairPartUsageEditor(form, changedRow = null) {
+  if (!form) return;
+  if (changedRow?.dataset?.repairPartRow !== undefined) {
+    const partId = Number(changedRow.querySelector('[data-repair-part-field="partId"]')?.value || 0);
+    const part = state.data.parts.find(item => Number(item.id) === partId);
+    if (part) {
+      const warehouse = changedRow.querySelector('[data-repair-part-field="warehouseId"]');
+      const unitPrice = changedRow.querySelector('[data-repair-part-field="chargeUnitPrice"]');
+      if (warehouse && !warehouse.value && part.warehouseId) warehouse.value = String(part.warehouseId);
+      if (unitPrice && !unitPrice.value) {
+        const defaultPrice = firstAmount(part.salePrice, part.settlementPrice, part.purchasePrice);
+        if (defaultPrice !== null) unitPrice.value = formatDecimal(defaultPrice);
+      }
+    }
+  }
+  const usages = collectRepairPartUsages(form);
+  state.modal.item.partUsages = usages;
+  const partsFee = usages.reduce(
+    (total, row) => total + repairPartUsageLineAmount(row.chargeUnitPrice, row.quantity, row.discountAmount),
+    0
+  );
+  setFormFieldValue(form, "partsFee", formatDecimal(partsFee), false);
+  for (const row of form.querySelectorAll("[data-repair-part-row]")) {
+    const lineTotal = repairPartUsageLineAmount(
+      row.querySelector('[data-repair-part-field="chargeUnitPrice"]')?.value,
+      row.querySelector('[data-repair-part-field="quantity"]')?.value,
+      row.querySelector('[data-repair-part-field="discountAmount"]')?.value
+    );
+    const output = row.querySelector("[data-repair-part-line-total]");
+    if (output) output.textContent = formatDecimal(lineTotal);
+  }
+  syncRepairTotalFee(form);
+}
+
+function repairPartUsageLineAmount(unitPrice, quantity, discountAmount) {
+  const total = amountValue(unitPrice) * Math.max(0, Number.parseInt(quantity, 10) || 0)
+    - amountValue(discountAmount);
+  return Math.max(0, total);
 }
 
 function repairUsesExternal(item = {}) {
@@ -5272,13 +5848,13 @@ function syncRepairTotalFee(form) {
     repairPersonChoice: form.elements.repairPersonChoice?.value,
     repairExternal: state.modal?.item?.repairExternal,
     repairFee: form.elements.repairFee?.value,
-    repairExpense: form.elements.repairExpense?.value,
-    partsFee: form.elements.partsFee?.value
+    partsFee: form.elements.partsFee?.value,
+    passThroughAmount: form.elements.passThroughAmount?.value
   }), false);
 }
 
 function repairTotalFee(item = {}) {
-  return decimalSum(item.repairFee, repairUsesExternal(item) ? item.repairExpense : 0, item.partsFee);
+  return decimalSum(item.repairFee, item.partsFee, item.passThroughAmount);
 }
 
 function decimalSum(...values) {
@@ -5325,13 +5901,26 @@ function syncRepairPartFee(form, partId) {
   }
 }
 
-function syncStocktakingQuantity(form, resourceId) {
+async function syncStocktakingQuantity(form, resourceId) {
   const type = String(form.elements.resourceType?.value || "PART").toUpperCase();
   const rows = type === "MACHINE" ? state.data.vehicles : state.data.parts;
   const resource = rows.find(item => Number(item.id) === Number(resourceId));
   if (!resource) return;
-  const quantity = type === "MACHINE" ? resource.inventoryCount : resource.quantity;
+  let warehouseId = Number(form.elements.warehouseId?.value || 0);
+  if (!warehouseId && resource.warehouseId) {
+    warehouseId = Number(resource.warehouseId);
+    setFormFieldValue(form, "warehouseId", warehouseId, false);
+    state.modal.item.warehouseId = warehouseId;
+  }
+  if (!warehouseId) return;
+  const params = new URLSearchParams({
+    resourceType: type,
+    resourceId: String(resourceId),
+    warehouseId: String(warehouseId)
+  });
+  const quantity = await api(`${endpoints.warehouse.balance}?${params.toString()}`);
   setFormFieldValue(form, "actualQuantity", quantity ?? 0, false);
+  state.modal.item.actualQuantity = Number(quantity || 0);
 }
 
 function syncStockTransferResource(form, resourceId) {
@@ -5357,6 +5946,18 @@ function syncPurchaseResourceDefaults(form) {
   }
 }
 
+function syncPurchaseSkuDefaults(form) {
+  if (purchaseOrderResourceType() !== "PART") return;
+  const meta = selectedComboMeta(form, "resourceId");
+  if (!meta) return;
+  if (meta.unit && !String(form.elements.unit?.value || "").trim()) {
+    setFormFieldValue(form, "unit", meta.unit, false);
+  }
+  if (meta.warehouseId && !String(form.elements.warehouseId?.value || "").trim()) {
+    setFormFieldValue(form, "warehouseId", meta.warehouseId, false);
+  }
+}
+
 function applyPurchaseOrderResourceMode(form, value) {
   const type = String(value || "PART").toUpperCase() === "MACHINE" ? "MACHINE" : "PART";
   state.modal.item.resourceType = type;
@@ -5369,6 +5970,9 @@ function applyPurchaseOrderResourceMode(form, value) {
     state.modal.item.settlementPrice = null;
     state.modal.item.unitPrice = null;
     state.modal.item.totalAmount = null;
+    state.modal.item.status = "RECEIVED";
+    state.modal.item.orderDate ||= todayInputDate();
+    state.modal.item.freightAmount ??= 0;
     state.modal.item.__placeholders = {
       ...vehicleInboundDefaultsForModel(state.modal.item).__placeholders,
       ...(state.modal.item.__placeholders || {})
@@ -5379,6 +5983,7 @@ function applyPurchaseOrderResourceMode(form, value) {
   state.modal.item.resourceCode = null;
   state.modal.item.resourceName = null;
   state.modal.item.specificationModel = null;
+  state.modal.item.status = "ORDERED";
   if (!state.modal.item.unit || state.modal.item.unit === "台") {
     state.modal.item.unit = "件";
   }
@@ -5398,31 +6003,31 @@ function syncPurchaseAmount(form, changedName) {
 }
 
 function isPaymentField(name) {
-  return ["settlementPrice", "salePrice", "receivableAmount", "receivedAmount", "paymentSettled", "lastPaymentDate", "quantity"].includes(name);
+  return ["unitSalePrice", "lineAmount", "receivedAmount", "paymentSettled", "lastPaymentDate", "quantity"].includes(name);
 }
 
 function syncPaymentFields(form, changedName) {
   if (!form) return;
   const quantity = Math.max(1, amountValue(form.elements.quantity?.value || 1));
-  const settlement = amountValue(form.elements.settlementPrice?.value);
-  const sale = amountValue(form.elements.salePrice?.value);
-  const currentReceivable = amountValue(form.elements.receivableAmount?.value);
-  const unitOrTotal = settlement || sale;
-  if (["settlementPrice", "salePrice", "quantity"].includes(changedName) && unitOrTotal > 0) {
-    const nextReceivable = form.dataset.kind === "partStock" ? unitOrTotal * quantity : unitOrTotal;
-    if (!currentReceivable || changedName === "quantity") {
-      setFormFieldValue(form, "receivableAmount", formatDecimal(nextReceivable), false);
-    }
+  const unitSalePrice = amountValue(form.elements.unitSalePrice?.value);
+  if (["unitSalePrice", "quantity"].includes(changedName) && unitSalePrice > 0) {
+    const nextLineAmount = unitSalePrice * quantity;
+    setFormFieldValue(form, "lineAmount", formatDecimal(nextLineAmount), false);
   }
-  const receivable = amountValue(form.elements.receivableAmount?.value);
+  const receivable = amountValue(form.elements.lineAmount?.value);
+  if (changedName === "paymentSettled" && form.elements.paymentSettled?.checked && receivable > 0) {
+    setFormFieldValue(form, "receivedAmount", formatDecimal(receivable), false);
+  }
   const received = amountValue(form.elements.receivedAmount?.value);
   if (received > 0 && !String(form.elements.lastPaymentDate?.value || "").trim()) {
     setFormFieldValue(form, "lastPaymentDate", todayInputDate(), false);
   }
-  if (receivable > 0 && received >= receivable) {
-    setFormFieldValue(form, "paymentSettled", true, false);
-  } else if (changedName === "receivedAmount" && received > 0 && receivable > received) {
-    setFormFieldValue(form, "paymentSettled", false, false);
+  if (changedName !== "paymentSettled") {
+    if (receivable > 0 && received >= receivable) {
+      setFormFieldValue(form, "paymentSettled", true, false);
+    } else if (changedName === "receivedAmount" && received > 0 && receivable > received) {
+      setFormFieldValue(form, "paymentSettled", false, false);
+    }
   }
 }
 
@@ -5450,18 +6055,13 @@ function datePart(value) {
   return text.length >= 10 ? text.slice(0, 10) : null;
 }
 
-function enrichPurchaseOrderPayload(payload, form) {
+function enrichPurchaseOrderPayload(payload, form, item = {}) {
   const type = String(payload.resourceType || "PART").toUpperCase() === "MACHINE" ? "MACHINE" : "PART";
   payload.resourceType = type;
   if (type === "PART") {
-    const meta = selectedComboMeta(form, "configValueId");
-    if (meta) {
-      payload.resourceCode = meta.valueCode || null;
-      payload.resourceName = meta.valueLabel || null;
-      payload.specificationModel = meta.itemLabel || null;
-      if (!payload.unit && meta.unit) {
-        payload.unit = meta.unit;
-      }
+    const sku = selectedComboMeta(form, "resourceId");
+    if (sku?.unit && !payload.unit) {
+      payload.unit = sku.unit;
     }
     return;
   }
@@ -5478,7 +6078,7 @@ function enrichPurchaseOrderPayload(payload, form) {
     payload.totalAmount = formatDecimal(amountValue(machineSettlementPrice) * Math.max(1, Number(payload.quantity || 1)));
   }
   payload.orderDate = payload.orderDate || datePart(payload.inboundDate) || todayInputDate();
-  payload.status = payload.status || "RECEIVED";
+  payload.status = payload.status || item.status || "RECEIVED";
   payload.remark = payload.remarks || payload.remark || null;
 }
 
@@ -5584,7 +6184,11 @@ function usesVehicleInboundConfigEditor(kind, item = state.modal?.item || {}) {
 }
 
 function vehicleInboundFormFields(item = state.modal?.item || {}) {
-  const baseFields = fields.vehicleInbound.filter(field => field.name !== "salePrice");
+  const baseFields = fields.vehicleInbound
+    .filter(field => field.name !== "salePrice")
+    .map(field => field.name === "stockStatus"
+      ? { ...field, type: "hidden", defaultValue: "IN_STOCK", required: false }
+      : field);
   if (!isManualForklift(fieldOrPrefillValue(item, "machineType"))) {
     return baseFields;
   }
@@ -5595,16 +6199,68 @@ function vehicleInboundFormFields(item = state.modal?.item || {}) {
   ];
 }
 
+function inventoryMasterFormFields(kind, item = {}) {
+  const source = fields[kind] || [];
+  if (!item?.id || Boolean(item.modelOnly)) return source;
+  const hiddenNames = new Set(["warehouseId", ...(kind === "vehicle" ? ["stockStatus"] : [])]);
+  const readOnlyNames = new Set([
+    kind === "vehicle" ? "inventoryCount" : "quantity",
+    "purchasePrice",
+    "landedUnitCost"
+  ]);
+  return source.map(field => {
+    if (hiddenNames.has(field.name)) {
+      return { ...field, type: "hidden", required: false };
+    }
+    if (readOnlyNames.has(field.name)) {
+      return { ...field, readOnly: true };
+    }
+    return field;
+  });
+}
+
+function modificationOrderFormFields(item = state.modal?.item || {}) {
+  if (!isModificationDiscountMode(item)) return fields.modificationOrder;
+  return fields.modificationOrder.flatMap(field => {
+    if (field.name === "newPartId") {
+      return [{
+        name: "newConfigValueId",
+        label: "目标新配件",
+        type: "select",
+        coerce: "int",
+        required: true,
+        options: discountConfigValueOptions
+      }];
+    }
+    if (field.name === "quantity") {
+      return [{ name: "quantity", type: "hidden", coerce: "int", defaultValue: 1 }];
+    }
+    return [field];
+  });
+}
+
 function getFields(kind, item = state.modal?.item || {}) {
+  if (kind === "vehicle" || kind === "part") {
+    return inventoryMasterFormFields(kind, item);
+  }
   if (kind === "purchaseOrder") {
     const type = purchaseOrderResourceType(item);
     if (type === "MACHINE") {
       const resourceTypeField = fields.purchaseOrder.find(field => field.name === "resourceType");
       const specificationField = fields.purchaseOrder.find(field => field.name === "specificationModel");
+      const purchaseOnlyNames = new Set([
+        "freightAmount",
+        "orderDate",
+        "expectedArrivalDate",
+        "receivedDate",
+        "status",
+        "operator"
+      ]);
       return [
         ...(resourceTypeField ? [resourceTypeField] : []),
         ...(specificationField ? [specificationField] : []),
-        ...vehicleInboundFormFields(item).filter(field => field.name !== "specificationModel")
+        ...vehicleInboundFormFields(item).filter(field => field.name !== "specificationModel"),
+        ...fields.purchaseOrder.filter(field => purchaseOnlyNames.has(field.name))
       ];
     }
     const partFields = new Set(["configItemId", "configValueId"]);
@@ -5633,6 +6289,15 @@ function getFields(kind, item = state.modal?.item || {}) {
   if (kind === "repair") {
     return fields.repair.filter(field => field.name !== "repairExpense" || repairUsesExternal(item));
   }
+  if (kind === "rental" && !item?.id) {
+    return fields.rental.flatMap(field => {
+      if (field.name === "returnDate") return [];
+      if (field.name === "status") {
+        return [{ name: "status", type: "hidden", defaultValue: "ACTIVE" }];
+      }
+      return [field];
+    });
+  }
   if (kind === "vehicleConfigChange") {
     const mode = vehicleConfigChangeMode(item);
     if (mode === "INSTALL") {
@@ -5649,36 +6314,14 @@ function getFields(kind, item = state.modal?.item || {}) {
     }
     return [
       ...fields.vehicleConfigChange,
-      ...fields.modificationOrder.flatMap(field => {
-        if (field.name === "newPartId") {
-          return [
-            { name: "newConfigValueId", label: "目标新配件", type: "select", coerce: "int", required: true, options: discountConfigValueOptions },
-            { name: "priceDifference", label: "新件差价", type: "number", coerce: "decimal", step: "0.01", required: true, placeholder: "正数为支出，负数为收入" }
-          ];
-        }
-        if (field.name === "quantity") {
-          return [{ name: "quantity", type: "hidden", coerce: "int", defaultValue: 1 }];
-        }
-        return [field];
-      })
+      ...modificationOrderFormFields(item)
     ];
   }
   if (kind === "partStock" && item.direction === "outbound") {
     return fields.partOutbound;
   }
-  if (kind === "modificationOrder" && isModificationDiscountMode(item)) {
-    return fields.modificationOrder.flatMap(field => {
-      if (field.name === "newPartId") {
-        return [
-          { name: "newConfigValueId", label: "目标新配件", type: "select", coerce: "int", required: true, options: discountConfigValueOptions },
-          { name: "priceDifference", label: "新件差价", type: "number", coerce: "decimal", step: "0.01", required: true, placeholder: "正数为支出，负数为收入" }
-        ];
-      }
-      if (field.name === "quantity") {
-        return [{ name: "quantity", type: "hidden", coerce: "int", defaultValue: 1 }];
-      }
-      return [field];
-    });
+  if (kind === "modificationOrder") {
+    return modificationOrderFormFields(item);
   }
   return fields[kind] || [];
 }
@@ -5700,7 +6343,14 @@ function nextConfigItemCode() {
 }
 
 function findEntity(kind, id) {
-  return entityRows(kind).find(item => item.id === id) || {};
+  const detail = state.vehicleDetail || {};
+  const contextualRows = kind === "vehicle" ? [
+    detail.machine,
+    detail.selectedDetail?.machine,
+    ...(detail.vehicles || [])
+  ].filter(Boolean) : [];
+  return [...entityRows(kind), ...contextualRows]
+    .find(item => item?.id !== null && item?.id !== undefined && id !== null && id !== undefined && String(item.id) === String(id)) || {};
 }
 
 function entityRows(kind) {
@@ -5795,6 +6445,15 @@ function modalTitle(kind, item) {
   if (kind === "vehicleConfigChange") {
     return `车辆配置变更：${vehicleConfigChangeModeLabel(vehicleConfigChangeMode(item))}`;
   }
+  if (kind === "paymentRecord") {
+    return `${item?.direction === "PAYMENT" ? "登记付款" : "登记收款"}：${item?.sourceLabel || "业务单据"}`;
+  }
+  if (kind === "paymentReversal") {
+    return `冲销收付款：${item?.sourceLabel || "业务单据"}`;
+  }
+  if (kind === "removedPartValuation") {
+    return `确认旧件估值：${item?.partLabel || "拆下件"}`;
+  }
   const names = {
     vehicle: "整车档案",
     vehicleModel: "车型",
@@ -5807,6 +6466,9 @@ function modalTitle(kind, item) {
     supplier: "采购供应商",
     purchaseOrder: "入库订单",
     purchaseFreight: "修改运费",
+    paymentRecord: "收付款记录",
+    paymentReversal: "收付款冲销",
+    removedPartValuation: "旧件估值",
     stocktaking: "库存盘点",
     warehouse: "仓库",
     stockTransfer: "库存调拨",
@@ -5819,17 +6481,20 @@ function modalTitle(kind, item) {
     configValue: "配置值",
     vehicleConfigItem: "整车配置项",
     vehicleConfigValue: "整车配置值",
-    vehicleStock: item?.direction === "outbound" ? "整车出库" : "整车入库",
-    partStock: item?.direction === "outbound" ? "配件出库" : "配件入库",
+    vehicleStock: item?.direction === "inbound" ? "整车入库调整" : "整车库存减少",
+    partStock: item?.direction === "outbound"
+      ? "配件销售出库"
+      : item?.direction === "adjustOutbound" ? "配件库存减少" : "配件入库调整",
     partReplace: "配件替换",
     vehiclePartInstall: "新增装车配件",
     modificationOrder: "改装工单",
     user: "用户",
     userUsername: "修改用户名",
     userPassword: "修改密码",
+    userJobTag: "设置用户职务",
     switchUser: "切换用户"
   };
-  if (kind === "switchUser" || kind === "vehicleStock" || kind === "vehicleInbound" || kind === "vehicleOutbound" || kind === "rental" || kind === "partStock" || kind === "partReplace" || kind === "vehiclePartInstall" || kind === "modificationOrder" || kind === "vehicleConfigChange" || kind === "stockTransfer" || kind === "dataRestore" || kind === "userUsername" || kind === "userPassword" || kind === "invoiceUpload" || kind === "contractUpload") {
+  if (kind === "switchUser" || kind === "vehicleStock" || kind === "vehicleInbound" || kind === "vehicleOutbound" || kind === "rental" || kind === "partStock" || kind === "partReplace" || kind === "vehiclePartInstall" || kind === "modificationOrder" || kind === "vehicleConfigChange" || kind === "stockTransfer" || kind === "dataRestore" || kind === "userUsername" || kind === "userPassword" || kind === "userJobTag" || kind === "invoiceUpload" || kind === "contractUpload" || kind === "paymentRecord" || kind === "paymentReversal" || kind === "removedPartValuation") {
     return (kind === "invoiceUpload" || kind === "contractUpload") && item?.orderNo ? `${names[kind]}：${item.orderNo}` : names[kind];
   }
   if (kind === "configValue" || kind === "user" || kind === "vehicleModel") return `新增${names[kind]}`;
@@ -5855,6 +6520,9 @@ function modalSubtitle(kind) {
     supplier: "维护采购供应商、联系人、税号、账号和备注。",
     purchaseOrder: "配件入库可从配置字典带入名称、编码与规格；整车入库会创建库存车辆并按规格型号带入结构化配置。",
     purchaseFreight: "运费默认为 0；只在实际产生运费时修改。",
+    paymentRecord: "本次金额会生成不可变收付款流水，并同步实际现金收支；如录入错误请使用冲销。",
+    paymentReversal: "冲销不会删除原记录，而是生成等额反向流水以保留完整审计链。",
+    removedPartValuation: "确认后会更新旧件 FIFO 单价、解除隔离锁定，并把新增库存价值计入库存收益。",
     stocktaking: "先创建盘点草稿；确认入账后才会同步库存数量。",
     warehouse: "维护仓库编码、名称、类型和默认仓设置。",
     stockTransfer: "选择整车或配件，从一个仓库调拨到另一个仓库并生成库存流水。",
@@ -5867,14 +6535,15 @@ function modalSubtitle(kind) {
     configValue: "为当前配置项添加可选值。",
     vehicleConfigItem: "维护整车规格型号，用于整车采购和车型入库时拉取默认配置。",
     vehicleConfigValue: "从配件配置项和值中选择车辆各部分默认配置。",
-    vehicleStock: "调整已有整车的库存数量。",
-    partStock: "入库只调整库存；出库会选择客户并生成出库订单。",
+    vehicleStock: "仅用于盘盈、盘亏或历史纠偏；正常销售请使用整车销售出库。",
+    partStock: "销售出库会生成客户订单；入库调整和库存减少仅用于盘盈、盘亏或历史纠偏。",
     partReplace: "选择车辆上的旧配件，并用同类型库存配件替换；拆下件会自动入库。",
     vehiclePartInstall: "从配件仓库领料装到当前整车，只需选择分类、库存配件和数量。",
     modificationOrder: "只填写这次客户要求替换的配置；完成工单时才会生成库存流水并更新车辆配置。",
     user: "由超级管理员创建管理员或普通用户。",
     userUsername: "仅超级管理员可修改管理员或普通用户的登录名。",
     userPassword: "仅超级管理员可重置管理员或普通用户的登录密码。",
+    userJobTag: "选择管理、文员或维修；职务会影响维修人员选择和业务分配。",
     switchUser: "输入另一个账号后立即进入对应权限。"
   };
   return subtitles[kind] || "";
@@ -6279,14 +6948,17 @@ function vehicleOutboundOptions() {
 }
 
 function canOutboundVehicle(item) {
-  return !item.modelOnly && Number(item.inventoryCount || 0) > 0 && item.stockStatus !== "OUTBOUND" && !activeRentalForMachine(item.id);
+  return !item.modelOnly
+    && Number(item.inventoryCount || 0) > 0
+    && !["OUTBOUND", "RENTED"].includes(item.stockStatus)
+    && !activeRentalForMachine(item.id);
 }
 
 function vehicleRentalOptions() {
   const currentRentalId = state.modal?.item?.id;
   return state.data.vehicles
     .filter(item => !item.modelOnly)
-    .filter(item => Number(item.inventoryCount || 0) > 0 && item.stockStatus !== "OUTBOUND")
+    .filter(item => Number(item.inventoryCount || 0) > 0 && !["OUTBOUND", "RENTED"].includes(item.stockStatus))
     .filter(item => {
       const rental = activeRentalForMachine(item.id);
       return !rental || Number(rental.id) === Number(currentRentalId);
@@ -6323,9 +6995,12 @@ function customerEntryModeOptions() {
 }
 
 function supplierOptions() {
-  return state.data.suppliers.map(item => ({
+  const currentSupplierId = Number(effectiveFieldValue(state.modal?.item || {}, "supplierId") || 0);
+  return state.data.suppliers
+    .filter(item => item.active !== false || Number(item.id) === currentSupplierId)
+    .map(item => ({
     value: item.id,
-    label: `${item.supplierName || "-"}${item.contactName ? " / " + item.contactName : ""}`,
+    label: `${item.supplierName || "-"}${item.active === false ? "（已停用）" : ""}${item.contactName ? " / " + item.contactName : ""}`,
     meta: {
       contactPhone: item.contactPhone,
       supplierType: item.supplierType
@@ -6338,6 +7013,23 @@ function purchaseResourceTypeOptions() {
     { value: "PART", label: "配件订单" },
     { value: "MACHINE", label: "整车订单" }
   ];
+}
+
+function purchaseResourceOptions() {
+  if (purchaseOrderResourceType() !== "PART") {
+    return [];
+  }
+  return state.data.parts.filter(part => !part.isLocked).map(part => ({
+    value: part.id,
+    label: `${part.partCode || part.id} · ${part.partName || "-"} / ${part.specification || "-"}（当前 ${part.quantity ?? 0}${part.unit || ""}）`,
+    meta: {
+      partCode: part.partCode,
+      partName: part.partName,
+      specification: part.specification,
+      unit: part.unit,
+      warehouseId: part.warehouseId
+    }
+  }));
 }
 
 function purchaseStatusOptions() {
@@ -6382,12 +7074,12 @@ function stocktakingResourceOptions() {
       .filter(item => !item.modelOnly)
       .map(item => ({
         value: item.id,
-        label: `${vehicleNumberLabel(item)} / 账面 ${item.inventoryCount ?? 0}`
+        label: `${vehicleNumberLabel(item)} / 总库存 ${item.inventoryCount ?? 0}`
       }));
   }
   return state.data.parts.map(item => ({
     value: item.id,
-    label: `${item.partCode || "-"} / ${item.partName || "-"} / 账面 ${item.quantity ?? 0}${item.unit || ""}`
+    label: `${item.partCode || "-"} / ${item.partName || "-"} / 总库存 ${item.quantity ?? 0}${item.unit || ""}`
   }));
 }
 
@@ -6421,6 +7113,7 @@ function stockTransferResourceOptions() {
     return state.data.vehicles
       .filter(item => !item.modelOnly)
       .filter(item => Number(item.inventoryCount || 0) > 0)
+      .filter(item => item.stockStatus !== "RENTED" && !activeRentalForMachine(item.id))
       .map(item => ({
         value: item.id,
         label: `${vehicleNumberLabel(item)} / ${warehouseNameById(item.warehouseId)} / 库存 ${item.inventoryCount ?? 0}`,
@@ -6451,7 +7144,7 @@ function stockTransferResourceName(payload = {}) {
 }
 
 function partCodeOptions() {
-  return state.data.parts.map(item => ({
+  return state.data.parts.filter(item => !item.isLocked).map(item => ({
     value: item.partCode,
     label: `${item.partCode || "-"} · ${item.partName || "-"}（库存 ${item.quantity ?? 0}${item.unit || ""}）`
   }));
@@ -6492,6 +7185,7 @@ function discountConfigValueOptions() {
 
 function installPartCategoryOptions() {
   const availableCategories = new Set(state.data.parts
+    .filter(part => !part.isLocked)
     .filter(part => Number(part.quantity || 0) > 0)
     .map(part => normalizeText(part.partCategory))
     .filter(Boolean));
@@ -6508,6 +7202,7 @@ function installPartOptions() {
   const selectedItem = state.data.configItems.find(item => String(item.id) === String(state.modal?.item?.configItemId));
   const selectedCategory = normalizeText(configPartCategory(selectedItem));
   return state.data.parts
+    .filter(part => !part.isLocked)
     .filter(part => Number(part.quantity || 0) > 0)
     .filter(part => !selectedCategory || normalizeText(part.partCategory) === selectedCategory)
     .map(part => ({
@@ -6527,13 +7222,11 @@ function stockStatusOptions() {
   return [
     { value: "PENDING_INBOUND", label: "待入库" },
     { value: "IN_STOCK", label: "在库" },
+    { value: "RENTED", label: "租赁中" },
     { value: "PENDING_MODIFICATION", label: "待改装" },
     { value: "MODIFYING", label: "改装中" },
     { value: "PENDING_OUTBOUND", label: "待出库" },
-    { value: "OUTBOUND", label: "已出库" },
-    { value: "OUT_OF_STOCK", label: "已出库" },
-    { value: "RESERVED", label: "已预留" },
-    { value: "LOCKED", label: "已锁定" }
+    { value: "OUTBOUND", label: "已出库" }
   ];
 }
 
@@ -6574,7 +7267,7 @@ function hasAnyRole(...roles) {
 }
 
 function repairPartOptions() {
-  return state.data.parts.map(item => ({
+  return state.data.parts.filter(item => !item.isLocked).map(item => ({
     value: item.id,
     label: `${item.partCode || "-"} · ${item.partName || "-"}（库存 ${item.quantity ?? 0}${item.unit || ""}）`
   }));
@@ -6591,10 +7284,31 @@ function repairPersonOptions() {
 }
 
 function rentalStatusOptions() {
+  if (state.modal?.item?.financialPosted) {
+    return [{ value: "RETURNED", label: "已归还（已生成账单）" }];
+  }
   return [
     { value: "ACTIVE", label: "租赁中" },
     { value: "RETURNED", label: "已归还" }
   ];
+}
+
+function paymentReversalOptions() {
+  const records = state.modal?.item?.paymentRecords || [];
+  const reversedIds = new Set(records
+    .map(record => record.reversalOfPaymentId)
+    .filter(Boolean)
+    .map(String));
+  return records
+    .filter(record =>
+      Number(record.amount || 0) > 0
+      && !record.reversalOfPaymentId
+      && !reversedIds.has(String(record.id))
+    )
+    .map(record => ({
+      value: record.id,
+      label: `${record.sourceLabel ? `${record.sourceLabel} · ` : ""}${record.paymentNo || `#${record.id}`} · ${dateValue(record.paymentDate) || "-"} · ${record.direction === "PAYMENT" ? "付款" : "收款"} ${money(record.amount)}`
+    }));
 }
 
 function hasPermission(permission) {
@@ -6705,7 +7419,8 @@ function renderLoadError(error) {
   return `
     <div class="surface">
       <div class="surface-body">
-        <div class="empty-state">
+        <div class="empty-state empty-state-error">
+          <span class="empty-state-visual" aria-hidden="true">${icons.warning}</span>
           <strong>数据加载失败</strong>
           <span>${escapeHtml(error?.message || "请刷新后重试")}</span>
           <button class="btn btn-primary" type="button" data-action="refresh">${icon("refresh")}重新加载</button>
@@ -6737,7 +7452,7 @@ function modalDangerConfirmation(kind, item = {}, payload = {}) {
     };
   }
   if (kind === "vehicleStock") {
-    const outbound = item.direction === "outbound";
+    const outbound = item.direction !== "inbound";
     return {
       title: outbound ? "确认整车出库调整" : "确认整车入库调整",
       target: entityDisplayName("vehicle", findEntity("vehicle", Number(payload.machineId || 0))),
@@ -6745,11 +7460,14 @@ function modalDangerConfirmation(kind, item = {}, payload = {}) {
     };
   }
   if (kind === "partStock") {
-    const outbound = item.direction === "outbound";
+    const saleOutbound = item.direction === "outbound";
+    const adjustmentOutbound = item.direction === "adjustOutbound";
     return {
-      title: outbound ? "确认配件出库" : "确认配件入库调整",
+      title: saleOutbound ? "确认配件销售出库" : adjustmentOutbound ? "确认配件库存减少" : "确认配件入库调整",
       target: payload.partCode || entityDisplayName("part", item),
-      impact: outbound ? "将创建配件出库订单并扣减库存。" : `配件库存将增加 ${payload.quantity || 0}，请确认编码和数量无误。`
+      impact: saleOutbound
+        ? "将创建配件出库订单、确认应收并扣减 FIFO 库存。"
+        : `配件库存将${adjustmentOutbound ? "减少" : "增加"} ${payload.quantity || 0}，并按库存调整计入损益。`
     };
   }
   if (kind === "partReplace") {
@@ -6778,6 +7496,27 @@ function modalDangerConfirmation(kind, item = {}, payload = {}) {
       title: "确认修改采购运费",
       target: entityDisplayName("purchaseOrder", item),
       impact: "运费会影响采购成本统计，请确认金额无误。"
+    };
+  }
+  if (kind === "paymentRecord") {
+    return {
+      title: item.direction === "PAYMENT" ? "确认登记付款" : "确认登记收款",
+      target: item.sourceLabel || "业务单据",
+      impact: "将生成现金流水并参与收支统计；保存后不能直接修改，只能冲销。"
+    };
+  }
+  if (kind === "paymentReversal") {
+    return {
+      title: "确认冲销收付款",
+      target: item.sourceLabel || "业务单据",
+      impact: "将生成等额反向流水，原记录和审计历史都会保留。"
+    };
+  }
+  if (kind === "removedPartValuation") {
+    return {
+      title: "确认旧件估值",
+      target: item.partLabel || "拆下件",
+      impact: "将更新 FIFO 库存价值、解除隔离锁定并生成库存收益记录；确认后不可直接改价。"
     };
   }
   if (kind === "userUsername") {

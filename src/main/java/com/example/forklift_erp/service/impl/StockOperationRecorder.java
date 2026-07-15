@@ -6,11 +6,13 @@ import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.repository.StockOperationLogRepository;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.StockLedgerService;
+import com.example.forklift_erp.constant.StockBusinessType;
 import com.example.forklift_erp.util.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Service
 public class StockOperationRecorder {
@@ -129,12 +131,37 @@ public class StockOperationRecorder {
                 operator,
                 command.remark(),
                 movementSourceType,
-                movementSourceId
+                movementSourceId,
+                null,
+                command.businessDate() == null ? LocalDate.now() : command.businessDate(),
+                command.businessType() == null || command.businessType().isBlank()
+                        ? inferredBusinessType(command)
+                        : command.businessType(),
+                command.unitRevenue(),
+                command.idempotencyKey(),
+                command.stockLotId()
         );
         operationAuditService.record(command.auditModule(), command.operationType(), command.resourceType(), command.resourceId(),
                 command.resourceCode(), command.resourceName(), command.auditSummary(), operator, command.remark(),
                 AUDIT_SOURCE_TYPE, savedLog.getId());
         return savedLog;
+    }
+
+    private String inferredBusinessType(Command command) {
+        if ("INITIAL".equals(command.operationType())) {
+            return StockBusinessType.INITIAL_BALANCE;
+        }
+        if ("ADJUST".equals(command.operationType())
+                || "STOCK_ADJUSTMENT".equals(command.movementSourceType())) {
+            return StockBusinessType.STOCK_ADJUSTMENT;
+        }
+        if ("INBOUND".equals(command.operationType())) {
+            return StockBusinessType.OTHER_INBOUND;
+        }
+        if ("OUTBOUND".equals(command.operationType())) {
+            return StockBusinessType.OTHER_OUTBOUND;
+        }
+        return command.operationType();
     }
 
     public record Command(
@@ -154,7 +181,54 @@ public class StockOperationRecorder {
             String remark,
             String movementSourceType,
             Long movementSourceId,
-            String auditSummary
+            String auditSummary,
+            LocalDate businessDate,
+            String businessType,
+            String idempotencyKey,
+            Long stockLotId
     ) {
+        public Command(
+                String auditModule,
+                String resourceType,
+                Long resourceId,
+                String resourceCode,
+                String resourceName,
+                Long warehouseId,
+                String operationType,
+                Integer quantity,
+                Integer beforeQuantity,
+                Integer afterQuantity,
+                BigDecimal unitCost,
+                BigDecimal unitRevenue,
+                String operator,
+                String remark,
+                String movementSourceType,
+                Long movementSourceId,
+                String auditSummary
+        ) {
+            this(
+                    auditModule,
+                    resourceType,
+                    resourceId,
+                    resourceCode,
+                    resourceName,
+                    warehouseId,
+                    operationType,
+                    quantity,
+                    beforeQuantity,
+                    afterQuantity,
+                    unitCost,
+                    unitRevenue,
+                    operator,
+                    remark,
+                    movementSourceType,
+                    movementSourceId,
+                    auditSummary,
+                    null,
+                    null,
+                    null,
+                    null
+            );
+        }
     }
 }

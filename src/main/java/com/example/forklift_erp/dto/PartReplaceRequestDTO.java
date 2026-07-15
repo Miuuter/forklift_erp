@@ -5,6 +5,9 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+
 @Data
 public class PartReplaceRequestDTO {
     private Long machineVersion;
@@ -24,8 +27,17 @@ public class PartReplaceRequestDTO {
     private Integer quantity = 1;
 
     private String oldPartAction = PartChangeAction.STOCK_IN.code();
+    private String oldPartDisposition;
+    private Long oldPartWarehouseId;
+    private String oldPartCondition;
+    private String oldPartValuationSource;
+    private BigDecimal oldPartUnitCost;
+    private Long warehouseId;
+    private LocalDate businessDate;
+    private String workOrderType;
     private String stockMovementSourceType;
     private Long stockMovementSourceId;
+    private Long stockMovementSourceLineId;
     private String operator;
     private String remark;
 }

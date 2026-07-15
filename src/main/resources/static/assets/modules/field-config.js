@@ -33,8 +33,10 @@ export function createFields(deps) {
     jobTagOptions,
     rentalStatusOptions,
     purchaseConfigValueOptions,
+    purchaseResourceOptions,
     purchaseSpecificationModelOptions,
     purchaseStatusOptions,
+    paymentReversalOptions,
     stocktakingResourceTypeOptions,
     stocktakingResourceOptions,
     stocktakingStatusOptions,
@@ -54,7 +56,8 @@ export function createFields(deps) {
   vehicle: [
     { name: "vehicleProductNumber", label: "车号/产品编号", required: true, section: "入库信息" },
     { name: "inboundDate", label: "入库日期", type: "datetime-local", coerce: "datetime", defaultValue: nowInputDateTime, section: "入库信息" },
-    { name: "supplier", label: "供应商", section: "入库信息" },
+    { name: "supplierId", label: "供应商", type: "select", coerce: "int", options: supplierOptions, section: "入库信息" },
+    { name: "warehouseId", label: "实际仓库", type: "select", coerce: "int", options: warehouseOptions, section: "入库信息" },
     { name: "warehouseName", label: "经销商名称/仓位", section: "入库信息" },
     { name: "applicationNumber", label: "样机申请单号", section: "入库信息" },
     { name: "materialNumber", label: "物料号", section: "入库信息" },
@@ -68,6 +71,7 @@ export function createFields(deps) {
     { name: "manufacturingDate", label: "制造日期", type: "date", coerce: "date", section: "整机识别" },
     { name: "stockStatus", label: "库存状态", type: "select", options: stockStatusOptions(), defaultValue: "IN_STOCK", section: "价格库存" },
     { name: "purchasePrice", label: "采购价", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
+    { name: "landedUnitCost", label: "落地成本", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
     { name: "settlementPrice", label: "结算价", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
     { name: "salePrice", label: "销售单价", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
     { name: "inventoryCount", label: "库存数", type: "number", coerce: "int", step: "1", defaultValue: 1, section: "价格库存" },
@@ -95,7 +99,8 @@ export function createFields(deps) {
   vehicleInbound: [
     { name: "vehicleProductNumber", label: "车号/产品编号", required: true, section: "入库信息" },
     { name: "inboundDate", label: "入库日期", type: "datetime-local", coerce: "datetime", defaultValue: nowInputDateTime, section: "入库信息" },
-    { name: "supplier", label: "供应商", section: "入库信息" },
+    { name: "supplierId", label: "供应商", type: "select", coerce: "int", options: supplierOptions, section: "入库信息" },
+    { name: "warehouseId", label: "实际仓库", type: "select", coerce: "int", options: warehouseOptions, section: "入库信息" },
     { name: "warehouseName", label: "经销商名称/仓位", section: "入库信息" },
     { name: "applicationNumber", label: "样机申请单号", section: "入库信息" },
     { name: "materialNumber", label: "物料号", section: "入库信息" },
@@ -109,6 +114,7 @@ export function createFields(deps) {
     { name: "manufacturingDate", label: "制造日期", type: "date", coerce: "date", section: "整机识别" },
     { name: "stockStatus", label: "库存状态", type: "select", options: stockStatusOptions(), defaultValue: "IN_STOCK", section: "价格库存" },
     { name: "purchasePrice", label: "采购价", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
+    { name: "landedUnitCost", label: "落地成本", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
     { name: "settlementPrice", label: "结算价", type: "number", coerce: "decimal", step: "0.01", section: "价格库存" },
     { name: "inventoryCount", label: "库存数", type: "number", coerce: "int", step: "1", defaultValue: 1, section: "价格库存" },
     { name: "remarks", label: "备注", type: "textarea", span: 2, section: "销售与去向" }
@@ -122,9 +128,11 @@ export function createFields(deps) {
     { name: "applicableModels", label: "适配车型", span: 2 },
     { name: "source", label: "来源" },
     { name: "sourceMachineId", label: "来源车辆 ID", type: "number", coerce: "int", step: "1" },
+    { name: "warehouseId", label: "实际仓库", type: "select", coerce: "int", options: warehouseOptions },
     { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 0 },
     { name: "unit", label: "单位", defaultValue: "件" },
     { name: "purchasePrice", label: "采购价", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "landedUnitCost", label: "落地成本", type: "number", coerce: "decimal", step: "0.01" },
     { name: "salePrice", label: "销售价", type: "number", coerce: "decimal", step: "0.01" },
     { name: "settlementPrice", label: "结算价", type: "number", coerce: "decimal", step: "0.01" },
     { name: "manufacturingDate", label: "生产日期", type: "date", coerce: "date" },
@@ -139,10 +147,11 @@ export function createFields(deps) {
     { name: "faultDescription", label: "故障描述", type: "textarea", span: 2, required: true },
     { name: "repairContent", label: "维修内容", type: "textarea", span: 2 },
     { name: "repairPersonChoice", label: "维修人员", type: "select", required: true, options: repairPersonOptions },
-    { name: "usedPartIds", label: "使用配件", type: "select", coerce: "intList", options: repairPartOptions },
+    { name: "partUsages", label: "配件明细", type: "repairPartUsages", span: 2 },
     { name: "repairFee", label: "维修收入", type: "number", coerce: "decimal", step: "0.01" },
-    { name: "repairExpense", label: "维修支出", type: "number", coerce: "decimal", step: "0.01" },
-    { name: "partsFee", label: "配件费", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "repairExpense", label: "外协成本（不计入客户应收）", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "passThroughAmount", label: "客户可转嫁金额", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "partsFee", label: "配件收费", type: "number", coerce: "decimal", step: "0.01", readOnly: true },
     { name: "totalFee", label: "客户应收", type: "number", coerce: "decimal", step: "0.01", readOnly: true },
     { name: "remarks", label: "备注", type: "textarea", span: 2 }
   ],
@@ -178,16 +187,19 @@ export function createFields(deps) {
   ],
   vehicleStock: [
     { name: "machineId", label: "整车", type: "select", coerce: "int", required: true, options: vehicleOptions },
+    { name: "warehouseId", label: "实际仓库", type: "select", coerce: "int", options: warehouseOptions },
     { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1 },
+    { name: "businessDate", label: "业务日期", type: "date", coerce: "date", defaultValue: todayInputDate },
+    { name: "reason", label: "调整原因", required: true },
     { name: "operator", label: "操作人" },
     { name: "remark", label: "备注", type: "textarea", span: 2 }
   ],
   vehicleOutbound: [
     { name: "machineId", label: "车号/产品编号", type: "select", coerce: "int", required: true, options: vehicleOutboundOptions, section: "销售车辆" },
+    { name: "warehouseId", label: "出库仓库", type: "select", coerce: "int", options: warehouseOptions, section: "销售车辆" },
     { name: "salesDate", label: "销售日期", type: "date", coerce: "date", defaultValue: todayInputDate, section: "销售车辆" },
-    { name: "settlementPrice", label: "结算价", type: "number", coerce: "decimal", step: "0.01", required: true, section: "价格收款" },
-    { name: "salePrice", label: "销售单价", type: "number", coerce: "decimal", step: "0.01", section: "价格收款" },
-    { name: "receivableAmount", label: "应收金额", type: "number", coerce: "decimal", step: "0.01", section: "价格收款" },
+    { name: "unitSalePrice", label: "销售单价", type: "number", coerce: "decimal", step: "0.01", required: true, section: "价格收款" },
+    { name: "lineAmount", label: "销售行金额", type: "number", coerce: "decimal", step: "0.01", section: "价格收款" },
     { name: "receivedAmount", label: "已收金额", type: "number", coerce: "decimal", step: "0.01", section: "价格收款" },
     { name: "paymentDueDate", label: "收款到期日", type: "date", coerce: "date", section: "价格收款" },
     { name: "lastPaymentDate", label: "最近收款日", type: "date", coerce: "date", section: "价格收款" },
@@ -216,16 +228,21 @@ export function createFields(deps) {
   ],
   partStock: [
     { name: "partCode", label: "配件", type: "select", required: true, options: partCodeOptions },
+    { name: "warehouseId", label: "实际仓库", type: "select", coerce: "int", options: warehouseOptions },
     { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1 },
+    { name: "businessDate", label: "业务日期", type: "date", coerce: "date", defaultValue: todayInputDate },
     { name: "operator", label: "操作人" },
+    { name: "reason", label: "调整原因", required: true },
     { name: "remark", label: "备注", type: "textarea", span: 2 }
   ],
   partOutbound: [
     { name: "partCode", label: "配件", type: "select", required: true, options: partCodeOptions },
+    { name: "warehouseId", label: "出库仓库", type: "select", coerce: "int", options: warehouseOptions },
     { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1 },
     { name: "customerId", label: "客户", type: "select", coerce: "int", required: true, options: customerOptions },
-    { name: "settlementPrice", label: "结算价", type: "number", coerce: "decimal", step: "0.01" },
-    { name: "receivableAmount", label: "应收金额", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "unitSalePrice", label: "销售单价", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "lineAmount", label: "销售行金额", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "salesDate", label: "销售日期", type: "date", coerce: "date", defaultValue: todayInputDate },
     { name: "receivedAmount", label: "已收金额", type: "number", coerce: "decimal", step: "0.01" },
     { name: "paymentDueDate", label: "收款到期日", type: "date", coerce: "date" },
     { name: "lastPaymentDate", label: "最近收款日", type: "date", coerce: "date" },
@@ -236,11 +253,13 @@ export function createFields(deps) {
   ],
   rental: [
     { name: "machineId", label: "租赁车辆", type: "select", coerce: "int", required: true, options: vehicleRentalOptions, section: "租赁车辆" },
+    { name: "warehouseId", label: "出租仓库", type: "select", coerce: "int", options: warehouseOptions, section: "租赁车辆" },
     { name: "customerId", label: "租赁去向（客户）", type: "select", coerce: "int", required: true, options: customerOptions, section: "租赁信息" },
     { name: "destination", label: "具体去向/地址", span: 2, section: "租赁信息" },
     { name: "monthlyRentalPrice", label: "月租价格", type: "number", coerce: "decimal", step: "0.01", required: true, section: "租赁信息" },
     { name: "startDate", label: "开始日期", type: "date", coerce: "date", defaultValue: todayInputDate, section: "租赁信息" },
     { name: "endDate", label: "结束日期", type: "date", coerce: "date", section: "租赁信息" },
+    { name: "returnDate", label: "实际归还日期", type: "date", coerce: "date", section: "租赁信息" },
     { name: "status", label: "租赁状态", type: "toggle", options: rentalStatusOptions, defaultValue: "ACTIVE", section: "租赁信息" },
     { name: "operator", label: "经办人", section: "备注" },
     { name: "remark", label: "备注", type: "textarea", span: 2, section: "备注" }
@@ -256,6 +275,7 @@ export function createFields(deps) {
   supplier: [
     { name: "supplierName", label: "供应商名称", required: true },
     { name: "supplierType", label: "供应类型", type: "select", options: [{ value: "整车供应商", label: "整车供应商" }, { value: "配件供应商", label: "配件供应商" }, { value: "综合供应商", label: "综合供应商" }], allowCustom: true },
+    { name: "active", label: "启用", type: "checkbox", coerce: "boolean", defaultValue: true },
     { name: "contactName", label: "联系人" },
     { name: "contactPhone", label: "联系电话" },
     { name: "address", label: "地址", span: 2 },
@@ -267,16 +287,20 @@ export function createFields(deps) {
     { name: "resourceType", label: "入库类型", type: "select", options: [{ value: "PART", label: "配件入库" }, { value: "MACHINE", label: "整车入库" }], defaultValue: "PART", section: "入库类型" },
     { name: "specificationModel", label: "规格型号", type: "select", options: purchaseSpecificationModelOptions, allowCustom: true, required: true, section: "入库类型" },
     { name: "supplierId", label: "供应商", type: "select", coerce: "int", required: true, options: supplierOptions, section: "采购来源" },
-    { name: "configItemId", label: "配置项", type: "select", coerce: "int", required: true, options: configItemOptions, section: "配件入库" },
-    { name: "configValueId", label: "配置值/配件名称", type: "select", coerce: "int", required: true, options: purchaseConfigValueOptions, section: "配件入库" },
+    { name: "warehouseId", label: "目标仓库", type: "select", coerce: "int", options: warehouseOptions, section: "采购来源" },
+    { name: "resourceId", label: "实际配件 SKU", type: "select", coerce: "int", required: true, options: purchaseResourceOptions, section: "采购来源" },
+    { name: "configItemId", label: "配置项（仅预填）", type: "select", coerce: "int", options: configItemOptions, section: "配件入库" },
+    { name: "configValueId", label: "配置值（仅预填）", type: "select", coerce: "int", options: purchaseConfigValueOptions, section: "配件入库" },
     { name: "resourceCode", label: "整车编码", section: "整车入库" },
     { name: "resourceName", label: "整车名称", section: "整车入库" },
     { name: "quantity", label: "采购数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1, section: "金额数量" },
     { name: "unit", label: "单位", defaultValue: "件", section: "金额数量" },
     { name: "unitPrice", label: "单价", type: "number", coerce: "decimal", step: "0.01", section: "金额数量" },
     { name: "totalAmount", label: "总金额", type: "number", coerce: "decimal", step: "0.01", section: "金额数量" },
+    { name: "freightAmount", label: "运费", type: "number", coerce: "decimal", step: "0.01", defaultValue: 0, section: "金额数量" },
     { name: "orderDate", label: "采购日期", type: "date", coerce: "date", defaultValue: todayInputDate, section: "到货跟进" },
     { name: "expectedArrivalDate", label: "预计到货", type: "date", coerce: "date", section: "到货跟进" },
+    { name: "receivedDate", label: "实际收货日期", type: "date", coerce: "date", section: "到货跟进" },
     { name: "status", label: "状态", type: "select", options: purchaseStatusOptions, defaultValue: "ORDERED", section: "到货跟进" },
     { name: "operator", label: "经办人", section: "备注" },
     { name: "remark", label: "备注", type: "textarea", span: 2, section: "备注" }
@@ -284,9 +308,32 @@ export function createFields(deps) {
   purchaseFreight: [
     { name: "freightAmount", label: "运费", type: "number", coerce: "decimal", step: "0.01", defaultValue: 0, required: true }
   ],
+  paymentRecord: [
+    { name: "sourceType", type: "hidden" },
+    { name: "sourceId", type: "hidden", coerce: "int" },
+    { name: "direction", type: "hidden" },
+    { name: "amount", label: "本次金额", type: "number", coerce: "decimal", step: "0.01", required: true, section: "收付款" },
+    { name: "paymentDate", label: "收付款日期", type: "date", coerce: "date", defaultValue: todayInputDate, required: true, section: "收付款" },
+    { name: "accountName", label: "账户名称", section: "账户信息" },
+    { name: "paymentMethod", label: "收付款方式", placeholder: "银行转账、现金、承兑等", section: "账户信息" },
+    { name: "remark", label: "备注", type: "textarea", span: 2, section: "备注" }
+  ],
+  paymentReversal: [
+    { name: "paymentId", label: "原收付款记录", type: "select", coerce: "int", required: true, options: paymentReversalOptions },
+    { name: "remark", label: "冲销原因", type: "textarea", required: true, span: 2 }
+  ],
+  removedPartValuation: [
+    { name: "unitCost", label: "确认单价", type: "number", coerce: "decimal", step: "0.01", required: true },
+    { name: "valuationSource", label: "估值依据", required: true, placeholder: "检测报告、市场询价、负责人确认等" },
+    { name: "condition", label: "旧件成色/状态" },
+    { name: "businessDate", label: "估值日期", type: "date", coerce: "date", defaultValue: todayInputDate, required: true },
+    { name: "operator", label: "经办人" },
+    { name: "remark", label: "备注", type: "textarea", span: 2 }
+  ],
   stocktaking: [
     { name: "resourceType", label: "盘点类型", type: "select", required: true, options: stocktakingResourceTypeOptions, defaultValue: "PART", section: "盘点对象" },
     { name: "resourceId", label: "盘点对象", type: "select", coerce: "int", required: true, options: stocktakingResourceOptions, section: "盘点对象" },
+    { name: "warehouseId", label: "盘点仓库", type: "select", coerce: "int", options: warehouseOptions, section: "盘点对象" },
     { name: "actualQuantity", label: "实盘数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 0, section: "盘点结果" },
     { name: "stocktakingDate", label: "盘点日期", type: "date", coerce: "date", defaultValue: todayInputDate, section: "盘点结果" },
     { name: "status", label: "状态", type: "select", options: stocktakingStatusOptions, defaultValue: "DRAFT", section: "盘点结果" },
@@ -323,9 +370,8 @@ export function createFields(deps) {
   ],
   outboundOrder: [
     { name: "salesDate", label: "销售日期", type: "date", coerce: "date" },
-    { name: "settlementPrice", label: "结算价", type: "number", coerce: "decimal", step: "0.01" },
-    { name: "salePrice", label: "销售单价", type: "number", coerce: "decimal", step: "0.01" },
-    { name: "receivableAmount", label: "应收金额", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "unitSalePrice", label: "销售单价", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "lineAmount", label: "销售行金额", type: "number", coerce: "decimal", step: "0.01" },
     { name: "receivedAmount", label: "已收金额", type: "number", coerce: "decimal", step: "0.01" },
     { name: "paymentDueDate", label: "收款到期日", type: "date", coerce: "date" },
     { name: "lastPaymentDate", label: "最近收款日", type: "date", coerce: "date" },
@@ -355,6 +401,19 @@ export function createFields(deps) {
     { name: "machineId", label: "整车", type: "select", coerce: "int", required: true, options: vehicleOptions },
     { name: "machineConfigId", label: "原车配件", type: "select", coerce: "int", required: true, options: machineConfigOptions },
     { name: "newPartId", label: "同类型库存配件", type: "select", coerce: "int", required: true, options: compatiblePartOptions },
+    { name: "warehouseId", label: "新件领料仓库", type: "select", coerce: "int", options: warehouseOptions },
+    { name: "businessDate", label: "业务日期", type: "date", coerce: "date", defaultValue: todayInputDate },
+    { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1 },
+    { name: "oldPartDisposition", label: "旧件处置", type: "select", options: () => [
+      { value: "QUARANTINE", label: "隔离待估值入库" },
+      { value: "REUSE", label: "可复用入库" },
+      { value: "SCRAP", label: "报废" },
+      { value: "DISCARD", label: "不入库" }
+    ], defaultValue: "QUARANTINE" },
+    { name: "oldPartWarehouseId", label: "旧件入库仓库", type: "select", coerce: "int", options: warehouseOptions },
+    { name: "oldPartCondition", label: "旧件成色/状态" },
+    { name: "oldPartValuationSource", label: "旧件估值依据" },
+    { name: "oldPartUnitCost", label: "旧件单价估值", type: "number", coerce: "decimal", step: "0.01" },
     { name: "operator", label: "操作人" },
     { name: "remark", label: "备注", type: "textarea", span: 2 }
   ],
@@ -362,15 +421,37 @@ export function createFields(deps) {
     { name: "machineId", type: "hidden", coerce: "int" },
     { name: "configItemId", label: "配件分类", type: "select", coerce: "int", required: true, options: installPartCategoryOptions },
     { name: "newPartId", label: "仓库配件", type: "select", coerce: "int", required: true, options: installPartOptions },
-    { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1 }
+    { name: "warehouseId", label: "领料仓库", type: "select", coerce: "int", options: warehouseOptions },
+    { name: "businessDate", label: "业务日期", type: "date", coerce: "date", defaultValue: todayInputDate },
+    { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 1 },
+    { name: "operator", label: "操作人" },
+    { name: "remark", label: "备注", type: "textarea", span: 2 }
   ],
   modificationOrder: [
     { name: "vehicleModelKey", label: "车型", type: "select", required: true, options: vehicleModelOptions },
     { name: "machineId", label: "车号", type: "select", coerce: "int", required: true, options: vehicleNumberOptions },
     { name: "machineConfigId", label: "原配置", type: "select", coerce: "int", required: true, options: machineConfigOptions },
     { name: "newPartId", label: "新配件", type: "select", coerce: "int", required: true, options: compatiblePartOptions },
+    { name: "workOrderType", label: "工单类型", type: "select", required: true, options: () => [
+      { value: "PRE_SALE", label: "售前改装（资本化至车辆成本）" },
+      { value: "AFTER_SALE", label: "售后/客户改装（形成服务收入与成本）" }
+    ], defaultValue: "PRE_SALE" },
+    { name: "warehouseId", label: "车辆/领料仓库", type: "select", coerce: "int", options: warehouseOptions },
+    { name: "businessDate", label: "业务日期", type: "date", coerce: "date", defaultValue: todayInputDate },
     { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, placeholderValue: 1 },
     { name: "oldPartAction", label: "旧件处理", type: "select", options: oldPartActionOptions, placeholderValue: "STOCK_IN" },
+    { name: "oldPartDisposition", label: "旧件处置", type: "select", options: () => [
+      { value: "QUARANTINE", label: "隔离待估值入库" },
+      { value: "REUSE", label: "可复用入库" },
+      { value: "SCRAP", label: "报废" },
+      { value: "DISCARD", label: "不入库" }
+    ], defaultValue: "QUARANTINE" },
+    { name: "oldPartWarehouseId", label: "旧件入库仓库", type: "select", coerce: "int", options: warehouseOptions },
+    { name: "oldPartCondition", label: "旧件成色/状态" },
+    { name: "oldPartValuationSource", label: "旧件估值依据" },
+    { name: "oldPartUnitCost", label: "旧件单价估值", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "chargeUnitPrice", label: "客户收费单价", type: "number", coerce: "decimal", step: "0.01" },
+    { name: "discountAmount", label: "客户折扣额", type: "number", coerce: "decimal", step: "0.01", defaultValue: 0 },
     { name: "customerName", label: "客户名称" },
     { name: "salesOrderNo", label: "销售单号" },
     { name: "operator", label: "操作人" },
@@ -387,6 +468,9 @@ export function createFields(deps) {
   ],
   userPassword: [
     { name: "password", label: "新密码", type: "password", required: true }
+  ],
+  userJobTag: [
+    { name: "jobTag", label: "选择职务", type: "toggle", options: jobTagOptions, required: true, span: 2 }
   ],
   switchUser: [
     { name: "username", label: "用户名", required: true },

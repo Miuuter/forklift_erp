@@ -1,6 +1,8 @@
 package com.example.forklift_erp.service.impl;
 
 import com.example.forklift_erp.dto.PartInventoryCreateDTO;
+import com.example.forklift_erp.dto.PartInventoryVO;
+import com.example.forklift_erp.dto.PartStockAdjustRequestDTO;
 import com.example.forklift_erp.entity.PartInventory;
 import com.example.forklift_erp.service.PartInventoryService;
 import org.springframework.stereotype.Service;
@@ -35,12 +37,21 @@ public class DataImportPartsImporter {
     private static final String CATEGORY_PART = "\u914d\u4ef6";
 
     private final PartInventoryService partInventoryService;
+    private final DataImportIdempotencyService idempotencyService;
 
-    public DataImportPartsImporter(PartInventoryService partInventoryService) {
+    public DataImportPartsImporter(
+            PartInventoryService partInventoryService,
+            DataImportIdempotencyService idempotencyService
+    ) {
         this.partInventoryService = partInventoryService;
+        this.idempotencyService = idempotencyService;
     }
 
-    ImportResult importWorkbook(WorkbookSnapshot snapshot) {
+    ImportResult importWorkbook(WorkbookSnapshot snapshot, ImportContext context) {
+        if (context.businessDocument()) {
+            return new ImportResult(0, snapshot.sheetRows("Parts").size(),
+                    "Parts workbook is a snapshot; BUSINESS_DOCUMENT mode requires purchase-order documents and makes no stock changes");
+        }
         Map<String, List<WorkbookRow>> grouped = new LinkedHashMap<>();
         for (WorkbookRow row : snapshot.sheetRows("Parts")) {
             String code = text(row, 1);
@@ -59,25 +70,74 @@ public class DataImportPartsImporter {
             WorkbookRow latestRow = group.stream()
                     .max(Comparator.comparingInt(WorkbookRow::rowNumber))
                     .orElse(group.get(0));
+            if (!idempotencyService.reserve(context, "Parts", latestRow.rowNumber(), "PART:" + code)) {
+                reused++;
+                continue;
+            }
             PartInventoryCreateDTO dto = buildPartDto(group, latestRow);
+            int openingQuantity = group.stream().mapToInt(row -> intValue(row, 7, 0)).sum();
             Optional<PartInventory> existing = partInventoryService.findByPartCode(code);
             if (existing.isEmpty()) {
-                partInventoryService.create(dto);
+                if (context.masterData() || context.openingMigration()) {
+                    dto.setQuantity(0);
+                }
+                PartInventoryVO createdPart = partInventoryService.create(dto);
+                if (context.openingMigration() && openingQuantity > 0) {
+                    postOpeningAdjustment(code, createdPart == null ? null : createdPart.getVersion(),
+                            openingQuantity, latestRow);
+                }
                 created++;
                 continue;
             }
 
             PartInventory current = existing.get();
+            if (isOperational(current)) {
+                // Never reset operated stock from an external snapshot.
+                reused++;
+                continue;
+            }
+            dto.setQuantity(current.getQuantity() == null ? 0 : current.getQuantity());
+            dto.setSalePrice(current.getSalePrice());
+            dto.setSettlementPrice(current.getSettlementPrice());
             dto.setVersion(current.getVersion());
+            PartInventoryVO savedPart = null;
             if (partChanged(current, dto)) {
-                partInventoryService.update(current.getId(), dto);
+                savedPart = partInventoryService.update(current.getId(), dto);
                 updated++;
-            } else {
+            }
+            if (context.openingMigration() && dto.getQuantity() == 0) {
+                if (openingQuantity > 0) {
+                    postOpeningAdjustment(
+                            code,
+                            savedPart == null ? current.getVersion() : savedPart.getVersion(),
+                            openingQuantity,
+                            latestRow
+                    );
+                }
+            } else if (!partChanged(current, dto)) {
                 reused++;
             }
         }
         return new ImportResult(created + updated + reused, 0,
-                "Imported parts created=" + created + ", updated=" + updated + ", reused=" + reused);
+                "Mode=" + context.importMode() + ", imported parts created=" + created
+                        + ", updated=" + updated + ", reused=" + reused);
+    }
+
+    private void postOpeningAdjustment(
+            String partCode,
+            Long version,
+            int openingQuantity,
+            WorkbookRow latestRow
+    ) {
+        PartStockAdjustRequestDTO adjustment = new PartStockAdjustRequestDTO();
+        adjustment.setPartCode(partCode);
+        adjustment.setVersion(version);
+        adjustment.setQuantity(openingQuantity);
+        adjustment.setBusinessDate(date(latestRow, 0));
+        adjustment.setOpeningBalance(true);
+        adjustment.setReason("Opening migration from parts workbook");
+        adjustment.setRemark(REMARK_SOURCE_PURCHASE_DETAIL_IMPORT);
+        partInventoryService.inbound(adjustment);
     }
 
     PartInventoryCreateDTO buildPartDto(List<WorkbookRow> group, WorkbookRow latestRow) {
@@ -107,7 +167,7 @@ public class DataImportPartsImporter {
         dto.setQuantity(totalQuantity);
         dto.setUnit(text(latestRow, 6));
         dto.setPurchasePrice(averagePrice);
-        dto.setSettlementPrice(averagePrice);
+        dto.setLandedUnitCost(averagePrice);
         dto.setRemarks(buildPartRemark(group));
         dto.setInboundDate(dateTime(latestRow, 0));
         return dto;
@@ -123,8 +183,15 @@ public class DataImportPartsImporter {
                 || !Objects.equals(current.getQuantity(), dto.getQuantity())
                 || !Objects.equals(trimToNull(current.getUnit()), trimToNull(dto.getUnit()))
                 || !Objects.equals(current.getPurchasePrice(), dto.getPurchasePrice())
-                || !Objects.equals(current.getSettlementPrice(), dto.getSettlementPrice())
+                || !Objects.equals(current.getLandedUnitCost(), dto.getLandedUnitCost())
                 || !Objects.equals(trimToNull(current.getRemarks()), trimToNull(dto.getRemarks()));
+    }
+
+    private boolean isOperational(PartInventory part) {
+        return part != null
+                && ((part.getQuantity() != null && part.getQuantity() > 0)
+                || part.getSalesDate() != null
+                || part.getInboundDate() != null);
     }
 
     private String buildPartRemark(List<WorkbookRow> rows) {

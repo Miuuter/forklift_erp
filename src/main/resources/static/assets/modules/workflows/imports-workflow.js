@@ -42,16 +42,20 @@ export function createImportWorkflow(deps) {
 
   async function validateImportFromPage() {
     const typeSelect = getContentElement()?.querySelector("[data-import-type-select]");
+    const modeSelect = getContentElement()?.querySelector("[data-import-mode-select]");
     const fileInput = getContentElement()?.querySelector("[data-import-file]");
     const importType = String(typeSelect?.value || state.importSelectedType || "vehicle-workbook").trim();
+    const importMode = String(modeSelect?.value || state.importSelectedMode || defaultImportMode(importType)).trim();
     const file = fileInput?.files?.[0];
     if (!file) {
       showToast("请选择 Excel 文件", "error");
       return;
     }
     state.importSelectedType = importType;
+    state.importSelectedMode = importMode;
     const formData = new FormData();
     formData.append("file", file);
+    formData.append("mode", importMode);
     const validation = await api(endpoints.imports.validate(importType), {
       method: "POST",
       body: formData
@@ -95,7 +99,9 @@ export function createImportWorkflow(deps) {
 
   function renderImportWorkspace() {
     const selectedType = state.importSelectedType || state.filters.imports?.importType || "vehicle-workbook";
+    const selectedMode = state.importSelectedMode || defaultImportMode(selectedType);
     const templateLabel = importTypeLabel(selectedType);
+    const mode = importModeOption(selectedMode);
     const confirmable = Boolean(state.importValidation?.importable && state.importValidation?.job?.id);
     return `
       <div class="import-workspace">
@@ -104,6 +110,12 @@ export function createImportWorkflow(deps) {
             <span>导入类型</span>
             <select data-import-type-select>
               ${importTypeOptions().map(option => `<option value="${escapeAttr(option.value)}"${String(option.value) === String(selectedType) ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
+            </select>
+          </label>
+          <label class="field">
+            <span>导入模式</span>
+            <select data-import-mode-select>
+              ${importModeOptions(selectedType).map(option => `<option value="${escapeAttr(option.value)}"${String(option.value) === String(selectedMode) ? " selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}
             </select>
           </label>
           <label class="field">
@@ -117,7 +129,7 @@ export function createImportWorkflow(deps) {
           ${confirmable ? `<button class="btn btn-primary" type="button" data-action="confirm-import-job" data-id="${escapeAttr(state.importValidation.job.id)}">${icon("fileCheck")}确认导入</button>` : ""}
           ${state.importValidation ? `<button class="btn btn-ghost" type="button" data-action="clear-import-validation">${icon("minus")}清除结果</button>` : ""}
         </div>
-        <div class="helper-inline">当前模板：${escapeHtml(templateLabel)}</div>
+        <div class="helper-inline">当前模板：${escapeHtml(templateLabel)}；${escapeHtml(mode.description)}</div>
       </div>
     `;
   }
@@ -140,6 +152,7 @@ export function createImportWorkflow(deps) {
       <div class="import-validation">
         <section class="summary-grid">
           ${summaryCard("状态", importStatusLabel(job.status), validation.importable ? "可以确认导入" : "请修正错误后重试")}
+          ${summaryCard("导入模式", importModeLabel(job.importMode), importModeOption(job.importMode).description)}
           ${summaryCard("总行数", display(job.totalRows), `${display(job.validRows)} 行通过校验`)}
           ${summaryCard("错误行", display(job.errorRows), `${display(job.importedRows)} 行已导入`)}
         </section>
@@ -179,6 +192,7 @@ export function createImportWorkflow(deps) {
         ${renderSurface("预校验结果", renderImportValidationPanel())}
         ${renderSurface("导入记录", renderTable([
           { label: "导入类型", html: true, render: row => importTypeBadge(row.importType) },
+          { label: "模式", html: true, render: row => importModeBadge(row.importMode) },
           { label: "模板", key: "templateName" },
           { label: "文件名", key: "originalFileName" },
           { label: "状态", html: true, render: row => importStatusBadge(row.status) },
@@ -202,6 +216,48 @@ export function createImportWorkflow(deps) {
     ];
   }
 
+  function importModeOptions(importType) {
+    const type = String(importType || "").toLowerCase();
+    const options = [
+      {
+        value: "OPENING_MIGRATION",
+        label: "期初迁移",
+        description: "仅用于上线前或经过核准的期初数据；库存通过显式期初调整和 FIFO 批次入账。"
+      },
+      {
+        value: "BUSINESS_DOCUMENT",
+        label: "业务单据",
+        description: type.includes("part")
+          ? "配件快照不直接入库；应改用已关联 SKU、仓库的采购单据。"
+          : "导入历史入库和销售业务，按业务日期和幂等键处理。"
+      },
+      {
+        value: "MASTER_DATA",
+        label: "主数据更新",
+        description: "只更新允许的名称、分类等主数据，不重置已运营库存或已锁定资源。"
+      }
+    ];
+    return options;
+  }
+
+  function defaultImportMode(importType) {
+    return String(importType || "").toLowerCase().includes("part")
+      ? "OPENING_MIGRATION"
+      : "BUSINESS_DOCUMENT";
+  }
+
+  function importModeOption(value) {
+    return importModeOptions().find(option => option.value === String(value || "").toUpperCase()) || {
+      value: value || "",
+      label: value || "-",
+      description: "未识别的导入模式"
+    };
+  }
+
+  function importModeLabel(value) {
+    return importModeOption(value).label;
+  }
+
   function importTypeLabel(value) {
     const normalized = String(value || "").toLowerCase();
     if (!normalized || normalized === "全部") return "全部";
@@ -212,6 +268,13 @@ export function createImportWorkflow(deps) {
     const normalized = String(value || "").toLowerCase();
     const tone = normalized.includes("part") ? "teal" : "primary";
     return badge(importTypeLabel(value), tone);
+  }
+
+  function importModeBadge(value) {
+    const normalized = String(value || "").toUpperCase();
+    const tone = normalized === "OPENING_MIGRATION" ? "warn"
+      : normalized === "MASTER_DATA" ? "teal" : "primary";
+    return badge(importModeLabel(normalized), tone);
   }
 
   function importStatusLabel(status) {
@@ -268,6 +331,9 @@ export function createImportWorkflow(deps) {
     importTypeOptions,
     importTypeLabel,
     importTypeBadge,
+    importModeOptions,
+    importModeLabel,
+    importModeBadge,
     importStatusLabel,
     importStatusBadge,
     importCountSummary,

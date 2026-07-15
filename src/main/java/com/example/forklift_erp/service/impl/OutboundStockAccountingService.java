@@ -28,12 +28,24 @@ public class OutboundStockAccountingService {
             String operator,
             String remark
     ) {
+        return recordMachineOutbound(machine, order, stockChange, unitCost, machine.getWarehouseId(), operator, remark);
+    }
+
+    public StockOperationLog recordMachineOutbound(
+            MachineInventory machine,
+            OutboundOrder order,
+            InventoryQuantities.QuantityChange stockChange,
+            BigDecimal unitCost,
+            Long warehouseId,
+            String operator,
+            String remark
+    ) {
         return recordOutbound(
                 OutboundOrder.RESOURCE_MACHINE,
                 machine.getId(),
                 machine.getVehicleProductNumber(),
                 machine.getName(),
-                machine.getWarehouseId(),
+                warehouseId,
                 stockChange,
                 unitCost,
                 order,
@@ -49,14 +61,26 @@ public class OutboundStockAccountingService {
             String operator,
             String remark
     ) {
+        return recordPartOutbound(part, order, stockChange, partUnitCost(part), part.getWarehouseId(), operator, remark);
+    }
+
+    public StockOperationLog recordPartOutbound(
+            PartInventory part,
+            OutboundOrder order,
+            InventoryQuantities.QuantityChange stockChange,
+            BigDecimal unitCost,
+            Long warehouseId,
+            String operator,
+            String remark
+    ) {
         return recordOutbound(
                 OutboundOrder.RESOURCE_PART,
                 part.getId(),
                 part.getPartCode(),
                 part.getPartName(),
-                part.getWarehouseId(),
+                warehouseId,
                 stockChange,
-                partUnitCost(part),
+                unitCost,
                 order,
                 operator,
                 remark
@@ -65,7 +89,7 @@ public class OutboundStockAccountingService {
 
     public BigDecimal machineUnitCost(MachineInventory machine) {
         return MoneyValues.firstNonNegativeOrNull(
-                machine.getSettlementPrice(),
+                machine.getLandedUnitCost(),
                 machine.getPurchasePrice(),
                 BigDecimal.ZERO
         );
@@ -73,15 +97,20 @@ public class OutboundStockAccountingService {
 
     BigDecimal partUnitCost(PartInventory part) {
         return MoneyValues.firstNonNegativeOrNull(
-                part.getSettlementPrice(),
+                part.getLandedUnitCost(),
                 part.getPurchasePrice(),
                 BigDecimal.ZERO
         );
     }
 
-    BigDecimal resultAmount(OutboundOrder order) {
+    BigDecimal unitRevenue(OutboundOrder order) {
+        int quantity = order.getQuantity() == null || order.getQuantity() < 1 ? 1 : order.getQuantity();
+        BigDecimal fromLineAmount = MoneyValues.firstNonNegativeOrNull(order.getLineAmount(), order.getReceivableAmount());
+        if (fromLineAmount != null) {
+            return fromLineAmount.divide(BigDecimal.valueOf(quantity), 2, java.math.RoundingMode.HALF_UP);
+        }
         return MoneyValues.firstNonNegativeOrNull(
-                order.getReceivableAmount(),
+                order.getUnitSalePrice(),
                 order.getSettlementPrice(),
                 order.getSalePrice(),
                 BigDecimal.ZERO
@@ -112,7 +141,7 @@ public class OutboundStockAccountingService {
                 stockChange.beforeQuantity(),
                 stockChange.afterQuantity(),
                 unitCost,
-                resultAmount(order),
+                unitRevenue(order),
                 operator,
                 remark,
                 SOURCE_TYPE,

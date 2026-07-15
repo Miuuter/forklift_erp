@@ -15,6 +15,10 @@ import java.util.Optional;
 
 @Repository
 public interface RepairRecordRepository extends JpaRepository<RepairRecord, Long> {
+    boolean existsByMachineId(Long machineId);
+
+    boolean existsByCustomerId(Long customerId);
+
 
     List<RepairRecord> findByMachineIdOrderByRepairDateDesc(Long machineId);
     List<RepairRecord> findByMachineIdAndIsLockedFalseOrderByRepairDateDesc(Long machineId);

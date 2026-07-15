@@ -17,12 +17,15 @@ public class MachineInventoryVO {
     private String machineType;
     private String configuration;
     private String supplier;
+    private Long supplierId;
+    private String supplierNameSnapshot;
     private String warehouseName;
     private Long warehouseId;
     private String stockStatus;
     private String applicationNumber;
     private String materialNumber;
     private BigDecimal purchasePrice;
+    private BigDecimal landedUnitCost;
     private BigDecimal salePrice;
     private BigDecimal settlementPrice;
     private String engineNumber;
@@ -42,6 +45,7 @@ public class MachineInventoryVO {
     private String isInvoiceApplied;
     private String remarks;
     private Boolean modelOnly;
+    private Boolean isLocked;
     // 排除审计字段
 
     public static MachineInventoryVO fromEntity(MachineInventory entity) {
@@ -54,12 +58,15 @@ public class MachineInventoryVO {
         vo.setMachineType(entity.getMachineType());
         vo.setConfiguration(entity.getConfiguration());
         vo.setSupplier(entity.getSupplier());
+        vo.setSupplierId(entity.getSupplierId());
+        vo.setSupplierNameSnapshot(entity.getSupplierNameSnapshot());
         vo.setWarehouseName(entity.getWarehouseName());
         vo.setWarehouseId(entity.getWarehouseId());
         vo.setStockStatus(entity.getStockStatus());
         vo.setApplicationNumber(entity.getApplicationNumber());
         vo.setMaterialNumber(entity.getMaterialNumber());
         vo.setPurchasePrice(entity.getPurchasePrice());
+        vo.setLandedUnitCost(entity.getLandedUnitCost());
         vo.setSalePrice(entity.getSalePrice());
         vo.setSettlementPrice(entity.getSettlementPrice());
         vo.setEngineNumber(entity.getEngineNumber());
@@ -79,6 +86,7 @@ public class MachineInventoryVO {
         vo.setIsInvoiceApplied(entity.getIsInvoiceApplied());
         vo.setRemarks(entity.getRemarks());
         vo.setModelOnly(Boolean.TRUE.equals(entity.getModelOnly()));
+        vo.setIsLocked(Boolean.TRUE.equals(entity.getIsLocked()));
         return vo;
     }
 }

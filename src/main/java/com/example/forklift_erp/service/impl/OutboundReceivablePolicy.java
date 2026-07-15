@@ -11,6 +11,11 @@ import java.time.LocalDate;
 public class OutboundReceivablePolicy {
 
     public void apply(OutboundOrder order) {
+        Boolean explicitSettlement = Boolean.TRUE.equals(order.getPaymentSettled()) ? Boolean.TRUE : null;
+        apply(order, explicitSettlement);
+    }
+
+    public void apply(OutboundOrder order, Boolean explicitPaymentSettled) {
         BigDecimal receivable = MoneyValues.firstNonNegativeOrNull(
                 order.getReceivableAmount(),
                 order.getSettlementPrice(),
@@ -20,11 +25,13 @@ public class OutboundReceivablePolicy {
         order.setReceivableAmount(MoneyValues.zeroIfNullOrNegative(receivable));
         order.setReceivedAmount(received);
 
-        if (Boolean.TRUE.equals(order.getPaymentSettled())
+        if (Boolean.TRUE.equals(explicitPaymentSettled)
                 && received.compareTo(order.getReceivableAmount()) < 0) {
             order.setReceivedAmount(order.getReceivableAmount());
         }
-        if (order.getReceivableAmount().signum() > 0
+        if (explicitPaymentSettled != null) {
+            order.setPaymentSettled(explicitPaymentSettled);
+        } else if (order.getReceivableAmount().signum() > 0
                 && order.getReceivedAmount().compareTo(order.getReceivableAmount()) >= 0) {
             order.setPaymentSettled(true);
         } else if (order.getReceivableAmount().subtract(order.getReceivedAmount()).signum() > 0) {

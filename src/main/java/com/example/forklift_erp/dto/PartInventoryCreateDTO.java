@@ -50,6 +50,8 @@ public class PartInventoryCreateDTO {
 
     @DecimalMin(value = "0.00", message = "\u91c7\u8d2d\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
     private BigDecimal purchasePrice;
+    @DecimalMin(value = "0.00", message = "Landed unit cost cannot be negative")
+    private BigDecimal landedUnitCost;
     @DecimalMin(value = "0.00", message = "\u9500\u552e\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
     private BigDecimal salePrice;
     @DecimalMin(value = "0.00", message = "\u7ed3\u7b97\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
@@ -77,6 +79,7 @@ public class PartInventoryCreateDTO {
         entity.setQuantity(this.quantity);
         entity.setUnit(this.unit);
         entity.setPurchasePrice(this.purchasePrice);
+        entity.setLandedUnitCost(this.landedUnitCost);
         entity.setSalePrice(this.salePrice);
         entity.setSettlementPrice(this.settlementPrice);
         entity.setRemarks(this.remarks);
@@ -101,6 +104,7 @@ public class PartInventoryCreateDTO {
         entity.setQuantity(this.quantity);
         entity.setUnit(this.unit);
         entity.setPurchasePrice(this.purchasePrice);
+        entity.setLandedUnitCost(this.landedUnitCost);
         entity.setSalePrice(this.salePrice);
         entity.setSettlementPrice(this.settlementPrice);
         entity.setRemarks(this.remarks);

@@ -41,6 +41,7 @@ public interface PartInventoryRepository extends JpaRepository<PartInventory, Lo
     List<PartInventory> findBySourceAndIsLockedFalse(String source);
     List<PartInventory> findBySourceMachineId(Long machineId);
     List<PartInventory> findBySourceMachineIdAndIsLockedFalse(Long machineId);
+    boolean existsBySourceMachineId(Long machineId);
 
     long countByWarehouseId(Long warehouseId);
 
@@ -104,8 +105,8 @@ public interface PartInventoryRepository extends JpaRepository<PartInventory, Lo
             select
               count(p) as itemCount,
               sum(coalesce(p.quantity, 0)) as stockQuantity,
-              sum(coalesce(coalesce(p.settlementPrice, p.purchasePrice), 0) * coalesce(p.quantity, 0)) as costValue,
-              sum(coalesce(coalesce(p.settlementPrice, p.salePrice), 0) * coalesce(p.quantity, 0)) as settlementValue
+              sum(coalesce(coalesce(p.landedUnitCost, p.purchasePrice), 0) * coalesce(p.quantity, 0)) as costValue,
+              sum(coalesce(coalesce(p.salePrice, p.settlementPrice), 0) * coalesce(p.quantity, 0)) as settlementValue
             from PartInventory p
             """)
     StockValueProjection stockValue();

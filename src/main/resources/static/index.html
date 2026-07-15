@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>龙工叉车</title>
+  <title>叉车 ERP｜中山天力叉车</title>
   <meta name="theme-color" content="#1f4e78">
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
-  <link rel="stylesheet" href="/assets/app.css?v=20260713-industrial-ui">
+  <link rel="stylesheet" href="/assets/app.css?v=20260715-polish-v2">
   <script>
     if (new URLSearchParams(location.search).has("resetClient")) {
       window.__FORKLIFT_CLIENT_RESETTING__ = true;
@@ -29,46 +29,119 @@
       })();
     }
   </script>
-  <script type="module" src="/assets/app.js?v=20260713-industrial-ui"></script>
+  <script type="module" src="/assets/app.js?v=20260715-polish-v2"></script>
 </head>
 <body>
   <a class="skip-link" href="#moduleContent">跳到主内容</a>
   <div id="loginScreen" class="login-screen">
-    <section class="login-panel">
-      <div class="brand-row">
-        <div class="brand-mark"><img class="brand-icon" src="/assets/icon.svg" alt="" aria-hidden="true"></div>
-        <div>
-          <div class="brand-name">龙工叉车</div>
-          <div class="brand-subtitle">中山天力叉车</div>
-        </div>
-      </div>
-
-      <h1 class="login-title">登录系统</h1>
-      <p class="login-copy">统一管理车辆、配件、维修和配置数据。</p>
-
-      <form id="loginForm" class="stack-form">
-        <label class="field">
-          <span>用户名</span>
-          <input name="username" type="text" placeholder="admin" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
-        </label>
-        <label class="field">
-          <span>密码</span>
-          <input name="password" type="password" placeholder="admin123" autocomplete="current-password" required>
-        </label>
-        <button type="submit" class="btn btn-primary btn-block">
-          <span class="btn-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none"><path d="M10 17l5-5-5-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 12H3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    <div class="login-shell">
+      <section class="login-showcase" aria-labelledby="loginShowcaseTitle">
+        <div class="login-showcase-brand">
+          <span class="login-showcase-mark"><img src="/assets/icon.svg" alt="" aria-hidden="true"></span>
+          <span>
+            <strong>叉车 ERP</strong>
+            <small>中山天力叉车 · 业务管理中心</small>
           </span>
-          <span data-login-label>登录</span>
-        </button>
-      </form>
-    </section>
+        </div>
+
+        <div class="login-showcase-copy">
+          <span class="login-eyebrow">FORKLIFT OPERATIONS</span>
+          <h2 id="loginShowcaseTitle">让库存、销售与服务<br>在一张工作台闭环</h2>
+          <p>从整车和配件入库，到销售、租赁、维修与财务追踪，关键进度始终清晰可见。</p>
+        </div>
+
+        <div class="login-illustration" aria-hidden="true">
+          <svg viewBox="0 0 620 300" fill="none" focusable="false">
+            <defs>
+              <linearGradient id="forkliftBody" x1="184" y1="126" x2="392" y2="252" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#8FC5F2"/>
+                <stop offset="1" stop-color="#5A9BD2"/>
+              </linearGradient>
+              <pattern id="blueprintGrid" width="24" height="24" patternUnits="userSpaceOnUse">
+                <path d="M24 0H0V24" stroke="currentColor" stroke-opacity=".12"/>
+              </pattern>
+            </defs>
+            <rect x="1" y="1" width="618" height="298" rx="24" fill="url(#blueprintGrid)" opacity=".72"/>
+            <path d="M30 247h560" stroke="currentColor" stroke-opacity=".28" stroke-width="2"/>
+            <path d="M70 70h108v177H70V70Zm0 58h108M70 188h108M92 92h28v23H92V92Zm36 0h28v23h-28V92Zm-36 58h28v23H92v-23Zm36 0h28v23h-28v-23Zm-36 60h28v23H92v-23Zm36 0h28v23h-28v-23Z" stroke="currentColor" stroke-opacity=".42" stroke-width="2"/>
+            <path d="M201 224h224l-25-91h-94l-31 50h-74v41Z" fill="url(#forkliftBody)" stroke="#D6ECFF" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M306 133v-38h69l25 38M334 95v38M281 183h105M224 200h46" stroke="#EAF6FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M424 67v157M444 67v157M424 82h20M444 191h83M444 214h108" stroke="#D6ECFF" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M461 103h78v58h-78zM475 117h22v18h-22zm31 0h19v18h-19z" stroke="currentColor" stroke-opacity=".54" stroke-width="2"/>
+            <circle cx="255" cy="225" r="28" fill="#132B42" stroke="#B8DCF9" stroke-width="5"/>
+            <circle cx="386" cy="225" r="23" fill="#132B42" stroke="#B8DCF9" stroke-width="5"/>
+            <circle cx="255" cy="225" r="9" fill="#79B4E4"/>
+            <circle cx="386" cy="225" r="8" fill="#79B4E4"/>
+            <path d="M194 236h237" stroke="#EAF6FF" stroke-opacity=".7" stroke-width="2" stroke-dasharray="8 10"/>
+          </svg>
+        </div>
+
+        <div class="login-feature-strip">
+          <span>
+            <i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m4 7 8-4 8 4-8 4-8-4Zm0 0v10l8 4 8-4V7M12 11v10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></i>
+            实时库存
+          </span>
+          <span>
+            <i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M7 7h12l-3-3M17 17H5l3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></i>
+            业务闭环
+          </span>
+          <span>
+            <i aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 5 6v5c0 4.5 2.7 8.1 7 10 4.3-1.9 7-5.5 7-10V6l-7-3Zm-3 9 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></i>
+            权限审计
+          </span>
+        </div>
+      </section>
+
+      <section class="login-panel">
+        <div class="brand-row login-panel-brand">
+          <div class="brand-mark"><img class="brand-icon" src="/assets/icon.svg" alt="" aria-hidden="true"></div>
+          <div>
+            <div class="brand-name">龙工叉车</div>
+            <div class="brand-subtitle">中山天力叉车</div>
+          </div>
+        </div>
+
+        <div class="login-heading">
+          <span class="login-panel-kicker">内部业务系统</span>
+          <h1 class="login-title">欢迎回来</h1>
+          <p class="login-copy">登录后继续处理库存、订单与服务事项。</p>
+        </div>
+
+        <form id="loginForm" class="stack-form">
+          <label class="field login-field">
+            <span class="field-label">
+              <i class="field-label-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.8"/><path d="M5 20a7 7 0 0 1 14 0" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></i>
+              用户名
+            </span>
+            <input name="username" type="text" placeholder="请输入用户名" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+          </label>
+          <label class="field login-field">
+            <span class="field-label">
+              <i class="field-label-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.8"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></i>
+              密码
+            </span>
+            <input name="password" type="password" placeholder="请输入密码" autocomplete="current-password" required>
+          </label>
+          <button type="submit" class="btn btn-primary btn-block login-submit">
+            <span class="btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none"><path d="M10 4H5v16h5M14 8l4 4-4 4M9 12h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+            <span data-login-label>安全登录</span>
+          </button>
+        </form>
+
+        <div class="login-trust">
+          <span aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 5 6v5c0 4.5 2.7 8.1 7 10 4.3-1.9 7-5.5 7-10V6l-7-3Zm-3 9 2 2 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+          账号权限与关键操作均留有审计记录
+        </div>
+      </section>
+    </div>
   </div>
 
   <div id="appScreen" class="app-screen is-hidden">
     <aside class="sidebar" aria-label="应用导航">
       <div class="sidebar-brand">
-        <div class="brand-mark brand-mark-compact" aria-hidden="true">叉</div>
+        <div class="brand-mark brand-mark-compact"><img class="brand-icon" src="/assets/icon.svg" alt="" aria-hidden="true"></div>
         <div class="sidebar-brand-copy">
           <div class="brand-name">叉车 ERP</div>
           <div class="brand-subtitle">业务管理中心</div>
@@ -78,12 +151,12 @@
       <nav class="nav-list" id="mainNav" aria-label="主导航">
         <section class="nav-group nav-quick-actions" data-nav-group>
           <div class="nav-group-title">日常操作</div>
-          <button class="nav-item nav-action" data-action="quick-vehicle-inbound">整车入库</button>
-          <button class="nav-item nav-action" data-action="part-stock" data-direction="inbound">配件入库</button>
-          <button class="nav-item nav-action" data-action="create" data-kind="vehicleOutbound">销售出库</button>
-          <button class="nav-item nav-action" data-action="create" data-kind="rental">租赁登记</button>
-          <button class="nav-item nav-action" data-action="create" data-kind="repair">维修登记</button>
-          <button class="nav-item nav-action" data-action="stock-transfer">库存调拨</button>
+          <button class="nav-item nav-action" data-action="quick-vehicle-inbound" data-permissions="vehicle:write">整车入库</button>
+          <button class="nav-item nav-action" data-action="part-stock" data-direction="inbound" data-permissions="stock:adjust">配件入库</button>
+          <button class="nav-item nav-action" data-action="create" data-kind="vehicleOutbound" data-permissions="stock:adjust">销售出库</button>
+          <button class="nav-item nav-action" data-action="create" data-kind="rental" data-permissions="stock:adjust">租赁登记</button>
+          <button class="nav-item nav-action" data-action="create" data-kind="repair" data-permissions="repair:write">维修登记</button>
+          <button class="nav-item nav-action" data-action="stock-transfer" data-permissions="stock:adjust">库存调拨</button>
         </section>
 
         <section class="nav-group" data-nav-group>
@@ -145,7 +218,7 @@
         </button>
         <div class="topbar-actions">
           <div class="topbar-create">
-            <button class="btn btn-primary" id="newBusinessBtn" type="button" aria-haspopup="menu" aria-expanded="false">＋ 新建业务</button>
+            <button class="btn btn-primary" id="newBusinessBtn" type="button" aria-haspopup="menu" aria-expanded="false">新建业务</button>
             <div class="topbar-menu" id="newBusinessMenu" role="menu" aria-label="新建业务">
               <button type="button" role="menuitem" data-action="quick-vehicle-inbound" data-permissions="vehicle:write">整车入库</button>
               <button type="button" role="menuitem" data-action="part-stock" data-direction="inbound" data-permissions="stock:adjust">配件入库</button>
@@ -157,12 +230,12 @@
           </div>
           <div class="user-menu-wrap">
             <button class="user-menu-trigger" id="userMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false">
-              <span class="user-avatar" aria-hidden="true">管</span>
+              <span class="user-avatar" id="userAvatar" aria-hidden="true">管</span>
               <span class="user-menu-copy">
                 <strong id="currentUser">admin</strong>
-                <small>账户与权限</small>
+                <small id="currentUserRole">账户与权限</small>
               </span>
-              <span aria-hidden="true">⌄</span>
+              <span class="user-menu-chevron" data-user-menu-chevron aria-hidden="true"></span>
             </button>
             <div class="topbar-menu user-menu" id="userMenu" role="menu" aria-label="用户菜单">
               <button id="switchUserBtn" type="button" role="menuitem">切换用户</button>

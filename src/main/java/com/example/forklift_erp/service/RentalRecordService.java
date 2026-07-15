@@ -4,6 +4,7 @@ import com.example.forklift_erp.common.PageResult;
 import com.example.forklift_erp.dto.RentalRecordCreateDTO;
 import com.example.forklift_erp.dto.RentalRecordUpdateDTO;
 import com.example.forklift_erp.dto.RentalRecordVO;
+import com.example.forklift_erp.dto.RentalBillVO;
 
 import java.util.List;
 
@@ -15,6 +16,8 @@ public interface RentalRecordService {
     PageResult<RentalRecordVO> findPage(String keyword, String status, Integer page, Integer size);
 
     RentalRecordVO findById(Long id);
+
+    List<RentalBillVO> findBills(Long id);
 
     RentalRecordVO create(RentalRecordCreateDTO request);
 

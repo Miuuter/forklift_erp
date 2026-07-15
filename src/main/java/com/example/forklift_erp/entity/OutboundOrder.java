@@ -32,6 +32,9 @@ public class OutboundOrder implements CollaborativeResource {
     @Column(name = "resource_id")
     private Long resourceId;
 
+    @Column(name = "source_warehouse_id")
+    private Long sourceWarehouseId;
+
     @Column(name = "resource_code", length = 100)
     private String resourceCode;
 
@@ -67,6 +70,12 @@ public class OutboundOrder implements CollaborativeResource {
 
     @Column(name = "settlement_price", precision = 12, scale = 2)
     private BigDecimal settlementPrice;
+
+    @Column(name = "unit_sale_price", precision = 12, scale = 2)
+    private BigDecimal unitSalePrice;
+
+    @Column(name = "line_amount", precision = 14, scale = 2)
+    private BigDecimal lineAmount;
 
     @Column(name = "sales_date")
     private LocalDate salesDate;
@@ -154,6 +163,9 @@ public class OutboundOrder implements CollaborativeResource {
 
     @Column(name = "stock_operation_log_id")
     private Long stockOperationLogId;
+
+    @Column(name = "financial_posted")
+    private Boolean financialPosted = false;
 
     @Column(name = "is_locked")
     private Boolean isLocked = false;

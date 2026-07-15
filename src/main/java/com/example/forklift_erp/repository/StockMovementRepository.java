@@ -11,6 +11,7 @@ import java.util.Optional;
 @Repository
 public interface StockMovementRepository extends JpaRepository<StockMovement, Long> {
     Optional<StockMovement> findByMovementNo(String movementNo);
+    Optional<StockMovement> findByIdempotencyKey(String idempotencyKey);
 
     List<StockMovement> findBySourceTypeAndSourceId(String sourceType, Long sourceId);
 

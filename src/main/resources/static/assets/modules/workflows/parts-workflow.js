@@ -6,6 +6,7 @@ export function createPartsWorkflow(deps) {
     renderToolbar,
     partFilterControls,
     hasPermission,
+    hasAnyRole,
     icon,
     renderExportableSurface,
     renderTable,
@@ -27,7 +28,8 @@ export function createPartsWorkflow(deps) {
           main: [partFilterControls()],
           actions: [
             hasPermission("stock:adjust") ? `<button class="btn" type="button" data-action="part-stock" data-direction="inbound">${icon("plus")}配件入库</button>` : "",
-            hasPermission("stock:adjust") ? `<button class="btn" type="button" data-action="part-stock" data-direction="outbound">${icon("minus")}配件出库</button>` : ""
+            hasPermission("stock:adjust") ? `<button class="btn" type="button" data-action="part-stock" data-direction="outbound">${icon("minus")}销售出库</button>` : "",
+            hasPermission("stock:adjust") && hasAnyRole("ADMIN", "SUPER_ADMIN") ? `<button class="btn" type="button" data-action="part-stock" data-direction="adjustOutbound">${icon("minus")}库存减少</button>` : ""
           ]
         })}
         ${renderExportableSurface("配件列表", "parts", renderTable([

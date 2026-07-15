@@ -8,6 +8,8 @@ import com.example.forklift_erp.entity.Customer;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.CustomerRepository;
 import com.example.forklift_erp.repository.OutboundOrderRepository;
+import com.example.forklift_erp.repository.RentalRecordRepository;
+import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.CustomerService;
 import com.example.forklift_erp.service.OperationAuditService;
@@ -28,6 +30,12 @@ public class CustomerServiceImpl implements CustomerService {
 
     @Autowired
     private OutboundOrderRepository outboundOrderRepository;
+
+    @Autowired
+    private RentalRecordRepository rentalRecordRepository;
+
+    @Autowired
+    private RepairRecordRepository repairRecordRepository;
 
     @Autowired
     private CollaborationService collaborationService;
@@ -100,6 +108,12 @@ public class CustomerServiceImpl implements CustomerService {
         collaborationService.validateWrite(customer, version);
         if (outboundOrderRepository.existsByCustomerId(id)) {
             throw new BusinessException(ResultCode.CONFLICT, "Customer has outbound orders and cannot be deleted");
+        }
+        if (rentalRecordRepository.existsByCustomerId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT, "Customer has rental records and cannot be deleted");
+        }
+        if (repairRecordRepository.existsByCustomerId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT, "Customer has repair records and cannot be deleted");
         }
         customerRepository.delete(customer);
         operationAuditService.record("Customer", "DELETE", "CUSTOMER", id,

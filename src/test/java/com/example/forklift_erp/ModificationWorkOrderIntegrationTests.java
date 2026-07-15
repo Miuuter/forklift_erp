@@ -158,12 +158,14 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         line.put("machineConfigVersion", tireConfig.getVersion());
         line.put("newPartId", partId);
         line.put("newPartVersion", part.path("version").asLong());
+        line.put("warehouseId", part.path("warehouseId").asLong());
         line.put("quantity", 1);
         line.put("oldPartAction", "STOCK_IN");
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("machineId", machineId);
         payload.put("machineVersion", machine.path("version").asLong());
+        payload.put("warehouseId", machine.path("warehouseId").asLong());
         payload.put("customerName", "Codex Customer");
         payload.put("salesOrderNo", "SO-" + unique("order"));
         payload.put("operator", "work-order-test");
@@ -258,11 +260,15 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         line.put("newConfigValueId", savedTargetValue.getId());
         line.put("newConfigValueVersion", savedTargetValue.getVersion());
         line.put("oldPartAction", "DISCOUNT");
-        line.put("priceDifference", "880.00");
+        line.put("chargeUnitPrice", "1000.00");
+        line.put("discountAmount", "120.00");
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("machineId", machineId);
         payload.put("machineVersion", machine.path("version").asLong());
+        payload.put("warehouseId", machine.path("warehouseId").asLong());
+        payload.put("workOrderType", "AFTER_SALE");
+        payload.put("customerName", "折扣改装客户");
         payload.put("operator", "discount-work-order-test");
         payload.put("remark", "discount replacement");
         payload.put("lines", List.of(line));
@@ -275,7 +281,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.lines[0].oldPartAction").value("DISCOUNT"))
                 .andExpect(jsonPath("$.data.lines[0].newConfigValueId").value(savedTargetValue.getId()))
-                .andExpect(jsonPath("$.data.lines[0].priceDifference").value(880.00))
+                .andExpect(jsonPath("$.data.lines[0].chargeAmount").value(880.00))
                 .andReturn()
                 .getResponse()
                 .getContentAsString();
@@ -308,8 +314,8 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         JsonNode afterStats = loadFinanceStats();
         BigDecimal afterIncome = afterStats.path("annualSummary").path("modificationIncome").decimalValue();
         BigDecimal afterExpense = afterStats.path("annualSummary").path("modificationExpense").decimalValue();
-        assertThat(afterIncome.subtract(beforeIncome)).isEqualByComparingTo("0.00");
-        assertThat(afterExpense.subtract(beforeExpense)).isEqualByComparingTo("880.00");
+        assertThat(afterIncome.subtract(beforeIncome)).isEqualByComparingTo("880.00");
+        assertThat(afterExpense.subtract(beforeExpense)).isEqualByComparingTo("0.00");
 
         ConfigValue rebateValue = new ConfigValue();
         rebateValue.setConfigItemId(tireConfig.getConfigItemId());
@@ -326,11 +332,15 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         rebateLine.put("newConfigValueId", savedRebateValue.getId());
         rebateLine.put("newConfigValueVersion", savedRebateValue.getVersion());
         rebateLine.put("oldPartAction", "DISCOUNT");
-        rebateLine.put("priceDifference", "-120.00");
+        rebateLine.put("chargeUnitPrice", "200.00");
+        rebateLine.put("discountAmount", "80.00");
 
         Map<String, Object> rebatePayload = new LinkedHashMap<>();
         rebatePayload.put("machineId", machineId);
         rebatePayload.put("machineVersion", currentMachine.getVersion());
+        rebatePayload.put("warehouseId", currentMachine.getWarehouseId());
+        rebatePayload.put("workOrderType", "AFTER_SALE");
+        rebatePayload.put("customerName", "折扣改装客户");
         rebatePayload.put("operator", "discount-work-order-test");
         rebatePayload.put("lines", List.of(rebateLine));
 
@@ -393,6 +403,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         payload.put("configItemId", savedItem.getId());
         payload.put("newPartId", partId);
         payload.put("newPartVersion", part.path("version").asLong());
+        payload.put("warehouseId", part.path("warehouseId").asLong());
         payload.put("quantity", 2);
         payload.put("operator", "install-test");
 
@@ -445,6 +456,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         modelPayload.put("specificationModel", "CBY25");
         modelPayload.put("machineType", "手动叉车");
         modelPayload.put("modelOnly", true);
+        modelPayload.put("warehouseId", defaultWarehouseId());
 
         String modelResponse = mockMvc.perform(post("/api/inventory")
                         .header("Authorization", bearer(superToken))
@@ -483,6 +495,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         machine.put("specificationModel", "CBY25");
         machine.put("machineType", "手动叉车");
         machine.put("inventoryCount", 1);
+        machine.put("warehouseId", defaultWarehouseId());
 
         Map<String, Object> config = new LinkedHashMap<>();
         config.put("configItemId", savedItem.getId());
@@ -547,7 +560,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
 
         Map<String, Object> secondPayload = new LinkedHashMap<>(firstPayload);
         secondPayload.put("vehicleProductNumber", secondVehicleNumber);
-        secondPayload.put("inventoryCount", 2);
+        secondPayload.put("inventoryCount", 1);
         JsonNode second = createInventory(secondPayload);
         machinesToCleanup.add(second.path("id").asLong());
 
@@ -565,7 +578,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
                 .andExpect(jsonPath("$.data.content[0].machineType").value(machineType))
                 .andExpect(jsonPath("$.data.content[0].modelTemplateId").value(template.path("id").asLong()))
                 .andExpect(jsonPath("$.data.content[0].unitCount").value(2))
-                .andExpect(jsonPath("$.data.content[0].inventoryCount").value(3))
+                .andExpect(jsonPath("$.data.content[0].inventoryCount").value(2))
                 .andExpect(jsonPath("$.data.content[0].vehicleNumbers").value(containsString(firstVehicleNumber)))
                 .andExpect(jsonPath("$.data.content[0].vehicleNumbers").value(containsString(secondVehicleNumber)));
 
@@ -595,10 +608,12 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
     }
 
     private JsonNode createInventory(Map<String, Object> payload) throws Exception {
+        Map<String, Object> request = new LinkedHashMap<>(payload);
+        request.putIfAbsent("warehouseId", defaultWarehouseId());
         String response = mockMvc.perform(post("/api/inventory")
                         .header("Authorization", bearer(superToken))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(payload)))
+                        .content(json(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value(200))
                 .andReturn()
@@ -674,6 +689,7 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         payload.put("partCategory", category);
         payload.put("quantity", quantity);
         payload.put("unit", "pcs");
+        payload.put("warehouseId", defaultWarehouseId());
 
         String response = mockMvc.perform(post("/api/parts")
                         .header("Authorization", bearer(superToken))

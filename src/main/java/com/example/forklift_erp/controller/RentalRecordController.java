@@ -4,6 +4,7 @@ import com.example.forklift_erp.common.Result;
 import com.example.forklift_erp.dto.RentalRecordCreateDTO;
 import com.example.forklift_erp.dto.RentalRecordUpdateDTO;
 import com.example.forklift_erp.dto.RentalRecordVO;
+import com.example.forklift_erp.dto.RentalBillVO;
 import com.example.forklift_erp.security.PermissionCodes;
 import com.example.forklift_erp.service.RentalRecordService;
 import jakarta.validation.Valid;
@@ -20,6 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/rentals")
@@ -44,6 +47,12 @@ public class RentalRecordController {
     @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)
     public Result<RentalRecordVO> getById(@PathVariable Long id) {
         return Result.success(service.findById(id));
+    }
+
+    @GetMapping("/{id}/bills")
+    @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)
+    public Result<List<RentalBillVO>> getBills(@PathVariable Long id) {
+        return Result.success(service.findBills(id));
     }
 
     @PostMapping

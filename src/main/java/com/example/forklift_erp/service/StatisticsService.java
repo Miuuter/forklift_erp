@@ -4,16 +4,24 @@ import com.example.forklift_erp.dto.StatisticsDashboardVO;
 import com.example.forklift_erp.dto.ListSummaryVO;
 import com.example.forklift_erp.constant.ModificationWorkOrderStatus;
 import com.example.forklift_erp.entity.MachineInventory;
+import com.example.forklift_erp.entity.FinancialEvent;
 import com.example.forklift_erp.entity.ModificationWorkOrder;
 import com.example.forklift_erp.entity.ModificationWorkOrderLine;
+import com.example.forklift_erp.entity.OutboundOrder;
 import com.example.forklift_erp.entity.PartInventory;
+import com.example.forklift_erp.entity.PurchaseOrder;
+import com.example.forklift_erp.entity.RentalBill;
 import com.example.forklift_erp.entity.RepairRecord;
 import com.example.forklift_erp.entity.RentalRecord;
 import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
+import com.example.forklift_erp.repository.FinancialEventRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
+import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
+import com.example.forklift_erp.repository.PurchaseOrderRepository;
+import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.repository.RentalRecordRepository;
 import com.example.forklift_erp.repository.StockOperationLogRepository;
@@ -35,12 +43,16 @@ import java.util.stream.Collectors;
 @Service
 public class StatisticsService {
     private final StockOperationLogRepository stockOperationLogRepository;
+    private final FinancialEventRepository financialEventRepository;
     private final MachineInventoryRepository machineInventoryRepository;
     private final PartInventoryRepository partInventoryRepository;
     private final RepairRecordRepository repairRecordRepository;
     private final RentalRecordRepository rentalRecordRepository;
     private final ModificationWorkOrderRepository modificationWorkOrderRepository;
     private final ModificationWorkOrderLineRepository modificationWorkOrderLineRepository;
+    private final OutboundOrderRepository outboundOrderRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
+    private final RentalBillRepository rentalBillRepository;
     private final RentalRevenueCalculator rentalRevenueCalculator;
     private final FinancialStatisticsBuilder financialStatisticsBuilder;
     private final InventoryStatisticsBuilder inventoryStatisticsBuilder;
@@ -48,24 +60,32 @@ public class StatisticsService {
 
     public StatisticsService(
             StockOperationLogRepository stockOperationLogRepository,
+            FinancialEventRepository financialEventRepository,
             MachineInventoryRepository machineInventoryRepository,
             PartInventoryRepository partInventoryRepository,
             RepairRecordRepository repairRecordRepository,
             RentalRecordRepository rentalRecordRepository,
             ModificationWorkOrderRepository modificationWorkOrderRepository,
             ModificationWorkOrderLineRepository modificationWorkOrderLineRepository,
+            OutboundOrderRepository outboundOrderRepository,
+            PurchaseOrderRepository purchaseOrderRepository,
+            RentalBillRepository rentalBillRepository,
             RentalRevenueCalculator rentalRevenueCalculator,
             FinancialStatisticsBuilder financialStatisticsBuilder,
             InventoryStatisticsBuilder inventoryStatisticsBuilder,
             ListSummaryService listSummaryService
     ) {
         this.stockOperationLogRepository = stockOperationLogRepository;
+        this.financialEventRepository = financialEventRepository;
         this.machineInventoryRepository = machineInventoryRepository;
         this.partInventoryRepository = partInventoryRepository;
         this.repairRecordRepository = repairRecordRepository;
         this.rentalRecordRepository = rentalRecordRepository;
         this.modificationWorkOrderRepository = modificationWorkOrderRepository;
         this.modificationWorkOrderLineRepository = modificationWorkOrderLineRepository;
+        this.outboundOrderRepository = outboundOrderRepository;
+        this.purchaseOrderRepository = purchaseOrderRepository;
+        this.rentalBillRepository = rentalBillRepository;
         this.rentalRevenueCalculator = rentalRevenueCalculator;
         this.financialStatisticsBuilder = financialStatisticsBuilder;
         this.inventoryStatisticsBuilder = inventoryStatisticsBuilder;
@@ -78,6 +98,29 @@ public class StatisticsService {
         LocalDateTime endAt = LocalDate.of(selectedYear + 1, 1, 1).atStartOfDay();
         List<StockOperationLog> stockLogs = stockOperationLogRepository
                 .findByCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(startAt, endAt);
+        List<FinancialEvent> financialEvents = financialEventRepository.findByBusinessDateBetweenOrderByBusinessDateAscIdAsc(
+                startAt.toLocalDate(), endAt.toLocalDate().minusDays(1));
+        List<PurchaseOrder> purchases = purchaseOrderRepository.findAll().stream()
+                .filter(order -> order.getReceivedDate() != null)
+                .filter(order -> !order.getReceivedDate().isBefore(startAt.toLocalDate())
+                        && order.getReceivedDate().isBefore(endAt.toLocalDate()))
+                .toList();
+        List<OutboundOrder> outbounds = outboundOrderRepository.findAll().stream()
+                .filter(order -> {
+                    LocalDate date = order.getSalesDate() != null
+                            ? order.getSalesDate()
+                            : order.getCreatedAt() == null ? null : order.getCreatedAt().toLocalDate();
+                    return date != null && !date.isBefore(startAt.toLocalDate()) && date.isBefore(endAt.toLocalDate());
+                })
+                .toList();
+        Set<Long> outboundStockLogIds = outbounds.stream()
+                .map(OutboundOrder::getStockOperationLogId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, StockOperationLog> outboundStockLogs = outboundStockLogIds.isEmpty()
+                ? Map.of()
+                : stockOperationLogRepository.findAllById(outboundStockLogIds).stream()
+                .collect(Collectors.toMap(StockOperationLog::getId, log -> log, (left, right) -> left));
         List<RepairRecord> repairs = repairRecordRepository.findByRepairDateBetween(startAt, endAt.minusNanos(1));
         List<RentalRecord> rentals = rentalRecordRepository.findInDateRange(
                 startAt.toLocalDate(),
@@ -85,6 +128,15 @@ public class StatisticsService {
                 startAt,
                 endAt
         );
+        Set<Long> rentalIds = rentals.stream()
+                .map(RentalRecord::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        List<RentalBill> rentalBills = rentalIds.isEmpty()
+                ? List.of()
+                : rentalBillRepository.findAll().stream()
+                .filter(bill -> rentalIds.contains(bill.getRentalId()))
+                .toList();
         List<ModificationWorkOrder> modificationOrders = modificationWorkOrderRepository.findCompletedInRange(
                 ModificationWorkOrderStatus.COMPLETED.code(),
                 startAt,
@@ -104,16 +156,31 @@ public class StatisticsService {
         StatisticsDashboardVO dashboard = new StatisticsDashboardVO();
         dashboard.setSelectedYear(selectedYear);
         dashboard.setGeneratedAt(LocalDateTime.now());
-        dashboard.setMonthlyFinance(financialStatisticsBuilder.buildMonthlyRows(
+        dashboard.setMonthlyFinance(financialStatisticsBuilder.buildMonthlyRowsHybrid(
                 selectedYear,
+                financialEvents,
                 stockLogs,
+                purchases,
+                outbounds,
+                outboundStockLogs,
                 repairs,
                 rentals,
+                rentalBills,
                 modificationOrders,
                 modificationLinesByOrderId
         ));
-        dashboard.setYearlyFinance(financialStatisticsBuilder.buildYearlyRows(stockLogs, repairs, rentals, modificationOrders, modificationLinesByOrderId,
-                startAt.toLocalDate(), endAt.toLocalDate().minusDays(1)));
+        dashboard.setYearlyFinance(financialStatisticsBuilder.buildYearlyRowsHybrid(
+                financialEvents,
+                stockLogs,
+                purchases,
+                outbounds,
+                outboundStockLogs,
+                repairs,
+                rentals,
+                rentalBills,
+                modificationOrders,
+                modificationLinesByOrderId
+        ));
         dashboard.setAnnualSummary(financialStatisticsBuilder.annualRow(selectedYear, dashboard.getYearlyFinance()));
         dashboard.setResourceFlows(buildResourceFlows(selectedYear, stockLogs, machines, parts));
         dashboard.setTopOutbounds(buildTopOutbounds(selectedYear, stockLogs, machines, parts));

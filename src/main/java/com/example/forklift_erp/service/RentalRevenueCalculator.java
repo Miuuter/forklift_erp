@@ -91,10 +91,7 @@ public class RentalRevenueCalculator {
 
     private LocalDate rentalEndDate(RentalRecord rental, LocalDate start) {
         if (RentalStatus.RETURNED.code().equals(rental.getStatus())) {
-            if (rental.getEndDate() != null) {
-                return rental.getEndDate();
-            }
-            return rental.getUpdatedAt() == null ? start : rental.getUpdatedAt().toLocalDate();
+            return rental.getReturnDate() != null ? rental.getReturnDate() : rental.getEndDate();
         }
         LocalDate today = LocalDate.now(clock);
         return today.isBefore(start) ? null : today;

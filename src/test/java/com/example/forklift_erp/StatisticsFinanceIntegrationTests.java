@@ -233,10 +233,10 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         assertMoney(row.getModificationIncome(), "120.00");
         assertMoney(row.getModificationExpense(), "45.00");
         assertMoney(row.getTotalIncome(), "20190.00");
-        assertMoney(row.getTotalExpense(), "30675.00");
+        assertMoney(row.getTotalExpense(), "10525.00");
         assertMoney(row.getGrossProfit(), "9665.00");
         assertMoney(row.getNetProfit(), "9665.00");
-        assertMoney(row.getNetCashflow(), "-10485.00");
+        assertMoney(row.getNetCashflow(), "0.00");
     }
 
     private StatisticsDashboardVO.FinancialRow findPeriod(List<StatisticsDashboardVO.FinancialRow> rows, String period) {

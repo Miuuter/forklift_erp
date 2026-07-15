@@ -6,6 +6,7 @@ import com.example.forklift_erp.entity.User;
 import com.example.forklift_erp.repository.PermissionRepository;
 import com.example.forklift_erp.repository.RoleRepository;
 import com.example.forklift_erp.repository.UserRepository;
+import com.example.forklift_erp.repository.WarehouseRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -40,6 +41,20 @@ abstract class TestcontainersDatabaseSupport {
     protected static final String PASSWORD = "CodexTest123!";
 
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.0.43");
+    private static final String EXTERNAL_DATABASE_URL = setting(
+            "forklift.test.db.url",
+            "FORKLIFT_ERP_TEST_DB_URL"
+    );
+    private static final String EXTERNAL_DATABASE_USERNAME = setting(
+            "forklift.test.db.username",
+            "FORKLIFT_ERP_TEST_DB_USERNAME"
+    );
+    private static final String EXTERNAL_DATABASE_PASSWORD = setting(
+            "forklift.test.db.password",
+            "FORKLIFT_ERP_TEST_DB_PASSWORD"
+    );
+    private static final boolean USE_EXTERNAL_TEST_DATABASE =
+            EXTERNAL_DATABASE_URL != null && !EXTERNAL_DATABASE_URL.isBlank();
 
     private static final MySQLContainer<?> MYSQL = new MySQLContainer<>(MYSQL_IMAGE)
             .withDatabaseName("forklift_erp_test")
@@ -52,11 +67,27 @@ abstract class TestcontainersDatabaseSupport {
             .withUrlParam("allowPublicKeyRetrieval", "true");
 
     static {
-        MYSQL.start();
+        if (USE_EXTERNAL_TEST_DATABASE) {
+            requireIsolatedTestDatabase(EXTERNAL_DATABASE_URL);
+        } else {
+            MYSQL.start();
+        }
     }
 
     @DynamicPropertySource
     static void registerDatabaseProperties(DynamicPropertyRegistry registry) {
+        if (USE_EXTERNAL_TEST_DATABASE) {
+            registry.add("spring.datasource.url", () -> EXTERNAL_DATABASE_URL);
+            registry.add("spring.datasource.username", () -> requiredSetting(
+                    EXTERNAL_DATABASE_USERNAME,
+                    "forklift.test.db.username / FORKLIFT_ERP_TEST_DB_USERNAME"
+            ));
+            registry.add("spring.datasource.password", () -> EXTERNAL_DATABASE_PASSWORD == null
+                    ? ""
+                    : EXTERNAL_DATABASE_PASSWORD);
+            registry.add("spring.datasource.driver-class-name", () -> "com.mysql.cj.jdbc.Driver");
+            return;
+        }
         registry.add("spring.datasource.url", MYSQL::getJdbcUrl);
         registry.add("spring.datasource.username", MYSQL::getUsername);
         registry.add("spring.datasource.password", MYSQL::getPassword);
@@ -80,6 +111,9 @@ abstract class TestcontainersDatabaseSupport {
 
     @Autowired
     protected PasswordEncoder passwordEncoder;
+
+    @Autowired
+    protected WarehouseRepository warehouseRepository;
 
     protected final List<String> usersToCleanup = new ArrayList<>();
     protected final List<String> rolesToCleanup = new ArrayList<>();
@@ -213,6 +247,12 @@ abstract class TestcontainersDatabaseSupport {
         return result;
     }
 
+    protected Long defaultWarehouseId() {
+        return warehouseRepository.findFirstByDefaultWarehouseTrueOrderByIdAsc()
+                .orElseThrow(() -> new IllegalStateException("Default warehouse is required for integration tests"))
+                .getId();
+    }
+
     private Role findOrCreateRole(String roleName) {
         return roleRepository.findByName(roleName)
                 .orElseGet(() -> {
@@ -224,5 +264,40 @@ abstract class TestcontainersDatabaseSupport {
                     }
                     return roleRepository.save(newRole);
                 });
+    }
+
+    private static String setting(String systemProperty, String environmentVariable) {
+        String value = System.getProperty(systemProperty);
+        if (value == null || value.isBlank()) {
+            value = System.getenv(environmentVariable);
+        }
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String requiredSetting(String value, String label) {
+        if (value == null || value.isBlank()) {
+            throw new IllegalStateException("Missing external test database setting: " + label);
+        }
+        return value;
+    }
+
+    private static void requireIsolatedTestDatabase(String jdbcUrl) {
+        String normalized = jdbcUrl == null ? "" : jdbcUrl.trim().toLowerCase();
+        int queryStart = normalized.indexOf('?');
+        String withoutQuery = queryStart < 0 ? normalized : normalized.substring(0, queryStart);
+        if (!withoutQuery.endsWith("/forklift_erp_test")) {
+            throw new IllegalStateException(
+                    "Integration tests may only use the isolated database forklift_erp_test; refusing URL: "
+                            + sanitizedDatabaseUrl(jdbcUrl)
+            );
+        }
+    }
+
+    private static String sanitizedDatabaseUrl(String jdbcUrl) {
+        if (jdbcUrl == null) {
+            return "<null>";
+        }
+        int queryStart = jdbcUrl.indexOf('?');
+        return queryStart < 0 ? jdbcUrl : jdbcUrl.substring(0, queryStart);
     }
 }

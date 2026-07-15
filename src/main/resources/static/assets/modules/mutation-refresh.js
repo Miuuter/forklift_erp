@@ -50,7 +50,8 @@ export function createMutationRefresh({
       stocktaking: ["vehicle", "part"],
       invoiceUpload: ["outboundOrder"],
       contractUpload: ["outboundOrder"],
-      user: ["repairUser"]
+      user: ["repairUser"],
+      userJobTag: ["repairUser"]
     };
     return mapping[kind] || [];
   }
@@ -83,7 +84,8 @@ export function createMutationRefresh({
       stocktaking: ["stocktakes", "vehicles", "parts"],
       user: ["users"],
       userUsername: ["users"],
-      userPassword: ["users"]
+      userPassword: ["users"],
+      userJobTag: ["users"]
     };
     return mapping[kind] || [];
   }

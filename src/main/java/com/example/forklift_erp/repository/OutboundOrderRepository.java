@@ -186,21 +186,21 @@ public interface OutboundOrderRepository extends JpaRepository<OutboundOrder, Lo
 
     @Query("""
             select
-              sum(coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0)) as receivableAmount,
+              sum(coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0)) as receivableAmount,
               sum(coalesce(o.receivedAmount, 0)) as receivedAmount,
-              sum(case when coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
-                       then coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0)
+              sum(case when coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
+                       then coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0)
                        else 0 end) as outstandingAmount,
-              sum(case when coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
+              sum(case when coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
                        then 1 else 0 end) as pendingPaymentCount,
               sum(case when o.paymentDueDate is not null
                             and o.paymentDueDate < current_date
-                            and coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
+                            and coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
                        then 1 else 0 end) as overduePaymentCount,
               sum(case when o.paymentDueDate is not null
                             and o.paymentDueDate < current_date
-                            and coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
-                       then coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0)
+                            and coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
+                       then coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0)
                        else 0 end) as overdueAmount,
               sum(case when o.paymentSettled = true and (o.salesReported is null or o.salesReported = false)
                        then 1 else 0 end) as pendingSalesReportCount,
@@ -241,7 +241,7 @@ public interface OutboundOrderRepository extends JpaRepository<OutboundOrder, Lo
             where (:includeLocked = true or o.isLocked = false)
               and o.paymentDueDate is not null
               and o.paymentDueDate < current_date
-              and coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
+              and coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
             order by o.updatedAt desc, o.id desc
             """)
     List<OutboundOrder> findOverduePaymentTodos(@Param("includeLocked") boolean includeLocked, Pageable pageable);
@@ -250,7 +250,7 @@ public interface OutboundOrderRepository extends JpaRepository<OutboundOrder, Lo
             select o from OutboundOrder o
             where (:includeLocked = true or o.isLocked = false)
               and (o.paymentDueDate is null or o.paymentDueDate >= current_date)
-              and coalesce(coalesce(o.receivableAmount, o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
+              and coalesce(coalesce(coalesce(o.receivableAmount, o.lineAmount), o.settlementPrice), 0) - coalesce(o.receivedAmount, 0) > 0
             order by o.updatedAt desc, o.id desc
             """)
     List<OutboundOrder> findPendingPaymentTodos(@Param("includeLocked") boolean includeLocked, Pageable pageable);
@@ -345,6 +345,10 @@ public interface OutboundOrderRepository extends JpaRepository<OutboundOrder, Lo
     );
 
     boolean existsByCustomerId(Long customerId);
+
+    boolean existsByResourceTypeAndResourceId(String resourceType, Long resourceId);
+
+    boolean existsBySourceWarehouseId(Long sourceWarehouseId);
 
     boolean existsByOrderNo(String orderNo);
 

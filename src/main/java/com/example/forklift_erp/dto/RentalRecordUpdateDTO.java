@@ -11,6 +11,7 @@ import java.time.LocalDate;
 @Data
 public class RentalRecordUpdateDTO {
     private Long version;
+    private Long warehouseId;
 
     @NotNull(message = "租赁去向不能为空")
     private Long customerId;
@@ -27,6 +28,7 @@ public class RentalRecordUpdateDTO {
     private LocalDate startDate;
 
     private LocalDate endDate;
+    private LocalDate returnDate;
 
     private String status;
 

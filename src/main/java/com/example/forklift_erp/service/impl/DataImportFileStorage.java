@@ -8,6 +8,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -72,6 +75,20 @@ public class DataImportFileStorage {
 
     void registerRollbackCleanup(Path file) {
         fileStorageSupport.registerRollbackCleanup(file, "Failed to delete import file");
+    }
+
+    String fingerprint(Path file) {
+        try {
+            byte[] bytes = Files.readAllBytes(file);
+            byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder builder = new StringBuilder(hash.length * 2);
+            for (byte value : hash) {
+                builder.append(String.format("%02x", value));
+            }
+            return builder.toString();
+        } catch (java.io.IOException | NoSuchAlgorithmException ex) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "Unable to fingerprint import file");
+        }
     }
 
     private Path storageRoot() {

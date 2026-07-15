@@ -30,6 +30,9 @@ public class StocktakingRecord implements CollaborativeResource {
     @Column(name = "resource_id")
     private Long resourceId;
 
+    @Column(name = "warehouse_id")
+    private Long warehouseId;
+
     @Column(name = "resource_code", length = 100)
     private String resourceCode;
 
@@ -41,6 +44,12 @@ public class StocktakingRecord implements CollaborativeResource {
 
     @Column(name = "book_quantity", nullable = false)
     private Integer bookQuantity = 0;
+
+    @Column(name = "book_balance_version")
+    private Long bookBalanceVersion;
+
+    @Column(name = "snapshot_movement_id")
+    private Long snapshotMovementId;
 
     @Column(name = "actual_quantity", nullable = false)
     private Integer actualQuantity = 0;

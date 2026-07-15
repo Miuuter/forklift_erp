@@ -23,6 +23,9 @@ public class Supplier implements CollaborativeResource {
     @Column(name = "supplier_type", length = 50)
     private String supplierType;
 
+    @Column(nullable = false)
+    private Boolean active = true;
+
     @Column(name = "contact_name", length = 80)
     private String contactName;
 

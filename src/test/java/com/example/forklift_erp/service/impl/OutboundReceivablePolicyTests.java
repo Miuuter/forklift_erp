@@ -48,4 +48,17 @@ class OutboundReceivablePolicyTests {
 
         assertThat(order.getPaymentSettled()).isFalse();
     }
+
+    @Test
+    void applyHonorsExplicitUnsettledChoiceWhenAmountsAreFullyReceived() {
+        OutboundOrder order = new OutboundOrder();
+        order.setReceivableAmount(new BigDecimal("480.00"));
+        order.setReceivedAmount(new BigDecimal("480.00"));
+        order.setPaymentSettled(true);
+
+        policy.apply(order, false);
+
+        assertThat(order.getReceivedAmount()).isEqualByComparingTo("480.00");
+        assertThat(order.getPaymentSettled()).isFalse();
+    }
 }

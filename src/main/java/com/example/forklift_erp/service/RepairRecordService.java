@@ -27,6 +27,8 @@ public interface RepairRecordService {
 
     Optional<RepairRecord> findByIdForUpdate(Long id);
 
+    RepairRecordVO toVO(RepairRecord record);
+
     RepairRecord save(RepairRecord record);
 
     void deleteById(Long id);

@@ -7,6 +7,7 @@ import com.example.forklift_erp.dto.SupplierVO;
 import com.example.forklift_erp.entity.Supplier;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.PurchaseOrderRepository;
+import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.SupplierRepository;
 import com.example.forklift_erp.util.ListPageSupport;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +25,9 @@ public class SupplierService {
 
     @Autowired
     private PurchaseOrderRepository purchaseOrderRepository;
+
+    @Autowired
+    private MachineInventoryRepository machineInventoryRepository;
 
     @Autowired
     private CollaborationService collaborationService;
@@ -85,17 +89,24 @@ public class SupplierService {
         Supplier supplier = supplierRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Supplier not found"));
         collaborationService.validateWrite(supplier, version);
-        if (purchaseOrderRepository.existsBySupplierId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT, "Supplier has purchase orders and cannot be deleted");
-        }
-        supplierRepository.delete(supplier);
-        operationAuditService.record("Supplier", "DELETE", "SUPPLIER", id,
-                null, supplier.getSupplierName(), "Delete supplier", null, supplier.getRemarks());
+        supplier.setActive(false);
+        collaborationService.stampWrite(supplier);
+        supplierRepository.saveAndFlush(supplier);
+        String summary = (purchaseOrderRepository.existsBySupplierId(id) || machineInventoryRepository.existsBySupplierId(id))
+                ? "Deactivate supplier with historical references"
+                : "Deactivate supplier";
+        operationAuditService.record("Supplier", "DEACTIVATE", "SUPPLIER", id,
+                null, supplier.getSupplierName(), summary, null, supplier.getRemarks());
     }
 
     private void copy(SupplierDTO request, Supplier supplier) {
         supplier.setSupplierName(blankToNull(request.getSupplierName()));
         supplier.setSupplierType(blankToNull(request.getSupplierType()));
+        if (request.getActive() != null) {
+            supplier.setActive(request.getActive());
+        } else if (supplier.getActive() == null) {
+            supplier.setActive(true);
+        }
         supplier.setContactName(blankToNull(request.getContactName()));
         supplier.setContactPhone(blankToNull(request.getContactPhone()));
         supplier.setAddress(blankToNull(request.getAddress()));

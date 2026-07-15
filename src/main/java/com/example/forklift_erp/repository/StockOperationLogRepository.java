@@ -16,4 +16,6 @@ public interface StockOperationLogRepository extends JpaRepository<StockOperatio
             LocalDateTime start,
             LocalDateTime end
     );
+
+    List<StockOperationLog> findByResourceTypeAndResourceIdOrderByIdAsc(String resourceType, Long resourceId);
 }

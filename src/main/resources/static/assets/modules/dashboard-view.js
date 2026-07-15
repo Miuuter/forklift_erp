@@ -129,6 +129,7 @@ export function createDashboardView(deps) {
     const topRentalRows = stats.topRentals || [];
     const stockRows = stats.stockValues || [];
     const lowRows = stats.lowStocks || [];
+    const reconciliation = state.data.dailyReconciliation || null;
 
     return `
       <div class="page">
@@ -139,14 +140,18 @@ export function createDashboardView(deps) {
               ${renderYearOptions(stats.selectedYear, yearlyRows)}
             </select>
           </label>
+          <label class="field year-filter">
+            <span>对账日期</span>
+            <input type="date" data-action="select-reconciliation-date" value="${escapeAttr(state.selectedReconciliationDate || reconciliation?.activityDate || "")}">
+          </label>
           <div class="toolbar-actions">
             <button class="btn btn-ghost" type="button" data-action="refresh">${icon("refresh")}刷新</button>
           </div>
         </div>
 
         <section class="summary-grid">
-          ${summaryCard("年度总收入", money(annual.totalIncome), `出库 ${money(annual.outboundRevenue)} / 维修收入 ${money(annual.repairIncome)} / 维修应收 ${money(annual.repairReceivable)} / 租赁 ${money(annual.rentalIncome)}`)}
-          ${summaryCard("成本/支出合计", money(annual.totalExpense), `入库 ${money(annual.inboundCost)} / 出库成本 ${money(annual.outboundCost)}`)}
+          ${summaryCard("年度总收入", money(annual.totalIncome), `出库 ${money(annual.outboundRevenue)} / 维修 ${money(annual.repairIncome)} / 租赁 ${money(annual.rentalIncome)} / 盘盈 ${money(annual.inventoryGain)}`)}
+          ${summaryCard("成本/支出合计", money(annual.totalExpense), `入库 ${money(annual.inboundCost)} / 出库成本 ${money(annual.outboundCost)} / 盘亏 ${money(annual.inventoryLoss)}`)}
           ${summaryCard("净现金流", money(annual.netCashflow), `经营毛利 ${money(annual.netProfit)} / 配件成本 ${money(annual.repairPartsCost)}`)}
           ${summaryCard("租赁收入", money(annual.rentalIncome), `${annual.rentalOrders || 0} 单租赁`)}
         </section>
@@ -159,7 +164,8 @@ export function createDashboardView(deps) {
           stockRows,
           topRows,
           topRentalRows,
-          lowRows
+          lowRows,
+          reconciliation
         })}
       </div>
     `;
@@ -171,7 +177,8 @@ export function createDashboardView(deps) {
     stockRows,
     topRows,
     topRentalRows,
-    lowRows
+    lowRows,
+    reconciliation
   }) {
     const tabs = [
       { key: "yearly", label: "年度对比" },
@@ -179,7 +186,8 @@ export function createDashboardView(deps) {
       { key: "stock", label: "库存价值" },
       { key: "outbound", label: "出库 TOP" },
       { key: "rental", label: "租赁 TOP" },
-      { key: "lowStock", label: "低库存" }
+      { key: "lowStock", label: "低库存" },
+      { key: "reconciliation", label: "每日对账" }
     ];
     const active = tabs.some(tab => tab.key === state.statisticsReport) ? state.statisticsReport : "yearly";
     state.statisticsReport = active;
@@ -190,6 +198,8 @@ export function createDashboardView(deps) {
             { label: "成本/支出", key: "totalExpense", formatter: money },
             { label: "经营毛利", key: "netProfit", formatter: money },
             { label: "净现金流", key: "netCashflow", formatter: money },
+            { label: "盘盈收益", key: "inventoryGain", formatter: money },
+            { label: "盘亏损失", key: "inventoryLoss", formatter: money },
             { label: "维修单", key: "repairOrders" },
             { label: "租赁单", key: "rentalOrders" },
             { label: "改装工单", key: "modificationOrders" }
@@ -231,7 +241,8 @@ export function createDashboardView(deps) {
             { label: "名称", key: "resourceName" },
             { label: "库存", key: "quantity", formatter: (value, row) => `${value}${row.unit || ""}` },
             { label: "阈值", key: "threshold" }
-          ], lowRows)
+          ], lowRows),
+      reconciliation: renderDailyReconciliation(reconciliation)
     }[active];
     return renderSurface("经营报表", `
       <div class="report-tabs" role="tablist" aria-label="经营报表">
@@ -241,6 +252,53 @@ export function createDashboardView(deps) {
       </div>
       <div class="report-panel">${content}</div>
     `);
+  }
+
+  function renderDailyReconciliation(reconciliation) {
+    if (!reconciliation) {
+      return emptyState("尚未加载每日对账数据。");
+    }
+    const summary = reconciliation.summary || {};
+    const stockIssues = reconciliation.stockIssues || [];
+    const rentalIssues = reconciliation.rentalIssues || [];
+    const sales = reconciliation.sales || [];
+    return `
+      <section class="summary-grid">
+        ${summaryCard("错误", summary.errorCount || 0, `${summary.stockIssueCount || 0} 条库存差异 / ${summary.rentalIssueCount || 0} 条租赁锁定差异`)}
+        ${summaryCard("警告", summary.warningCount || 0, reconciliation.stateScopeWarning || "库存与租赁为当前状态快照；流水与财务按所选业务日期归集。")}
+        ${summaryCard("销售超收", summary.overpaidSalesCount || 0, `${sales.length} 笔销售应收/收款已核对`)}
+      </section>
+      <div class="form-section-title">库存与 FIFO 差异</div>
+      ${stockIssues.length ? renderTable([
+        { label: "级别", html: true, render: row => badge(row.severity || "-", row.severity === "ERROR" ? "danger" : "warn") },
+        { label: "规则", key: "code" },
+        { label: "资源", html: true, render: row => `${escapeHtml(row.resourceCode || "-")} ${escapeHtml(row.resourceName || "")}` },
+        { label: "仓库", key: "warehouseId" },
+        { label: "主档", key: "profileQuantity" },
+        { label: "可用/锁定", html: true, render: row => `${escapeHtml(row.availableQuantity ?? 0)} / ${escapeHtml(row.lockedQuantity ?? 0)}` },
+        { label: "FIFO", key: "fifoQuantity" },
+        { label: "说明", key: "message" }
+      ], stockIssues) : emptyState("库存主档、仓库余额、库存流水和 FIFO 批次当前一致。")}
+      <div class="form-section-title">租赁占用检查</div>
+      ${rentalIssues.length ? renderTable([
+        { label: "级别", html: true, render: row => badge(row.severity || "-", row.severity === "ERROR" ? "danger" : "warn") },
+        { label: "租赁单", key: "rentalNo" },
+        { label: "车号", key: "vehicleNumber" },
+        { label: "仓库", key: "warehouseId" },
+        { label: "可用/锁定", html: true, render: row => `${escapeHtml(row.availableQuantity ?? 0)} / ${escapeHtml(row.lockedQuantity ?? 0)}` },
+        { label: "车辆状态", key: "machineStatus" },
+        { label: "说明", key: "message" }
+      ], rentalIssues) : emptyState("所有在租车辆均处于 RENTED 状态且库存已锁定。")}
+      <div class="form-section-title">销售应收与收款</div>
+      ${sales.length ? renderTable([
+        { label: "订单", key: "orderNo" },
+        { label: "客户", key: "customerName" },
+        { label: "应收", key: "receivable", formatter: money },
+        { label: "实收", key: "receipts", formatter: money },
+        { label: "未收", key: "unpaid", formatter: money },
+        { label: "状态", html: true, render: row => badge(row.status || "-", row.status === "OVERPAID" ? "danger" : row.status === "SETTLED" ? "teal" : "warn") }
+      ], sales) : emptyState("所选日期前没有已过账销售应收或收款。")}
+    `;
   }
 
   function queueGroups(queues = []) {
@@ -561,8 +619,8 @@ export function createDashboardView(deps) {
     const totalStockSettlement = sumMoney(stockRows.map(row => row.settlementValue ?? row.retailValue));
     return `
       <section class="summary-grid">
-        ${summaryCard("年度总收入", money(annual.totalIncome), `出库 ${money(annual.outboundRevenue)} / 维修收入 ${money(annual.repairIncome)}`)}
-        ${summaryCard("净现金流", money(annual.netCashflow), `经营毛利 ${money(annual.netProfit)} / 配件成本 ${money(annual.repairPartsCost)}`)}
+        ${summaryCard("年度总收入", money(annual.totalIncome), `出库 ${money(annual.outboundRevenue)} / 维修 ${money(annual.repairIncome)} / 盘盈 ${money(annual.inventoryGain)}`)}
+        ${summaryCard("净现金流", money(annual.netCashflow), `经营毛利 ${money(annual.netProfit)} / 盘亏 ${money(annual.inventoryLoss)}`)}
         ${summaryCard("库存成本", money(totalStockCost), `估值 ${money(totalStockSettlement)} / 配件低库存 ${lowParts} 项`)}
         ${summaryCard("库存结构", `${machineStock.itemCount || 0} / ${partStock.itemCount || 0}`, "整车 / 配件档案数")}
       </section>

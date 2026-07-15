@@ -84,6 +84,9 @@ public class PartInventory implements CollaborativeResource {
     @Column(name = "purchase_price", precision = 12, scale = 2)
     private BigDecimal purchasePrice; // 采购单价
 
+    @Column(name = "landed_unit_cost", precision = 12, scale = 2)
+    private BigDecimal landedUnitCost;
+
     @Column(name = "sale_price", precision = 12, scale = 2)
     private BigDecimal salePrice; // 销售单价
 

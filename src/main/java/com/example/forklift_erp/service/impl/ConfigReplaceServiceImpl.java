@@ -2,6 +2,8 @@
 package com.example.forklift_erp.service.impl;
 
 import com.example.forklift_erp.constant.PartChangeAction;
+import com.example.forklift_erp.constant.MachineStockStatus;
+import com.example.forklift_erp.constant.StockBusinessType;
 import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.dto.ConfigReplaceRequestDTO;
 import com.example.forklift_erp.dto.PartReplaceRequestDTO;
@@ -13,6 +15,7 @@ import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.ConfigReplaceService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
 import com.example.forklift_erp.service.StockLedgerService;
+import com.example.forklift_erp.service.StockLotService;
 import com.example.forklift_erp.util.MoneyValues;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -55,12 +59,22 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
     @Autowired
     private ResourceVisibilityPolicy visibilityPolicy;
 
+    @Autowired
+    private StockLotService stockLotService;
+
     @Override
     @Transactional
     public ConfigReplaceLog performReplace(ConfigReplaceRequestDTO request) {
+        if (request.getNewPartId() != null) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Inventory-backed replacement must use the dedicated /api/replace/part workflow");
+        }
         // 1. 校验车辆存在
         MachineInventory machine = machineRepository.findByIdForUpdate(request.getMachineId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "车辆不存在"));
+        if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be modified");
+        }
 
         // 2. 校验新配置值存在
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be modified");
@@ -177,6 +191,15 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
     public ConfigReplaceLog performPartReplace(PartReplaceRequestDTO request) {
         MachineInventory machine = machineRepository.findByIdForUpdate(request.getMachineId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "车辆不存在"));
+        if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be modified");
+        }
+        boolean workOrderExecution = "MODIFICATION_WORK_ORDER".equalsIgnoreCase(
+                request.getStockMovementSourceType());
+        if (!workOrderExecution && !MachineStockStatus.canSell(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle status does not allow direct part replacement: " + machine.getStockStatus());
+        }
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be modified");
         collaborationService.validateWrite(machine, request.getMachineVersion());
 
@@ -198,8 +221,13 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         if (quantity < 1) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "替换数量必须大于0");
         }
-        if (newPart.getQuantity() == null || newPart.getQuantity() < quantity) {
-            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK, "配件库存不足: " + newPart.getPartName());
+        Long sourceWarehouseId = stockLedgerService.resolveWarehouseId(
+                request.getWarehouseId() == null ? newPart.getWarehouseId() : request.getWarehouseId());
+        int warehouseAvailable = stockLedgerService.availableQuantity(
+                StockLedgerService.RESOURCE_PART, newPart.getId(), sourceWarehouseId);
+        if (warehouseAvailable < quantity) {
+            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK,
+                    "Part stock is insufficient in the selected warehouse: " + newPart.getPartName());
         }
 
         String actualType = normalizeType(newPart.getPartCategory());
@@ -218,16 +246,50 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         String oldValue = oldConfig.getSelectedValue();
         String newValue = partDisplayName(newPart);
 
-        int newPartBeforeQuantity = newPart.getQuantity();
-        newPart.setQuantity(newPartBeforeQuantity - quantity);
+        LocalDate businessDate = request.getBusinessDate() == null ? LocalDate.now() : request.getBusinessDate();
+        String movementSourceType = firstNonBlank(request.getStockMovementSourceType(), "CONFIG_REPLACE");
+        String movementKey = movementKey(request, machine, oldConfig);
+        StockLotService.ConsumptionResult fifo = stockLotService.consumeFifo(
+                StockLedgerService.RESOURCE_PART,
+                newPart.getId(),
+                sourceWarehouseId,
+                quantity,
+                unitCost(newPart),
+                warehouseAvailable,
+                movementSourceType,
+                request.getStockMovementSourceId(),
+                request.getStockMovementSourceLineId(),
+                businessDate,
+                movementKey == null ? null : movementKey + ":FIFO"
+        );
+        stockLedgerService.recordMovement(
+                "OUTBOUND",
+                StockLedgerService.RESOURCE_PART,
+                newPart.getId(),
+                newPart.getPartCode(),
+                newPart.getPartName(),
+                sourceWarehouseId,
+                warehouseAvailable,
+                warehouseAvailable - quantity,
+                fifo.unitCost(),
+                request.getOperator(),
+                "Part replacement consumption; machineId=" + machine.getId(),
+                movementSourceType,
+                request.getStockMovementSourceId(),
+                request.getStockMovementSourceLineId(),
+                businessDate,
+                StockBusinessType.MODIFICATION_USE,
+                BigDecimal.ZERO,
+                movementKey == null ? null : movementKey + ":MOVEMENT",
+                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId()
+        );
+        newPart.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, newPart.getId()));
         collaborationService.stampWrite(newPart);
         newPart = partRepository.save(newPart);
-        savePartStockLog(newPart, "OUTBOUND", quantity, newPartBeforeQuantity, newPart.getQuantity(),
-                request.getOperator(), "配件替换出库；车辆ID=" + machine.getId(),
-                request.getStockMovementSourceType(), request.getStockMovementSourceId());
 
-        boolean oldPartStockIn = shouldStockInOldPart(request.getOldPartAction());
+        boolean oldPartStockIn = shouldStockInOldPart(request);
         PartInventory removedPart = null;
+        BigDecimal removedPartValue = BigDecimal.ZERO;
         if (oldPartStockIn) {
             removedPart = new PartInventory();
             removedPart.setPartCode(generateRemovedPartCode(machine.getId(), oldConfig.getConfigItemId()));
@@ -237,17 +299,88 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
             removedPart.setApplicableModels(machine.getSpecificationModel());
             removedPart.setSource("REMOVED");
             removedPart.setSourceMachineId(machine.getId());
-            removedPart.setWarehouseId(stockLedgerService.resolveWarehouseId(machine.getWarehouseId()));
-            removedPart.setQuantity(quantity);
+            Long oldWarehouseId = stockLedgerService.resolveWarehouseId(
+                    request.getOldPartWarehouseId() == null ? sourceWarehouseId : request.getOldPartWarehouseId());
+            BigDecimal oldUnitCost = MoneyValues.zeroIfNullOrNegative(request.getOldPartUnitCost());
+            removedPartValue = oldUnitCost.multiply(BigDecimal.valueOf(quantity));
+            boolean pendingValuation = request.getOldPartUnitCost() == null
+                    || request.getOldPartValuationSource() == null
+                    || request.getOldPartValuationSource().isBlank();
+            removedPart.setWarehouseId(oldWarehouseId);
+            removedPart.setQuantity(0);
             removedPart.setUnit(newPart.getUnit() != null ? newPart.getUnit() : "个");
-            removedPart.setInboundDate(LocalDateTime.now());
-            removedPart.setRemarks("配件替换拆下入库；车辆ID=" + machine.getId()
-                    + (request.getRemark() == null || request.getRemark().isBlank() ? "" : "；" + request.getRemark()));
+            removedPart.setPurchasePrice(oldUnitCost);
+            removedPart.setLandedUnitCost(oldUnitCost);
+            removedPart.setIsLocked(pendingValuation);
+            removedPart.setInboundDate(businessDate.atStartOfDay());
+            removedPart.setRemarks("Removed part disposition=" + oldPartDisposition(request)
+                    + "; condition=" + firstNonBlank(request.getOldPartCondition(), "UNSPECIFIED")
+                    + "; valuation=" + firstNonBlank(request.getOldPartValuationSource(), "PENDING")
+                    + "; machineId=" + machine.getId()
+                    + (request.getRemark() == null || request.getRemark().isBlank() ? "" : "; " + request.getRemark()));
             collaborationService.stampWrite(removedPart);
             removedPart = partRepository.save(removedPart);
-            savePartStockLog(removedPart, "INBOUND", quantity, 0, quantity,
-                    request.getOperator(), "配件替换拆下入库；车辆ID=" + machine.getId(),
-                    request.getStockMovementSourceType(), request.getStockMovementSourceId());
+            StockLot lot = stockLotService.createReceiptLot(
+                    StockLedgerService.RESOURCE_PART,
+                    removedPart.getId(),
+                    oldWarehouseId,
+                    quantity,
+                    oldUnitCost,
+                    BigDecimal.ZERO,
+                    movementSourceType,
+                    request.getStockMovementSourceId(),
+                    request.getStockMovementSourceLineId(),
+                    businessDate,
+                    movementKey == null ? null : movementKey + ":OLD-LOT"
+            );
+            stockLedgerService.recordMovement(
+                    "INBOUND",
+                    StockLedgerService.RESOURCE_PART,
+                    removedPart.getId(),
+                    removedPart.getPartCode(),
+                    removedPart.getPartName(),
+                    oldWarehouseId,
+                    0,
+                    quantity,
+                    oldUnitCost,
+                    request.getOperator(),
+                    "Removed part receipt; machineId=" + machine.getId(),
+                    movementSourceType,
+                    request.getStockMovementSourceId(),
+                    request.getStockMovementSourceLineId(),
+                    businessDate,
+                    StockBusinessType.MODIFICATION_RETURN,
+                    BigDecimal.ZERO,
+                    movementKey == null ? null : movementKey + ":OLD-MOVEMENT",
+                    lot.getId()
+            );
+            removedPart.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, removedPart.getId()));
+            collaborationService.stampWrite(removedPart);
+            removedPart = partRepository.save(removedPart);
+        }
+
+        if (!workOrderExecution) {
+            BigDecimal capitalization = fifo.totalCost().subtract(removedPartValue);
+            if (capitalization.signum() != 0) {
+                stockLotService.capitalizeSerializedAssetCost(
+                        StockLedgerService.RESOURCE_MACHINE,
+                        machine.getId(),
+                        machine.getWarehouseId(),
+                        capitalization,
+                        "CONFIG_REPLACE",
+                        machine.getId(),
+                        oldConfig.getId(),
+                        businessDate,
+                        null
+                );
+                BigDecimal updatedLandedCost =
+                        MoneyValues.zeroIfNullOrNegative(machine.getLandedUnitCost()).add(capitalization);
+                if (updatedLandedCost.signum() < 0) {
+                    throw new BusinessException(ResultCode.CONFLICT,
+                            "Part replacement would make the vehicle landed cost negative");
+                }
+                machine.setLandedUnitCost(updatedLandedCost);
+            }
         }
 
         oldConfig.setSelectedValue(newValue);
@@ -286,6 +419,13 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
     public ConfigReplaceLog performPartInstall(VehiclePartInstallRequestDTO request) {
         MachineInventory machine = machineRepository.findByIdForUpdate(request.getMachineId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "车辆不存在"));
+        if (MachineStockStatus.RENTED.code().equals(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT, "A rented vehicle cannot be modified");
+        }
+        if (!MachineStockStatus.canSell(machine.getStockStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle status does not allow part installation: " + machine.getStockStatus());
+        }
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be modified");
         collaborationService.validateWrite(machine, request.getMachineVersion());
 
@@ -301,8 +441,13 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         if (quantity < 1) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "装车数量必须大于0");
         }
-        if (newPart.getQuantity() == null || newPart.getQuantity() < quantity) {
-            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK, "配件库存不足: " + newPart.getPartName());
+        Long warehouseId = stockLedgerService.resolveWarehouseId(
+                request.getWarehouseId() == null ? newPart.getWarehouseId() : request.getWarehouseId());
+        int warehouseAvailable = stockLedgerService.availableQuantity(
+                StockLedgerService.RESOURCE_PART, newPart.getId(), warehouseId);
+        if (warehouseAvailable < quantity) {
+            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK,
+                    "Part stock is insufficient in the selected warehouse: " + newPart.getPartName());
         }
 
         String expectedType = normalizeType(configPartCategory(configItem));
@@ -315,14 +460,44 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         ConfigValue configValue = resolveConfigValueForInstall(configItem, newPart);
         String installedValue = partDisplayName(newPart);
 
-        int beforeQuantity = newPart.getQuantity();
-        newPart.setQuantity(beforeQuantity - quantity);
+        LocalDate businessDate = request.getBusinessDate() == null ? LocalDate.now() : request.getBusinessDate();
+        StockLotService.ConsumptionResult fifo = stockLotService.consumeFifo(
+                StockLedgerService.RESOURCE_PART,
+                newPart.getId(),
+                warehouseId,
+                quantity,
+                unitCost(newPart),
+                warehouseAvailable,
+                "VEHICLE_PART_INSTALL",
+                machine.getId(),
+                null,
+                businessDate,
+                null
+        );
+        stockLedgerService.recordMovement(
+                "OUTBOUND",
+                StockLedgerService.RESOURCE_PART,
+                newPart.getId(),
+                newPart.getPartCode(),
+                newPart.getPartName(),
+                warehouseId,
+                warehouseAvailable,
+                warehouseAvailable - quantity,
+                fifo.unitCost(),
+                request.getOperator(),
+                "Vehicle part installation; machineId=" + machine.getId(),
+                "VEHICLE_PART_INSTALL",
+                machine.getId(),
+                null,
+                businessDate,
+                StockBusinessType.MODIFICATION_USE,
+                BigDecimal.ZERO,
+                null,
+                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId()
+        );
+        newPart.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, newPart.getId()));
         collaborationService.stampWrite(newPart);
         newPart = partRepository.save(newPart);
-        savePartStockLog(newPart, "OUTBOUND", quantity, beforeQuantity, newPart.getQuantity(),
-                request.getOperator(),
-                "整车新增配件装车；车辆ID=" + machine.getId(),
-                "VEHICLE_PART_INSTALL", null);
 
         MachineConfig newConfig = new MachineConfig();
         newConfig.setMachineId(machine.getId());
@@ -339,6 +514,18 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         collaborationService.stampWrite(newConfig);
         newConfig = machineConfigRepository.save(newConfig);
 
+        stockLotService.capitalizeSerializedAssetCost(
+                StockLedgerService.RESOURCE_MACHINE,
+                machine.getId(),
+                machine.getWarehouseId(),
+                fifo.totalCost(),
+                "VEHICLE_PART_INSTALL",
+                machine.getId(),
+                newConfig.getId(),
+                businessDate,
+                "VEHICLE-PART-INSTALL:" + machine.getId() + ":" + newConfig.getId()
+        );
+        machine.setLandedUnitCost(MoneyValues.zeroIfNullOrNegative(machine.getLandedUnitCost()).add(fifo.totalCost()));
         collaborationService.stampWrite(machine);
         machineRepository.save(machine);
 
@@ -442,6 +629,37 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
                 || "REUSABLE".equalsIgnoreCase(oldPartAction);
     }
 
+    private boolean shouldStockInOldPart(PartReplaceRequestDTO request) {
+        String disposition = oldPartDisposition(request);
+        if ("SCRAP".equals(disposition) || "DISCARD".equals(disposition) || "NONE".equals(disposition)) {
+            return false;
+        }
+        return shouldStockInOldPart(request.getOldPartAction());
+    }
+
+    private String oldPartDisposition(PartReplaceRequestDTO request) {
+        String disposition = request.getOldPartDisposition();
+        if (disposition == null || disposition.isBlank()) {
+            return PartChangeAction.STOCK_IN.code().equalsIgnoreCase(request.getOldPartAction())
+                    ? "QUARANTINE"
+                    : "NONE";
+        }
+        return disposition.trim().toUpperCase();
+    }
+
+    private BigDecimal unitCost(PartInventory part) {
+        return MoneyValues.firstNonNegativeOrZero(part.getLandedUnitCost(), part.getPurchasePrice());
+    }
+
+    private String movementKey(PartReplaceRequestDTO request, MachineInventory machine, MachineConfig config) {
+        if (request.getStockMovementSourceId() == null || request.getStockMovementSourceLineId() == null) {
+            return null;
+        }
+        return "MODIFICATION:" + request.getStockMovementSourceType() + ":"
+                + request.getStockMovementSourceId() + ":" + request.getStockMovementSourceLineId()
+                + ":" + machine.getId() + ":" + config.getId();
+    }
+
     private StockOperationLog savePartStockLog(PartInventory part, String operationType, Integer quantity,
                                   Integer beforeQuantity, Integer afterQuantity, String operator, String remark) {
         return savePartStockLog(part, operationType, quantity, beforeQuantity, afterQuantity,
@@ -451,7 +669,7 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
     private StockOperationLog savePartStockLog(PartInventory part, String operationType, Integer quantity,
                                   Integer beforeQuantity, Integer afterQuantity, String operator, String remark,
                                   String movementSourceType, Long movementSourceId) {
-        BigDecimal unitCost = MoneyValues.firstNonNegativeOrZero(part.getSettlementPrice(), part.getPurchasePrice());
+        BigDecimal unitCost = MoneyValues.firstNonNegativeOrZero(part.getLandedUnitCost(), part.getPurchasePrice());
         return stockOperationRecorder.record(new StockOperationRecorder.Command(
                 "Part stock",
                 StockLedgerService.RESOURCE_PART,

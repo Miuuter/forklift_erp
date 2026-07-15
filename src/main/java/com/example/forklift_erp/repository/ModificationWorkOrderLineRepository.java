@@ -8,6 +8,9 @@ import java.util.List;
 
 @Repository
 public interface ModificationWorkOrderLineRepository extends JpaRepository<ModificationWorkOrderLine, Long> {
+    boolean existsByNewPartId(Long newPartId);
+
+    boolean existsByWarehouseIdOrOldPartWarehouseId(Long warehouseId, Long oldPartWarehouseId);
 
     List<ModificationWorkOrderLine> findByWorkOrderIdOrderByIdAsc(Long workOrderId);
 

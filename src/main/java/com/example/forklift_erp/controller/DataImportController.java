@@ -60,8 +60,12 @@ public class DataImportController {
     }
 
     @PostMapping(value = "/{type}/validate", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Result<DataImportValidationVO> validate(@PathVariable String type, @RequestParam("file") MultipartFile file) {
-        return Result.success("导入文件校验完成", importService.validate(type, file));
+    public Result<DataImportValidationVO> validate(
+            @PathVariable String type,
+            @RequestParam(required = false) String mode,
+            @RequestParam("file") MultipartFile file
+    ) {
+        return Result.success("导入文件校验完成", importService.validate(type, mode, file));
     }
 
     @PostMapping("/{id}/confirm")

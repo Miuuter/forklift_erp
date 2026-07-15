@@ -10,6 +10,10 @@ import java.util.List;
  */
 @Repository
 public interface ConfigReplaceLogRepository extends JpaRepository<ConfigReplaceLog, Long> {
+    boolean existsByMachineId(Long machineId);
+
+    boolean existsByNewPartId(Long newPartId);
+
 
     /**
      * 根据车辆ID查询该车的所有配置替换记录

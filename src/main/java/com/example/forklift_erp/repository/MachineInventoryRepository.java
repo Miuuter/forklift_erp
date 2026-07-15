@@ -37,6 +37,7 @@ public interface MachineInventoryRepository extends JpaRepository<MachineInvento
     Optional<MachineInventory> findByVehicleProductNumberAndIsLockedFalse(String vehicleProductNumber);
 
     long countByWarehouseId(Long warehouseId);
+    boolean existsBySupplierId(Long supplierId);
 
     @Query(value = """
             select m.*
@@ -101,8 +102,8 @@ public interface MachineInventoryRepository extends JpaRepository<MachineInvento
             select
               count(m) as itemCount,
               sum(coalesce(m.inventoryCount, 0)) as stockQuantity,
-              sum(coalesce(coalesce(m.settlementPrice, m.purchasePrice), 0) * coalesce(m.inventoryCount, 0)) as costValue,
-              sum(coalesce(coalesce(m.settlementPrice, m.salePrice), 0) * coalesce(m.inventoryCount, 0)) as settlementValue
+              sum(coalesce(coalesce(m.landedUnitCost, m.purchasePrice), 0) * coalesce(m.inventoryCount, 0)) as costValue,
+              sum(coalesce(coalesce(m.salePrice, m.settlementPrice), 0) * coalesce(m.inventoryCount, 0)) as settlementValue
             from MachineInventory m
             where coalesce(m.modelOnly, false) = false
             """)

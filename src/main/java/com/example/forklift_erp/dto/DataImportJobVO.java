@@ -10,6 +10,7 @@ public class DataImportJobVO {
     private Long id;
     private Long version;
     private String importType;
+    private String importMode;
     private String templateName;
     private String originalFileName;
     private String status;
@@ -31,6 +32,7 @@ public class DataImportJobVO {
         vo.setId(entity.getId());
         vo.setVersion(entity.getVersion());
         vo.setImportType(entity.getImportType());
+        vo.setImportMode(entity.getImportMode());
         vo.setTemplateName(entity.getTemplateName());
         vo.setOriginalFileName(entity.getOriginalFileName());
         vo.setStatus(entity.getStatus());

@@ -13,10 +13,13 @@ public class StocktakingRecordVO {
     private String stocktakingNo;
     private String resourceType;
     private Long resourceId;
+    private Long warehouseId;
     private String resourceCode;
     private String resourceName;
     private String specificationModel;
     private Integer bookQuantity;
+    private Long bookBalanceVersion;
+    private Long snapshotMovementId;
     private Integer actualQuantity;
     private Integer differenceQuantity;
     private LocalDate stocktakingDate;
@@ -33,10 +36,13 @@ public class StocktakingRecordVO {
         vo.setStocktakingNo(entity.getStocktakingNo());
         vo.setResourceType(entity.getResourceType());
         vo.setResourceId(entity.getResourceId());
+        vo.setWarehouseId(entity.getWarehouseId());
         vo.setResourceCode(entity.getResourceCode());
         vo.setResourceName(entity.getResourceName());
         vo.setSpecificationModel(entity.getSpecificationModel());
         vo.setBookQuantity(entity.getBookQuantity());
+        vo.setBookBalanceVersion(entity.getBookBalanceVersion());
+        vo.setSnapshotMovementId(entity.getSnapshotMovementId());
         vo.setActualQuantity(entity.getActualQuantity());
         vo.setDifferenceQuantity(entity.getDifferenceQuantity());
         vo.setStocktakingDate(entity.getStocktakingDate());

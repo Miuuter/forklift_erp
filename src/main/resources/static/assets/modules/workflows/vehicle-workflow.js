@@ -8,15 +8,14 @@ export function createVehicleWorkflow(deps) {
     yesNoFromText,
     yesNoText,
     renderToolbar,
-    renderExportableSurface,
     renderSurface,
     renderTable,
     renderDetailGrid,
     detailItem,
-    listTableOptions,
     renderPagination,
     filterButtonGroup,
     hasPermission,
+    hasAnyRole,
     icon,
     escapeAttr,
     escapeHtml,
@@ -58,32 +57,66 @@ export function createVehicleWorkflow(deps) {
           main: [vehicleFilterControls()],
           actions: [hasPermission("vehicle:write") ? renderVehicleModelMenu() : ""]
         })}
-        ${renderVehicleDetail()}
-        ${renderVehicleModelPanel(modelRows)}
-        ${renderPagination("vehicles")}
+        <section class="vehicle-master-detail">
+          <div class="vehicle-master-pane">
+            ${renderVehicleModelPanel(modelRows)}
+          </div>
+          <div class="vehicle-detail-pane">
+            ${renderVehicleDetail()}
+          </div>
+        </section>
       </div>
     `;
   }
   
   function renderVehicleModelPanel(rows) {
-    return renderExportableSurface("车型库存列表", "vehicles", renderTable([
-      { label: "车型", render: row => vehicleModelLabel(row) },
-      { label: "规格型号", key: "specificationModel" },
-      { label: "车辆类型", key: "machineType" },
-      { label: "供应商", key: "supplier" },
-      { label: "经销商/仓位", key: "warehouseName" },
-      { label: "车辆数", key: "unitCount" },
-      { label: "库存", html: true, render: row => stockBadge(row.inventoryCount, "台") },
-      { label: "销售单价", key: "salePrice", formatter: money }
-    ], rows, {
-      tableKey: "vehicles",
-      selectableRow: row => ({
-        action: "detail-vehicle",
-        data: { modelKey: row.modelKey },
-        active: state.vehicleDetail?.modelKey === row.modelKey,
-        label: `查看车型 ${vehicleModelLabel(row)} 详情`
-      })
-    }));
+    const body = state.pages.vehicles?.loading
+      ? `<div class="loading-state"><span class="loading-spinner" aria-hidden="true"></span><span>正在加载车型库存...</span></div>`
+      : rows.length
+        ? `<div class="vehicle-model-list">${rows.map(renderVehicleModelCard).join("")}</div>`
+        : emptyState("暂无符合条件的车型库存");
+    return `
+      <section class="surface vehicle-model-list-surface">
+        <div class="surface-head">
+          <h2 class="surface-title">车型库存列表</h2>
+          <span class="surface-count">${escapeHtml(state.pages.vehicles?.totalElements || rows.length)} 个车型</span>
+        </div>
+        <div class="surface-body">
+          ${body}
+          ${renderPagination("vehicles")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderVehicleModelCard(row) {
+    const pending = state.vehicleDetailLoading && state.pendingVehicleModelKey === row.modelKey;
+    const active = pending || state.vehicleDetail?.modelKey === row.modelKey;
+    const supplierLocation = [row.supplier, row.warehouseName].filter(Boolean).join(" · ") || "未设置供应商或仓位";
+    return `
+      <button class="vehicle-model-card${active ? " is-active" : ""}${pending ? " is-loading" : ""}" type="button"
+        data-action="detail-vehicle" data-model-key="${escapeAttr(row.modelKey)}"
+        aria-pressed="${active ? "true" : "false"}"
+        aria-label="查看车型 ${escapeAttr(vehicleModelLabel(row))} 详情">
+        <span class="vehicle-model-card-head">
+          <span>
+            <strong>${escapeHtml(vehicleModelLabel(row))}</strong>
+            <small>${escapeHtml(row.specificationModel || "未填写规格型号")}</small>
+          </span>
+          ${stockBadge(row.inventoryCount, "台")}
+        </span>
+        <span class="vehicle-model-card-meta">
+          ${badge(row.machineType || "未分类", "primary")}
+          <span>${escapeHtml(supplierLocation)}</span>
+        </span>
+        <span class="vehicle-model-card-metrics">
+          <span><small>车辆数</small><strong>${escapeHtml(row.unitCount || 0)}</strong></span>
+          <span><small>当前库存</small><strong>${escapeHtml(row.inventoryCount || 0)} 台</strong></span>
+          <span><small>销售单价</small><strong>${escapeHtml(money(row.salePrice))}</strong></span>
+        </span>
+        ${pending ? `<span class="vehicle-model-card-loading"><span class="loading-spinner" aria-hidden="true"></span>加载详情中</span>` : ""}
+      </button>
+    `;
   }
 
   function vehicleFlowRows() {
@@ -171,6 +204,7 @@ export function createVehicleWorkflow(deps) {
         ${row.orderId && hasPermission("stock:adjust") && isContractUploadReady(row) ? `<button class="btn btn-sm" type="button" data-action="upload-contract" data-id="${escapeAttr(row.orderId)}">${icon("upload")}合同</button>` : ""}
         ${row.orderId && hasPermission("stock:adjust") && row.contractFileAvailable ? `<button class="btn btn-sm" type="button" data-action="download-contract" data-id="${escapeAttr(row.orderId)}">${icon("download")}合同</button>` : ""}
         ${!row.orderId && !row.rentalId && Number(row.inventoryCount || 0) > 0 && hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="vehicle-rental-direct" data-machine-id="${escapeAttr(row.id)}">${icon("plus")}登记租赁</button>` : ""}
+        ${!row.orderId && !row.rentalId && Number(row.inventoryCount || 0) > 0 && hasPermission("stock:adjust") && hasAnyRole("ADMIN", "SUPER_ADMIN") ? `<button class="btn btn-sm btn-danger" type="button" data-action="vehicle-stock" data-direction="adjustOutbound" data-id="${escapeAttr(row.id)}">${icon("minus")}库存减少</button>` : ""}
         ${hasPermission("vehicle:write") ? `<button class="btn btn-sm" type="button" data-action="edit" data-kind="vehicle" data-id="${escapeAttr(row.id)}">${icon("edit")}编辑档案</button>` : ""}
       </div>
     `;
@@ -422,7 +456,33 @@ export function createVehicleWorkflow(deps) {
   }
   
   function renderVehicleDetail() {
-    if (!state.vehicleDetail) return "";
+    if (state.vehicleDetailLoading) {
+      return `
+        <section class="surface vehicle-detail-surface" id="vehicleDetailSurface" aria-busy="true">
+          <div class="surface-head">
+            <h2 class="surface-title">车型详情</h2>
+          </div>
+          <div class="surface-body">
+            <div class="loading-state vehicle-detail-loading">
+              <span class="loading-spinner" aria-hidden="true"></span>
+              <span>正在加载车型与库存车号...</span>
+            </div>
+          </div>
+        </section>
+      `;
+    }
+    if (!state.vehicleDetail) {
+      return `
+        <section class="surface vehicle-detail-surface" id="vehicleDetailSurface">
+          <div class="surface-head">
+            <h2 class="surface-title">车型详情</h2>
+          </div>
+          <div class="surface-body">
+            ${emptyState("请从左侧选择车型查看库存、车号和业务详情")}
+          </div>
+        </section>
+      `;
+    }
     if (state.vehicleDetail.modelKey) {
       return renderVehicleModelDetail();
     }
@@ -434,7 +494,7 @@ export function createVehicleWorkflow(deps) {
     const order = latestVehicleOutboundOrder(machine.id);
     const activeTab = ensureVehicleDetailTab();
     return `
-      <section class="surface detail-surface-pop" id="vehicleDetailSurface">
+      <section class="surface detail-surface-pop vehicle-detail-surface" id="vehicleDetailSurface">
         <div class="surface-head">
           <h2 class="surface-title">车辆详情 · ${escapeHtml(machine.vehicleProductNumber || "")}</h2>
           <div class="toolbar-actions">
@@ -464,7 +524,7 @@ export function createVehicleWorkflow(deps) {
     const order = latestVehicleOutboundOrder(selected.id);
     const activeTab = ensureVehicleDetailTab();
     return `
-      <section class="surface detail-surface-pop" id="vehicleDetailSurface">
+      <section class="surface detail-surface-pop vehicle-detail-surface" id="vehicleDetailSurface">
         <div class="surface-head">
           <h2 class="surface-title">车型详情 · ${escapeHtml(vehicleModelLabel(model))}</h2>
           <div class="toolbar-actions">

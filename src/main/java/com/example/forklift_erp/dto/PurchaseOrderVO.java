@@ -17,6 +17,8 @@ public class PurchaseOrderVO {
     private Long configItemId;
     private Long configValueId;
     private String resourceType;
+    private Long warehouseId;
+    private Long resourceId;
     private String resourceCode;
     private String resourceName;
     private String specificationModel;
@@ -27,6 +29,11 @@ public class PurchaseOrderVO {
     private BigDecimal freightAmount;
     private LocalDate orderDate;
     private LocalDate expectedArrivalDate;
+    private LocalDate receivedDate;
+    private Long receivedStockMovementId;
+    private Long stockLotId;
+    private BigDecimal landedUnitCost;
+    private Boolean financialPosted;
     private String status;
     private String statusBeforeReceived;
     private String operator;
@@ -44,6 +51,8 @@ public class PurchaseOrderVO {
         vo.setConfigItemId(entity.getConfigItemId());
         vo.setConfigValueId(entity.getConfigValueId());
         vo.setResourceType(entity.getResourceType());
+        vo.setWarehouseId(entity.getWarehouseId());
+        vo.setResourceId(entity.getResourceId());
         vo.setResourceCode(entity.getResourceCode());
         vo.setResourceName(entity.getResourceName());
         vo.setSpecificationModel(entity.getSpecificationModel());
@@ -54,6 +63,11 @@ public class PurchaseOrderVO {
         vo.setFreightAmount(entity.getFreightAmount());
         vo.setOrderDate(entity.getOrderDate());
         vo.setExpectedArrivalDate(entity.getExpectedArrivalDate());
+        vo.setReceivedDate(entity.getReceivedDate());
+        vo.setReceivedStockMovementId(entity.getReceivedStockMovementId());
+        vo.setStockLotId(entity.getStockLotId());
+        vo.setLandedUnitCost(entity.getLandedUnitCost());
+        vo.setFinancialPosted(Boolean.TRUE.equals(entity.getFinancialPosted()));
         vo.setStatus(entity.getStatus());
         vo.setStatusBeforeReceived(entity.getStatusBeforeReceived());
         vo.setOperator(entity.getOperator());

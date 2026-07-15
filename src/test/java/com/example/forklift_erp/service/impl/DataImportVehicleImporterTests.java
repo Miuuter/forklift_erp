@@ -22,6 +22,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -41,12 +42,7 @@ class DataImportVehicleImporterTests {
         MachineInventory persisted = machine(99L, "V-100", 2);
         when(machineService.create(any(MachineInventoryCreateDTO.class))).thenReturn(created);
         when(machineService.findById(99L)).thenReturn(Optional.of(persisted));
-        DataImportVehicleImporter importer = new DataImportVehicleImporter(
-                customerService,
-                machineService,
-                outboundOrderService,
-                new DataImportVehicleRowMapper()
-        );
+        DataImportVehicleImporter importer = newImporter(customerService, machineService, outboundOrderService);
 
         ImportResult result = importer.importWorkbook(snapshot(Map.of(
                 "Inbound",
@@ -60,14 +56,14 @@ class DataImportVehicleImporterTests {
                         18, "2",
                         24, "WH-A"
                 )))
-        ))));
+        ))), businessContext());
 
         ArgumentCaptor<MachineInventoryCreateDTO> captor = ArgumentCaptor.forClass(MachineInventoryCreateDTO.class);
         verify(machineService).create(captor.capture());
         verify(outboundOrderService, never()).createVehicleOutbound(any());
         assertThat(result.importedRows()).isEqualTo(1);
         assertThat(result.skippedRows()).isZero();
-        assertThat(result.summary()).isEqualTo("Imported customers=0, machines=1, orders=0");
+        assertThat(result.summary()).isEqualTo("Mode=BUSINESS_DOCUMENT, imported customers=0, machines=1, orders=0");
         MachineInventoryCreateDTO dto = captor.getValue();
         assertThat(dto.getVehicleProductNumber()).isEqualTo("V-100");
         assertThat(dto.getName()).isEqualTo("Forklift A");
@@ -92,12 +88,7 @@ class DataImportVehicleImporterTests {
         createdCustomer.setId(5L);
         createdCustomer.setCompanyName("Acme");
         when(customerService.create(any(CustomerDTO.class))).thenReturn(createdCustomer);
-        DataImportVehicleImporter importer = new DataImportVehicleImporter(
-                customerService,
-                machineService,
-                outboundOrderService,
-                new DataImportVehicleRowMapper()
-        );
+        DataImportVehicleImporter importer = newImporter(customerService, machineService, outboundOrderService);
 
         ImportResult result = importer.importWorkbook(snapshot(Map.of(
                 "Sales",
@@ -112,12 +103,12 @@ class DataImportVehicleImporterTests {
                         14, "Acme",
                         20, "2024-02-04"
                 )))
-        ))));
+        ))), businessContext());
 
         ArgumentCaptor<VehicleOutboundOrderCreateDTO> orderCaptor = ArgumentCaptor.forClass(VehicleOutboundOrderCreateDTO.class);
         verify(outboundOrderService).createVehicleOutbound(orderCaptor.capture());
         assertThat(result.importedRows()).isEqualTo(3);
-        assertThat(result.summary()).isEqualTo("Imported customers=1, machines=1, orders=1");
+        assertThat(result.summary()).isEqualTo("Mode=BUSINESS_DOCUMENT, imported customers=1, machines=1, orders=1");
         VehicleOutboundOrderCreateDTO order = orderCaptor.getValue();
         assertThat(order.getMachineId()).isEqualTo(20L);
         assertThat(order.getCustomerId()).isEqualTo(5L);
@@ -133,17 +124,12 @@ class DataImportVehicleImporterTests {
         MachineInventoryService machineService = mock(MachineInventoryService.class);
         OutboundOrderService outboundOrderService = mock(OutboundOrderService.class);
         stubEmptyLookups(customerService, machineService, outboundOrderService);
-        DataImportVehicleImporter importer = new DataImportVehicleImporter(
-                customerService,
-                machineService,
-                outboundOrderService,
-                new DataImportVehicleRowMapper()
-        );
+        DataImportVehicleImporter importer = newImporter(customerService, machineService, outboundOrderService);
 
         ImportResult result = importer.importWorkbook(snapshot(Map.of(
                 "Sales",
                 List.of(new WorkbookRow(2, rowWith(15, Map.of(5, "V-300"))))
-        )));
+        )), businessContext());
 
         verify(machineService, never()).create(any());
         verify(customerService, never()).create(any());
@@ -153,7 +139,7 @@ class DataImportVehicleImporterTests {
     }
 
     @Test
-    void importWorkbookUpdatesExistingVehicleFromInboundMatch() {
+    void importWorkbookDoesNotRewriteExistingVehicleFromInboundSnapshot() {
         CustomerService customerService = mock(CustomerService.class);
         MachineInventoryService machineService = mock(MachineInventoryService.class);
         OutboundOrderService outboundOrderService = mock(OutboundOrderService.class);
@@ -185,14 +171,11 @@ class DataImportVehicleImporterTests {
                         13, "2000",
                         18, "1"
                 ))))
-        )));
+        )), businessContext());
 
-        ArgumentCaptor<MachineInventoryCreateDTO> captor = ArgumentCaptor.forClass(MachineInventoryCreateDTO.class);
-        verify(machineService).update(eq(11L), captor.capture());
+        verify(machineService, never()).update(any(), any());
         verify(machineService, never()).create(any());
-        assertThat(captor.getValue().getVersion()).isEqualTo(8L);
-        assertThat(captor.getValue().getName()).isEqualTo("Updated Forklift");
-        assertThat(captor.getValue().getSpecificationModel()).isEqualTo("CPCD35");
+        verify(outboundOrderService).createVehicleOutbound(any());
     }
 
     @Test
@@ -228,7 +211,7 @@ class DataImportVehicleImporterTests {
                         15, "New Address",
                         17, "13900000000"
                 ))))
-        )));
+        )), businessContext());
 
         ArgumentCaptor<CustomerDTO> customerCaptor = ArgumentCaptor.forClass(CustomerDTO.class);
         verify(customerService).update(eq(44L), customerCaptor.capture());
@@ -262,7 +245,7 @@ class DataImportVehicleImporterTests {
                         4, "OB-30",
                         13, "Other Buyer"
                 ))))
-        )));
+        )), businessContext());
 
         ArgumentCaptor<MachineInventoryCreateDTO> machineCaptor = ArgumentCaptor.forClass(MachineInventoryCreateDTO.class);
         verify(machineService).create(machineCaptor.capture());
@@ -285,12 +268,19 @@ class DataImportVehicleImporterTests {
             MachineInventoryService machineService,
             OutboundOrderService outboundOrderService
     ) {
+        DataImportIdempotencyService idempotencyService = mock(DataImportIdempotencyService.class);
+        when(idempotencyService.reserve(any(), any(), anyInt(), any())).thenReturn(true);
         return new DataImportVehicleImporter(
                 customerService,
                 machineService,
                 outboundOrderService,
-                new DataImportVehicleRowMapper()
+                new DataImportVehicleRowMapper(),
+                idempotencyService
         );
+    }
+
+    private ImportContext businessContext() {
+        return new ImportContext(1L, "vehicle-workbook", ImportContext.MODE_BUSINESS_DOCUMENT, "vehicle-test-file");
     }
 
     private WorkbookSnapshot snapshot(Map<String, List<WorkbookRow>> sheets) {

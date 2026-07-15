@@ -2,18 +2,32 @@ package com.example.forklift_erp.service.impl;
 
 import com.example.forklift_erp.common.PageResult;
 import com.example.forklift_erp.common.ResultCode;
+import com.example.forklift_erp.constant.StockBusinessType;
+import com.example.forklift_erp.constant.FinancialEventType;
 import com.example.forklift_erp.dto.PartInventoryCreateDTO;
 import com.example.forklift_erp.dto.PartInventoryVO;
 import com.example.forklift_erp.dto.PartStockAdjustRequestDTO;
+import com.example.forklift_erp.dto.RemovedPartValuationDTO;
 import com.example.forklift_erp.entity.PartInventory;
 import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.exception.BusinessException;
+import com.example.forklift_erp.repository.ConfigReplaceLogRepository;
+import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
+import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
+import com.example.forklift_erp.repository.PurchaseOrderRepository;
+import com.example.forklift_erp.repository.RepairPartUsageRepository;
+import com.example.forklift_erp.repository.ResourceAttachmentRepository;
+import com.example.forklift_erp.repository.StocktakingRecordRepository;
+import com.example.forklift_erp.repository.StockLotRepository;
 import com.example.forklift_erp.service.CollaborationService;
+import com.example.forklift_erp.service.InventoryAdjustmentAccountingService;
+import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.PartInventoryService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
 import com.example.forklift_erp.service.StockLedgerService;
+import com.example.forklift_erp.service.StockLotService;
 import com.example.forklift_erp.util.InventoryQuantities;
 import com.example.forklift_erp.util.ListPageSupport;
 import com.example.forklift_erp.util.MoneyValues;
@@ -27,7 +41,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Slf4j
@@ -44,6 +60,18 @@ public class PartInventoryServiceImpl implements PartInventoryService {
     private StockLedgerService stockLedgerService;
 
     @Autowired
+    private StockLotService stockLotService;
+
+    @Autowired
+    private StockLotRepository stockLotRepository;
+
+    @Autowired
+    private InventoryAdjustmentAccountingService inventoryAdjustmentAccountingService;
+
+    @Autowired
+    private FinancialEventService financialEventService;
+
+    @Autowired
     private OperationAuditService operationAuditService;
 
     @Autowired
@@ -51,6 +79,27 @@ public class PartInventoryServiceImpl implements PartInventoryService {
 
     @Autowired
     private ResourceVisibilityPolicy visibilityPolicy;
+
+    @Autowired
+    private PurchaseOrderRepository purchaseOrderRepository;
+
+    @Autowired
+    private OutboundOrderRepository outboundOrderRepository;
+
+    @Autowired
+    private ModificationWorkOrderLineRepository modificationWorkOrderLineRepository;
+
+    @Autowired
+    private RepairPartUsageRepository repairPartUsageRepository;
+
+    @Autowired
+    private ConfigReplaceLogRepository configReplaceLogRepository;
+
+    @Autowired
+    private StocktakingRecordRepository stocktakingRecordRepository;
+
+    @Autowired
+    private ResourceAttachmentRepository resourceAttachmentRepository;
 
     @Override
     public List<PartInventory> findAll() {
@@ -116,6 +165,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
     @Override
     @Transactional
     public PartInventory save(PartInventory part) {
+        boolean creating = part.getId() == null;
         if (part.getId() != null) {
             Optional<PartInventory> existingOpt = findById(part.getId());
             if (existingOpt.isPresent()) {
@@ -146,17 +196,20 @@ public class PartInventoryServiceImpl implements PartInventoryService {
             part.setWarehouseId(stockLedgerService.resolveWarehouseId(null));
         }
         part.setPurchasePrice(MoneyValues.zeroIfNegative(part.getPurchasePrice()));
+        part.setLandedUnitCost(MoneyValues.zeroIfNegative(part.getLandedUnitCost()));
         part.setSalePrice(MoneyValues.zeroIfNegative(part.getSalePrice()));
         part.setSettlementPrice(MoneyValues.zeroIfNegative(part.getSettlementPrice()));
         log.info("Save part: partCode={}, name={}, quantity={}", part.getPartCode(), part.getPartName(), part.getQuantity());
         collaborationService.stampWrite(part);
         PartInventory saved = partRepository.save(part);
-        stockLedgerService.reconcileAvailableQuantity(
-                StockLedgerService.RESOURCE_PART,
-                saved.getId(),
-                saved.getWarehouseId(),
-                saved.getQuantity()
-        );
+        if (creating) {
+            stockLedgerService.reconcileAvailableQuantity(
+                    StockLedgerService.RESOURCE_PART,
+                    saved.getId(),
+                    saved.getWarehouseId(),
+                    saved.getQuantity()
+            );
+        }
         return saved;
     }
 
@@ -166,6 +219,8 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         PartInventory saved = save(dto.toEntity());
         int quantity = saved.getQuantity() == null ? 0 : saved.getQuantity();
         if (quantity > 0) {
+            createInitialLot(saved, quantity, "INITIAL_BALANCE", businessDate(saved.getInboundDate()),
+                    "INITIAL-LOT:PART:" + saved.getId());
             saveStockLog(saved, "INITIAL", quantity, 0, quantity, null, "Initial part stock");
         }
         operationAuditService.record("Part", "CREATE", "PART", saved.getId(),
@@ -180,15 +235,90 @@ public class PartInventoryServiceImpl implements PartInventoryService {
                 .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND));
         collaborationService.validateWrite(part, dto.getVersion());
         int beforeQuantity = part.getQuantity() == null ? 0 : part.getQuantity();
+        Long beforeWarehouseId = part.getWarehouseId();
+        BigDecimal beforePurchasePrice = part.getPurchasePrice();
+        BigDecimal beforeLandedUnitCost = part.getLandedUnitCost();
         dto.updateEntity(part);
-        PartInventory saved = save(part);
-        int afterQuantity = saved.getQuantity() == null ? 0 : saved.getQuantity();
-        if (beforeQuantity != afterQuantity) {
-            saveStockLog(saved, "ADJUST", Math.abs(afterQuantity - beforeQuantity),
-                    beforeQuantity, afterQuantity, null, "Part stock adjusted from profile edit");
+        if (!Objects.equals(beforeQuantity, part.getQuantity())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Inventory quantity must be changed through an explicit stock adjustment");
         }
+        if (!Objects.equals(beforeWarehouseId, part.getWarehouseId())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part warehouse must be changed through a warehouse transfer");
+        }
+        if (stockLotRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_PART, part.getId())
+                && (!sameMoney(beforePurchasePrice, part.getPurchasePrice())
+                || !sameMoney(beforeLandedUnitCost, part.getLandedUnitCost()))) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Posted part cost cannot be edited directly; create a cost correction or reversal");
+        }
+        PartInventory saved = save(part);
         operationAuditService.record("Part", "UPDATE", "PART", saved.getId(),
                 saved.getPartCode(), saved.getPartName(), "Update part", null, saved.getRemarks());
+        return PartInventoryVO.fromEntity(saved);
+    }
+
+    @Override
+    @Transactional
+    public PartInventoryVO valueRemovedPart(Long id, RemovedPartValuationDTO dto) {
+        PartInventory part = findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND));
+        collaborationService.validateWrite(part, dto.getVersion());
+        if (!"REMOVED".equalsIgnoreCase(part.getSource()) || !Boolean.TRUE.equals(part.getIsLocked())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Only a quarantined removed part can use the valuation workflow");
+        }
+        LocalDate businessDate = dto.getBusinessDate() == null ? LocalDate.now() : dto.getBusinessDate();
+        String idempotencyBase = "REMOVED-PART-VALUATION:" + part.getId() + ":" + part.getVersion();
+        BigDecimal adjustment = stockLotService.revalueUnconsumedReceiptLots(
+                StockLedgerService.RESOURCE_PART,
+                part.getId(),
+                part.getWarehouseId(),
+                dto.getUnitCost(),
+                "REMOVED_PART_VALUATION",
+                part.getId(),
+                businessDate,
+                idempotencyBase + ":FIFO"
+        );
+        part.setPurchasePrice(dto.getUnitCost());
+        part.setLandedUnitCost(dto.getUnitCost());
+        part.setIsLocked(false);
+        String valuationRemark = "Valuation confirmed: source=" + dto.getValuationSource().trim()
+                + "; condition=" + (dto.getCondition() == null || dto.getCondition().isBlank()
+                ? "UNSPECIFIED" : dto.getCondition().trim())
+                + (dto.getRemark() == null || dto.getRemark().isBlank() ? "" : "; " + dto.getRemark().trim());
+        part.setRemarks(part.getRemarks() == null || part.getRemarks().isBlank()
+                ? valuationRemark
+                : part.getRemarks() + "; " + valuationRemark);
+        collaborationService.stampWrite(part);
+        PartInventory saved = partRepository.saveAndFlush(part);
+        if (adjustment.signum() > 0) {
+            financialEventService.post(
+                    FinancialEventType.INVENTORY_GAIN,
+                    adjustment,
+                    businessDate,
+                    "REMOVED_PART_VALUATION",
+                    saved.getId(),
+                    null,
+                    null,
+                    null,
+                    null,
+                    valuationRemark,
+                    idempotencyBase + ":GAIN"
+            );
+        }
+        operationAuditService.record(
+                "Removed part valuation",
+                "VALUE",
+                "PART",
+                saved.getId(),
+                saved.getPartCode(),
+                saved.getPartName(),
+                "Confirm removed-part unit cost " + dto.getUnitCost(),
+                dto.getOperator(),
+                valuationRemark
+        );
         return PartInventoryVO.fromEntity(saved);
     }
 
@@ -212,9 +342,48 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         }
         PartInventory existing = existingOpt.get();
         visibilityPolicy.ensureWritable(existing.getIsLocked(), "Part is locked and cannot be deleted");
+        ensureNoHistoricalReferences(id);
         stockLedgerService.deleteEmptyBalances(StockLedgerService.RESOURCE_PART, id);
         partRepository.deleteById(id);
         log.info("Delete part: id={}", id);
+    }
+
+    private void ensureNoHistoricalReferences(Long id) {
+        if (purchaseOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_PART, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has purchase records and cannot be deleted");
+        }
+        if (outboundOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_PART, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has outbound records and cannot be deleted");
+        }
+        if (modificationWorkOrderLineRepository.existsByNewPartId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has modification usage records and cannot be deleted");
+        }
+        if (repairPartUsageRepository.existsByPartId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has repair usage records and cannot be deleted");
+        }
+        if (configReplaceLogRepository.existsByNewPartId(id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has configuration replacement records and cannot be deleted");
+        }
+        if (stocktakingRecordRepository.existsByResourceTypeAndResourceId(
+                StockLedgerService.RESOURCE_PART, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has stocktaking records and cannot be deleted");
+        }
+        if (resourceAttachmentRepository.existsByResourceTypeAndResourceIdAndDeletedFalse(
+                StockLedgerService.RESOURCE_PART, id)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has active attachments and cannot be deleted");
+        }
+        if (stockLotRepository.existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
+                StockLedgerService.RESOURCE_PART, id, 0)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part has remaining FIFO inventory and cannot be deleted");
+        }
     }
 
     @Override
@@ -252,70 +421,111 @@ public class PartInventoryServiceImpl implements PartInventoryService {
     @Override
     @Transactional
     public PartInventory inbound(String partCode, int quantity, Long expectedVersion) {
-        PartInventory part = findByPartCodeForUpdate(partCode)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Part code not found: " + partCode));
-        visibilityPolicy.ensureWritable(part.getIsLocked(), "Part is locked and cannot be inbounded");
-        collaborationService.validateWrite(part, expectedVersion);
-        InventoryQuantities.QuantityChange change = InventoryQuantities.inbound(
-                part.getQuantity(),
-                quantity,
-                "Inbound quantity must be greater than 0"
-        );
-        part.setQuantity(change.afterQuantity());
-        part.setInboundDate(LocalDateTime.now());
-        log.info("Part inbound: partCode={}, quantity={}, currentQuantity={}", partCode, quantity, part.getQuantity());
-        collaborationService.stampWrite(part);
-        PartInventory saved = partRepository.save(part);
-        stockLedgerService.reconcileAvailableQuantity(
-                StockLedgerService.RESOURCE_PART,
-                saved.getId(),
-                saved.getWarehouseId(),
-                saved.getQuantity()
-        );
-        return saved;
+        PartStockAdjustRequestDTO request = new PartStockAdjustRequestDTO();
+        request.setPartCode(partCode);
+        request.setQuantity(quantity);
+        request.setVersion(expectedVersion);
+        request.setBusinessDate(LocalDate.now());
+        request.setReason("Service-layer inbound adjustment");
+        PartInventoryVO saved = inbound(request);
+        return partRepository.findById(saved.getId())
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Part not found after inbound"));
     }
 
     @Override
     @Transactional
     public PartInventory outbound(String partCode, int quantity, Long expectedVersion) {
-        PartInventory part = findByPartCodeForUpdate(partCode)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Part code not found: " + partCode));
-        visibilityPolicy.ensureWritable(part.getIsLocked(), "Part is locked and cannot be outbounded");
-        collaborationService.validateWrite(part, expectedVersion);
-        InventoryQuantities.QuantityChange change = InventoryQuantities.outbound(
-                part.getQuantity(),
-                quantity,
-                "Outbound quantity must be greater than 0",
-                "Insufficient stock: "
-        );
-        part.setQuantity(change.afterQuantity());
-        log.info("Part outbound: partCode={}, quantity={}, currentQuantity={}", partCode, quantity, part.getQuantity());
-        collaborationService.stampWrite(part);
-        PartInventory saved = partRepository.save(part);
-        stockLedgerService.reconcileAvailableQuantity(
-                StockLedgerService.RESOURCE_PART,
-                saved.getId(),
-                saved.getWarehouseId(),
-                saved.getQuantity()
-        );
-        return saved;
+        PartStockAdjustRequestDTO request = new PartStockAdjustRequestDTO();
+        request.setPartCode(partCode);
+        request.setQuantity(quantity);
+        request.setVersion(expectedVersion);
+        request.setBusinessDate(LocalDate.now());
+        request.setReason("Service-layer outbound adjustment");
+        PartInventoryVO saved = outbound(request);
+        return partRepository.findById(saved.getId())
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Part not found after outbound"));
     }
 
     @Override
     @Transactional
     public PartInventoryVO inbound(PartStockAdjustRequestDTO request) {
-        PartInventory part = inbound(request.getPartCode(), request.getQuantity(), request.getVersion());
-        saveStockLog(part, "INBOUND", request.getQuantity(), part.getQuantity() - request.getQuantity(),
-                part.getQuantity(), request.getOperator(), request.getRemark());
+        PartInventory part = findByPartCodeForUpdate(request.getPartCode())
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Part code not found: " + request.getPartCode()));
+        visibilityPolicy.ensureWritable(part.getIsLocked(), "Part is locked and cannot be inbounded");
+        collaborationService.validateWrite(part, request.getVersion());
+        Long warehouseId = stockLedgerService.resolveWarehouseId(request.getWarehouseId());
+        int before = stockLedgerService.availableQuantity(StockLedgerService.RESOURCE_PART, part.getId(), warehouseId);
+        int after = before + request.getQuantity();
+        LocalDate businessDate = request.getBusinessDate() == null ? LocalDate.now() : request.getBusinessDate();
+        String idempotencyBase = "PART-ADJUST:" + part.getId() + ":" + request.getVersion()
+                + ":" + businessDate + ":IN";
+        boolean openingBalance = Boolean.TRUE.equals(request.getOpeningBalance());
+        inventoryAdjustmentAccountingService.post(new InventoryAdjustmentAccountingService.Command(
+                "Part stock",
+                StockLedgerService.RESOURCE_PART,
+                part.getId(),
+                part.getPartCode(),
+                part.getPartName(),
+                warehouseId,
+                before,
+                after,
+                stockUnitCost(part),
+                request.getOperator(),
+                explicitAdjustmentRemark(request),
+                openingBalance ? "OPENING_MIGRATION" : "STOCK_ADJUSTMENT",
+                part.getId(),
+                openingBalance ? "Opening part balance" : "Explicit part inbound adjustment",
+                businessDate,
+                openingBalance ? StockBusinessType.INITIAL_BALANCE : StockBusinessType.STOCK_ADJUSTMENT,
+                idempotencyBase,
+                !openingBalance
+        ));
+        part.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, part.getId()));
+        part.setInboundDate(businessDate.atStartOfDay());
+        collaborationService.stampWrite(part);
+        partRepository.saveAndFlush(part);
         return PartInventoryVO.fromEntity(part);
     }
 
     @Override
     @Transactional
     public PartInventoryVO outbound(PartStockAdjustRequestDTO request) {
-        PartInventory part = outbound(request.getPartCode(), request.getQuantity(), request.getVersion());
-        saveStockLog(part, "OUTBOUND", request.getQuantity(), part.getQuantity() + request.getQuantity(),
-                part.getQuantity(), request.getOperator(), request.getRemark());
+        PartInventory part = findByPartCodeForUpdate(request.getPartCode())
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Part code not found: " + request.getPartCode()));
+        visibilityPolicy.ensureWritable(part.getIsLocked(), "Part is locked and cannot be outbounded");
+        collaborationService.validateWrite(part, request.getVersion());
+        Long warehouseId = stockLedgerService.resolveWarehouseId(request.getWarehouseId());
+        int before = stockLedgerService.availableQuantity(StockLedgerService.RESOURCE_PART, part.getId(), warehouseId);
+        if (before < request.getQuantity()) {
+            throw new BusinessException(ResultCode.INSUFFICIENT_STOCK, "Insufficient source warehouse stock: " + before);
+        }
+        int after = before - request.getQuantity();
+        LocalDate businessDate = request.getBusinessDate() == null ? LocalDate.now() : request.getBusinessDate();
+        String idempotencyBase = "PART-ADJUST:" + part.getId() + ":" + request.getVersion()
+                + ":" + businessDate + ":OUT";
+        inventoryAdjustmentAccountingService.post(new InventoryAdjustmentAccountingService.Command(
+                "Part stock",
+                StockLedgerService.RESOURCE_PART,
+                part.getId(),
+                part.getPartCode(),
+                part.getPartName(),
+                warehouseId,
+                before,
+                after,
+                stockUnitCost(part),
+                request.getOperator(),
+                explicitAdjustmentRemark(request),
+                "STOCK_ADJUSTMENT",
+                part.getId(),
+                "Explicit part outbound adjustment",
+                businessDate,
+                StockBusinessType.STOCK_ADJUSTMENT,
+                idempotencyBase,
+                true
+        ));
+        part.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, part.getId()));
+        collaborationService.stampWrite(part);
+        partRepository.saveAndFlush(part);
         return PartInventoryVO.fromEntity(part);
     }
 
@@ -327,7 +537,49 @@ public class PartInventoryServiceImpl implements PartInventoryService {
     }
 
     private BigDecimal stockUnitCost(PartInventory part) {
-        return MoneyValues.firstNonNegativeOrZero(part.getSettlementPrice(), part.getPurchasePrice());
+        return MoneyValues.firstNonNegativeOrZero(part.getLandedUnitCost(), part.getPurchasePrice());
+    }
+
+    private void createInitialLot(
+            PartInventory part,
+            int quantity,
+            String sourceType,
+            LocalDate businessDate,
+            String idempotencyKey
+    ) {
+        if (quantity <= 0) {
+            return;
+        }
+        stockLotService.createReceiptLot(
+                StockLedgerService.RESOURCE_PART,
+                part.getId(),
+                part.getWarehouseId(),
+                quantity,
+                stockUnitCost(part),
+                BigDecimal.ZERO,
+                sourceType,
+                part.getId(),
+                null,
+                businessDate,
+                idempotencyKey
+        );
+    }
+
+    private LocalDate businessDate(LocalDateTime dateTime) {
+        return dateTime == null ? LocalDate.now() : dateTime.toLocalDate();
+    }
+
+    private boolean sameMoney(BigDecimal left, BigDecimal right) {
+        return MoneyValues.zeroIfNullOrNegative(left).compareTo(MoneyValues.zeroIfNullOrNegative(right)) == 0;
+    }
+
+    private String explicitAdjustmentRemark(PartStockAdjustRequestDTO request) {
+        String reason = request.getReason() == null ? "" : request.getReason().trim();
+        String remark = request.getRemark() == null ? "" : request.getRemark().trim();
+        if (reason.isBlank() && remark.isBlank()) {
+            return "Explicit inventory adjustment";
+        }
+        return reason.isBlank() ? remark : remark.isBlank() ? reason : reason + "; " + remark;
     }
 
 }

@@ -4,6 +4,8 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.time.LocalDate;
+
 @Data
 public class VehiclePartInstallRequestDTO {
     private Long machineVersion;
@@ -21,6 +23,8 @@ public class VehiclePartInstallRequestDTO {
     @Min(value = 1, message = "数量必须大于0")
     private Integer quantity = 1;
 
+    private Long warehouseId;
+    private LocalDate businessDate;
     private String operator;
     private String remark;
 }

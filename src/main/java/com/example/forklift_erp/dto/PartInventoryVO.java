@@ -23,8 +23,10 @@ public class PartInventoryVO {
     private Integer quantity;
     private String unit;
     private BigDecimal purchasePrice;
+    private BigDecimal landedUnitCost;
     private BigDecimal salePrice;
     private BigDecimal settlementPrice;
+    private Boolean isLocked;
     private String remarks;
     private LocalDate manufacturingDate;
     private LocalDateTime inboundDate;
@@ -46,8 +48,10 @@ public class PartInventoryVO {
         vo.setQuantity(entity.getQuantity());
         vo.setUnit(entity.getUnit());
         vo.setPurchasePrice(entity.getPurchasePrice());
+        vo.setLandedUnitCost(entity.getLandedUnitCost());
         vo.setSalePrice(entity.getSalePrice());
         vo.setSettlementPrice(entity.getSettlementPrice());
+        vo.setIsLocked(Boolean.TRUE.equals(entity.getIsLocked()));
         vo.setRemarks(entity.getRemarks());
         vo.setManufacturingDate(entity.getManufacturingDate());
         vo.setInboundDate(entity.getInboundDate());

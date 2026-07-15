@@ -12,6 +12,8 @@ import java.util.Optional;
 
 public interface ResourceAttachmentRepository extends JpaRepository<ResourceAttachment, Long> {
 
+    boolean existsByResourceTypeAndResourceIdAndDeletedFalse(String resourceType, Long resourceId);
+
     List<ResourceAttachment> findByResourceTypeAndResourceIdAndDeletedFalseOrderByUploadedAtDesc(String resourceType, Long resourceId);
 
     List<ResourceAttachment> findByResourceTypeAndResourceIdAndAttachmentCategoryAndDeletedFalseOrderByUploadedAtDesc(

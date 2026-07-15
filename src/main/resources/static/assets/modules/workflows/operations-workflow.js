@@ -242,15 +242,44 @@ export function createOperationsWorkflow(deps) {
           ${summaryCard("数据库备份", canBackup ? "JSON" : "仅超级管理员", canBackup ? "导出当前应用表数据" : "恢复与备份仅超级管理员可见")}
           ${summaryCard("附件文件", "未包含", "发票/合同实体文件单独保管")}
         </section>
+        <div class="maintenance-guidance">
+          <span class="maintenance-guidance-icon" aria-hidden="true">${icon("shield")}</span>
+          <div>
+            <strong>先备份，再执行导入或恢复</strong>
+            <span>数据库备份不包含发票、合同等实体附件；恢复前请同时确认附件目录已有独立副本。</span>
+          </div>
+          ${badge("仅超级管理员", "primary")}
+        </div>
         ${canImport ? renderSurface("导入中心", `
-          <div class="action-grid">
-            <button class="btn btn-primary" type="button" data-action="go-tab" data-tab="imports">${icon("fileSearch")}打开导入中心</button>
+          <div class="maintenance-actions">
+            <button class="maintenance-action-card primary" type="button" data-action="go-tab" data-tab="imports">
+              <span class="maintenance-action-icon" aria-hidden="true">${icon("fileSearch")}</span>
+              <span>
+                <strong>打开导入中心</strong>
+                <small>下载标准模板，先预校验再确认写入业务数据。</small>
+              </span>
+              <span class="maintenance-action-arrow" aria-hidden="true">${icon("chevronRight")}</span>
+            </button>
           </div>
         `) : ""}
         ${canBackup ? renderSurface("备份与恢复", `
-          <div class="action-grid">
-            <button class="btn btn-primary" type="button" data-action="download-backup">${icon("download")}下载数据库备份</button>
-            <button class="btn" type="button" data-action="restore-backup">${icon("upload")}恢复数据库备份</button>
+          <div class="maintenance-actions">
+            <button class="maintenance-action-card primary" type="button" data-action="download-backup">
+              <span class="maintenance-action-icon" aria-hidden="true">${icon("backup")}</span>
+              <span>
+                <strong>下载数据库备份</strong>
+                <small>导出当前应用表数据为 JSON 文件，建议在高风险操作前保存。</small>
+              </span>
+              <span class="maintenance-action-arrow" aria-hidden="true">${icon("download")}</span>
+            </button>
+            <button class="maintenance-action-card warning" type="button" data-action="restore-backup">
+              <span class="maintenance-action-icon" aria-hidden="true">${icon("upload")}</span>
+              <span>
+                <strong>恢复数据库备份</strong>
+                <small>先执行干运行校验；正式恢复会覆盖当前业务数据。</small>
+              </span>
+              <span class="maintenance-action-arrow" aria-hidden="true">${icon("chevronRight")}</span>
+            </button>
           </div>
         `) : renderSurface("备份与恢复", emptyState("仅超级管理员可执行备份与恢复"))}
       </div>
@@ -360,6 +389,8 @@ export function createOperationsWorkflow(deps) {
       <div class="action-row">
         ${!closed ? `<button class="btn btn-sm btn-primary" type="button" data-action="complete-modification-order" data-id="${escapeAttr(row.id)}">${icon("swap")}完成</button>` : ""}
         ${!closed ? `<button class="btn btn-sm btn-danger" type="button" data-action="cancel-modification-order" data-id="${escapeAttr(row.id)}">${icon("trash")}取消</button>` : ""}
+        ${row.status === "COMPLETED" && row.workOrderType === "AFTER_SALE" && hasPermission("stock:adjust") ? `<button class="btn btn-sm btn-primary" type="button" data-action="record-payment" data-source-type="MODIFICATION_WORK_ORDER" data-source-id="${escapeAttr(row.id)}" data-direction="RECEIPT">${icon("money")}登记收款</button>` : ""}
+        ${row.status === "COMPLETED" && row.workOrderType === "AFTER_SALE" && hasPermission("stock:adjust") ? `<button class="btn btn-sm" type="button" data-action="reverse-payment" data-source-type="MODIFICATION_WORK_ORDER" data-source-id="${escapeAttr(row.id)}">${icon("refresh")}收款冲销</button>` : ""}
       </div>
     `;
   }
