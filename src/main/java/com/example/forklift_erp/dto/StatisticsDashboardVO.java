@@ -11,6 +11,8 @@ import java.util.List;
 public class StatisticsDashboardVO {
     private Integer selectedYear;
     private LocalDateTime generatedAt;
+    private Boolean dataComplete = true;
+    private List<String> dataWarnings = new ArrayList<>();
     private FinancialRow annualSummary;
     private List<FinancialRow> monthlyFinance = new ArrayList<>();
     private List<FinancialRow> yearlyFinance = new ArrayList<>();

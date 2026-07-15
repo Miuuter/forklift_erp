@@ -3,6 +3,7 @@ package com.example.forklift_erp.controller;
 import com.example.forklift_erp.common.Result;
 import com.example.forklift_erp.dto.PaymentRecordCreateDTO;
 import com.example.forklift_erp.dto.PaymentRecordVO;
+import com.example.forklift_erp.dto.PaymentReversalRequestDTO;
 import com.example.forklift_erp.security.PermissionCodes;
 import com.example.forklift_erp.service.PaymentRecordService;
 import jakarta.validation.Valid;
@@ -44,7 +45,11 @@ public class PaymentRecordController {
     }
 
     @PostMapping("/{id}/reverse")
-    public Result<PaymentRecordVO> reverse(@PathVariable Long id, @RequestParam(required = false) String remark) {
-        return Result.success("Payment reversed", paymentRecordService.reverse(id, remark));
+    public Result<PaymentRecordVO> reverse(
+            @PathVariable Long id,
+            @Valid @RequestBody PaymentReversalRequestDTO request
+    ) {
+        return Result.success("Payment reversed",
+                paymentRecordService.reverse(id, request.getRequestId(), request.getRemark()));
     }
 }

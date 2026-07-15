@@ -114,7 +114,7 @@ class PaymentRecordServiceTests {
         when(fixture.paymentRecordRepository.findById(21L))
                 .thenReturn(java.util.Optional.of(reversal));
 
-        assertThatThrownBy(() -> fixture.service.reverse(21L, null))
+        assertThatThrownBy(() -> fixture.service.reverse(21L, "reverse-21", null))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("Only an original positive payment can be reversed");
 
@@ -151,7 +151,7 @@ class PaymentRecordServiceTests {
                 FinancialEventService.SOURCE_OUTBOUND_ORDER,
                 31L,
                 "reverse balance",
-                "PAYMENT-REVERSAL:42"
+                "PAYMENT-REVERSAL-REQUEST:reverse-42"
         )).thenReturn(reversal);
         when(fixture.outboundOrderRepository.findByIdForUpdate(31L)).thenReturn(Optional.of(order));
         when(fixture.financialEventService.receiptTotal(
@@ -161,7 +161,7 @@ class PaymentRecordServiceTests {
                 FinancialEventService.SOURCE_OUTBOUND_ORDER, 31L
         )).thenReturn(List.of(deposit, balance, reversal));
 
-        fixture.service.reverse(42L, "reverse balance");
+        fixture.service.reverse(42L, "reverse-42", "reverse balance");
 
         assertThat(order.getReceivedAmount()).isEqualByComparingTo("200.00");
         assertThat(order.getPaymentSettled()).isFalse();
@@ -186,6 +186,7 @@ class PaymentRecordServiceTests {
         request.setSourceType(sourceType);
         request.setSourceId(sourceId);
         request.setAmount(new BigDecimal("10.00"));
+        request.setRequestId("request-" + sourceType + "-" + sourceId);
         return request;
     }
 
@@ -206,7 +207,8 @@ class PaymentRecordServiceTests {
                 purchaseOrderRepository,
                 repairRecordRepository,
                 rentalBillRepository,
-                modificationWorkOrderRepository
+                modificationWorkOrderRepository,
+                mock(OperationAuditService.class)
         );
         return new Fixture(
                 service,

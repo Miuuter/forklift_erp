@@ -14,4 +14,6 @@ public interface MigrationExceptionRepository extends JpaRepository<MigrationExc
     );
 
     List<MigrationException> findByStatusOrderByCreatedAtDescIdDesc(String status);
+
+    long countByStatus(String status);
 }

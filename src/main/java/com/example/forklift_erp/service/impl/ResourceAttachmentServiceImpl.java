@@ -179,13 +179,18 @@ public class ResourceAttachmentServiceImpl implements ResourceAttachmentService 
         try {
             Resource resource = new UrlResource(filePath.toUri());
             String contentType = firstNonBlank(attachment.getContentType(), Files.probeContentType(filePath), "application/octet-stream");
-            boolean previewable = Boolean.TRUE.equals(attachment.getPreviewable()) || inlinePreview;
+            boolean previewable = Boolean.TRUE.equals(attachment.getPreviewable())
+                    && attachmentStorage.isPreviewable(contentType, attachment.getOriginalName());
+            if (inlinePreview && !previewable) {
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        "This attachment type cannot be previewed inline");
+            }
             return new ResourceAttachmentDownload(
                     resource,
                     firstNonBlank(attachment.getOriginalName(), attachment.getAttachmentLabel(), "attachment"),
                     contentType,
                     Files.size(filePath),
-                    previewable
+                    inlinePreview && previewable
             );
         } catch (IOException e) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "Attachment download failed");
@@ -424,15 +429,7 @@ public class ResourceAttachmentServiceImpl implements ResourceAttachmentService 
     }
 
     private boolean isPreviewable(String contentType, String originalName) {
-        String normalized = firstNonBlank(contentType, "");
-        if (normalized.startsWith("image/")) {
-            return true;
-        }
-        if ("application/pdf".equalsIgnoreCase(normalized)) {
-            return true;
-        }
-        String extension = StringUtils.getFilenameExtension(originalName);
-        return extension != null && Set.of("jpg", "jpeg", "png", "webp", "gif", "bmp", "pdf").contains(extension.toLowerCase(Locale.ROOT));
+        return attachmentStorage.isPreviewable(contentType, originalName);
     }
 
     private String normalizeCategory(String category) {

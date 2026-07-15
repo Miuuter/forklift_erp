@@ -17,6 +17,7 @@ export const endpoints = {
   repair: {
     list: "/api/repairs",
     create: "/api/repairs",
+    batchComplete: "/api/repairs/batch-complete",
     update: id => `/api/repairs/${id}`,
     updateStatus: id => `/api/repairs/${id}/status`,
     delete: id => `/api/repairs/${id}`
@@ -86,6 +87,7 @@ export const endpoints = {
     create: "/api/rentals",
     update: id => `/api/rentals/${id}`,
     bills: id => `/api/rentals/${id}/bills`,
+    refreshBills: id => `/api/rentals/${id}/bills/refresh`,
     delete: id => `/api/rentals/${id}`
   },
   customer: {
@@ -105,6 +107,7 @@ export const endpoints = {
     create: "/api/purchase-orders",
     update: id => `/api/purchase-orders/${id}`,
     received: id => `/api/purchase-orders/${id}/received`,
+    batchReceive: "/api/purchase-orders/batch-receive",
     freight: id => `/api/purchase-orders/${id}/freight`,
     delete: id => `/api/purchase-orders/${id}`
   },
@@ -113,6 +116,8 @@ export const endpoints = {
     create: "/api/stocktaking-records",
     update: id => `/api/stocktaking-records/${id}`,
     complete: id => `/api/stocktaking-records/${id}/complete`,
+    batchComplete: "/api/stocktaking-records/batch-complete",
+    batchDeleteDrafts: "/api/stocktaking-records/batch-delete-drafts",
     delete: id => `/api/stocktaking-records/${id}`
   },
   warehouse: {

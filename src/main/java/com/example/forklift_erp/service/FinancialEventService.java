@@ -10,6 +10,7 @@ import com.example.forklift_erp.repository.FinancialEventRepository;
 import com.example.forklift_erp.repository.PaymentRecordRepository;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
 import com.example.forklift_erp.util.MoneyValues;
+import com.example.forklift_erp.util.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +20,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Append-only subledger used by both accrual and cash-basis reports.
@@ -74,6 +76,7 @@ public class FinancialEventService {
         event.setCounterpartyName(counterpartyName);
         event.setRemark(remark);
         event.setIdempotencyKey(idempotencyKey);
+        event.setCreatedBy(SecurityUtils.currentUsername());
         return financialEventRepository.save(event);
     }
 
@@ -203,8 +206,11 @@ public class FinancialEventService {
         if (amount == null || amount.signum() == 0) {
             return null;
         }
+        String effectiveIdempotencyKey = idempotencyKey == null
+                ? "INTERNAL-PAYMENT:" + UUID.randomUUID()
+                : idempotencyKey;
         if (idempotencyKey != null) {
-            PaymentRecord existing = paymentRecordRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
+            PaymentRecord existing = paymentRecordRepository.findByIdempotencyKey(effectiveIdempotencyKey).orElse(null);
             if (existing != null) {
                 return existing;
             }
@@ -213,9 +219,10 @@ public class FinancialEventService {
                 ? FinancialEventType.CASH_PAYMENT
                 : FinancialEventType.CASH_RECEIPT;
         FinancialEvent cashEvent = post(eventType, amount, paymentDate, sourceType, sourceId, null,
-                null, null, null, remark, idempotencyKey == null ? null : idempotencyKey + ":EVENT");
+                null, null, null, remark, effectiveIdempotencyKey + ":EVENT");
         PaymentRecord record = new PaymentRecord();
         record.setPaymentNo(BusinessNumberGenerator.next("PAY", 8));
+        record.setRequestId(effectiveIdempotencyKey);
         record.setDirection(direction);
         record.setAmount(amount);
         record.setPaymentDate(paymentDate == null ? LocalDate.now() : paymentDate);
@@ -225,7 +232,8 @@ public class FinancialEventService {
         record.setSourceId(sourceId);
         record.setFinancialEventId(cashEvent.getId());
         record.setRemark(remark);
-        record.setIdempotencyKey(idempotencyKey);
+        record.setIdempotencyKey(effectiveIdempotencyKey);
+        record.setCreatedBy(SecurityUtils.currentUsername());
         return paymentRecordRepository.save(record);
     }
 

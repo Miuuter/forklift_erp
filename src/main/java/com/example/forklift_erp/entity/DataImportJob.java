@@ -64,6 +64,9 @@ public class DataImportJob {
     @Column(name = "error_rows")
     private Integer errorRows = 0;
 
+    @Column(name = "error_details")
+    private Integer errorDetails = 0;
+
     @Column(name = "imported_rows")
     private Integer importedRows = 0;
 
@@ -113,6 +116,9 @@ public class DataImportJob {
         }
         if (this.errorRows == null) {
             this.errorRows = 0;
+        }
+        if (this.errorDetails == null) {
+            this.errorDetails = 0;
         }
         if (this.importedRows == null) {
             this.importedRows = 0;

@@ -17,6 +17,7 @@ public class DataImportJobVO {
     private Integer totalRows;
     private Integer validRows;
     private Integer errorRows;
+    private Integer errorDetails;
     private Integer importedRows;
     private Integer skippedRows;
     private String summary;
@@ -39,6 +40,7 @@ public class DataImportJobVO {
         vo.setTotalRows(entity.getTotalRows());
         vo.setValidRows(entity.getValidRows());
         vo.setErrorRows(entity.getErrorRows());
+        vo.setErrorDetails(entity.getErrorDetails());
         vo.setImportedRows(entity.getImportedRows());
         vo.setSkippedRows(entity.getSkippedRows());
         vo.setSummary(entity.getSummary());

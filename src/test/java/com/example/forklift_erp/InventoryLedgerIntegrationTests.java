@@ -404,13 +404,13 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
                         part.path("warehouseId").asLong()
                 )
                 .orElseThrow();
-        invalidBalance.setAvailableQuantity(-1);
+        invalidBalance.setReservedQuantity(1);
         invalidBalance = stockBalanceRepository.saveAndFlush(invalidBalance);
         mockMvc.perform(delete("/api/parts/{id}", partId)
                         .header("Authorization", bearer(superToken))
                         .param("version", String.valueOf(emptyPartVersion)))
                 .andExpect(status().isConflict());
-        invalidBalance.setAvailableQuantity(0);
+        invalidBalance.setReservedQuantity(0);
         stockBalanceRepository.saveAndFlush(invalidBalance);
 
         mockMvc.perform(delete("/api/parts/{id}", partId)

@@ -27,6 +27,9 @@ public class PaymentRecord {
     @Column(name = "payment_no", nullable = false, unique = true, length = 80)
     private String paymentNo;
 
+    @Column(name = "request_id", nullable = false, unique = true, length = 160)
+    private String requestId;
+
     @Column(nullable = false, length = 20)
     private String direction;
 
@@ -62,6 +65,9 @@ public class PaymentRecord {
 
     @Column(name = "reversal_of_payment_id")
     private Long reversalOfPaymentId;
+
+    @Column(name = "created_by", length = 50)
+    private String createdBy;
 
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

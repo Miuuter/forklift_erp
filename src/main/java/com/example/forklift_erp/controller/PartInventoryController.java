@@ -44,13 +44,13 @@ public class PartInventoryController {
         if (paged) {
             return Result.success(partService.findPage(keyword, stock, page, size));
         }
-        return Result.success(partService.findAll().stream().map(PartInventoryVO::fromEntity).toList());
+        return Result.success(partService.toVOs(partService.findAll()));
     }
 
     @GetMapping("/{id}")
     public Result<PartInventoryVO> getById(@PathVariable Long id) {
         return partService.findById(id)
-                .map(PartInventoryVO::fromEntity)
+                .map(partService::toVO)
                 .map(Result::success)
                 .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "Part not found"));
     }
@@ -58,7 +58,7 @@ public class PartInventoryController {
     @GetMapping("/code/{partCode}")
     public Result<PartInventoryVO> getByPartCode(@PathVariable String partCode) {
         return partService.findByPartCode(partCode)
-                .map(PartInventoryVO::fromEntity)
+                .map(partService::toVO)
                 .map(Result::success)
                 .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "Part code not found"));
     }
@@ -94,22 +94,22 @@ public class PartInventoryController {
 
     @GetMapping("/category/{category}")
     public Result<List<PartInventoryVO>> getByCategory(@PathVariable String category) {
-        return Result.success(partService.findByCategory(category).stream().map(PartInventoryVO::fromEntity).toList());
+        return Result.success(partService.toVOs(partService.findByCategory(category)));
     }
 
     @GetMapping("/available")
     public Result<List<PartInventoryVO>> getAvailable() {
-        return Result.success(partService.findAvailableParts().stream().map(PartInventoryVO::fromEntity).toList());
+        return Result.success(partService.toVOs(partService.findAvailableParts()));
     }
 
     @GetMapping("/source/{source}")
     public Result<List<PartInventoryVO>> getBySource(@PathVariable String source) {
-        return Result.success(partService.findBySource(source).stream().map(PartInventoryVO::fromEntity).toList());
+        return Result.success(partService.toVOs(partService.findBySource(source)));
     }
 
     @GetMapping("/sourceMachine/{machineId}")
     public Result<List<PartInventoryVO>> getBySourceMachineId(@PathVariable Long machineId) {
-        return Result.success(partService.findBySourceMachineId(machineId).stream().map(PartInventoryVO::fromEntity).toList());
+        return Result.success(partService.toVOs(partService.findBySourceMachineId(machineId)));
     }
 
     @PutMapping("/inbound")

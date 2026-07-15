@@ -46,7 +46,7 @@ class DataImportFileStorageTests {
                 "file",
                 "import.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "payload".getBytes(StandardCharsets.UTF_8)
+                new byte[]{0x50, 0x4B, 0x03, 0x04, 0x00}
         );
 
         Path stored = storage.store(file, 12L, "vehicle-workbook");
@@ -54,7 +54,8 @@ class DataImportFileStorageTests {
         assertThat(stored.getFileName().toString())
                 .startsWith("import-vehicle-workbook-12-")
                 .endsWith(".xlsx");
-        assertThat(Files.readString(stored)).isEqualTo("payload");
+        assertThat(Files.readAllBytes(stored))
+                .containsExactly(new byte[]{0x50, 0x4B, 0x03, 0x04, 0x00});
         assertThat(storage.resolve(stored.getFileName().toString())).isEqualTo(stored);
     }
 

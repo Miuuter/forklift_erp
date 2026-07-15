@@ -15,6 +15,10 @@ public interface PartInventoryService {
 
     PageResult<PartInventoryVO> findPage(String keyword, String stock, Integer page, Integer size);
 
+    PartInventoryVO toVO(PartInventory part);
+
+    List<PartInventoryVO> toVOs(List<PartInventory> parts);
+
     default PageResult<PartInventoryVO> findPage(String keyword, Integer page, Integer size) {
         return findPage(keyword, null, page, size);
     }

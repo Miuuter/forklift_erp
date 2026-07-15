@@ -5,6 +5,7 @@ import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.dto.MigrationExceptionVO;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.MigrationExceptionRepository;
+import com.example.forklift_erp.util.SecurityUtils;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -21,9 +22,14 @@ import java.util.List;
 @Service
 public class MigrationExceptionService {
     private final MigrationExceptionRepository migrationExceptionRepository;
+    private final OperationAuditService operationAuditService;
 
-    public MigrationExceptionService(MigrationExceptionRepository migrationExceptionRepository) {
+    public MigrationExceptionService(
+            MigrationExceptionRepository migrationExceptionRepository,
+            OperationAuditService operationAuditService
+    ) {
         this.migrationExceptionRepository = migrationExceptionRepository;
+        this.operationAuditService = operationAuditService;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -56,7 +62,21 @@ public class MigrationExceptionService {
         if (!"RESOLVED".equals(exception.getStatus())) {
             exception.setStatus("RESOLVED");
             exception.setResolvedAt(LocalDateTime.now());
+            exception.setResolvedBy(SecurityUtils.currentUsername());
             migrationExceptionRepository.save(exception);
+            operationAuditService.record(
+                    "Data quality",
+                    "RESOLVE",
+                    "MIGRATION_EXCEPTION",
+                    exception.getId(),
+                    exception.getExceptionType(),
+                    exception.getSourceType() + ":" + exception.getSourceId(),
+                    "Resolve migration exception",
+                    SecurityUtils.currentUsername(),
+                    exception.getDetail(),
+                    exception.getSourceType(),
+                    exception.getSourceId()
+            );
         }
         return MigrationExceptionVO.fromEntity(exception);
     }

@@ -226,7 +226,7 @@ class AttachmentVisibilityIntegrationTests extends TestcontainersDatabaseSupport
                 "files",
                 "locked.jpg",
                 "image/jpeg",
-                "locked".getBytes(StandardCharsets.UTF_8)
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x00}
         );
         mockMvc.perform(multipart("/api/attachments")
                         .file(file)
@@ -300,7 +300,7 @@ class AttachmentVisibilityIntegrationTests extends TestcontainersDatabaseSupport
                 "files",
                 originalName,
                 "image/jpeg",
-                "payload".getBytes(StandardCharsets.UTF_8)
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0x00}
         );
         String response = mockMvc.perform(multipart("/api/attachments")
                         .file(file)

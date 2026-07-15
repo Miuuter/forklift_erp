@@ -103,6 +103,7 @@ class HistoricalDataRepairServiceTests {
         ModificationWorkOrderLineRepository modificationWorkOrderLineRepository = mock(ModificationWorkOrderLineRepository.class);
         MigrationExceptionService migrationExceptionService = mock(MigrationExceptionService.class);
         HistoricalRepairBackupService historicalRepairBackupService = mock(HistoricalRepairBackupService.class);
+        OperationAuditService operationAuditService = mock(OperationAuditService.class);
 
         OutboundOrder order = new OutboundOrder();
         order.setId(21L);
@@ -157,6 +158,18 @@ class HistoricalDataRepairServiceTests {
                 )
         );
 
+        HistoricalReferenceRepairService historicalReferenceRepairService = new HistoricalReferenceRepairService(
+                supplierRepository,
+                warehouseRepository,
+                machineInventoryRepository,
+                partInventoryRepository,
+                purchaseOrderRepository,
+                outboundOrderRepository,
+                stockBalanceRepository,
+                stockMovementRepository,
+                stockMovementLineRepository,
+                migrationExceptionService
+        );
         HistoricalDataRepairService service = new HistoricalDataRepairService(
                 outboundOrderRepository,
                 stockMovementRepository,
@@ -167,9 +180,6 @@ class HistoricalDataRepairServiceTests {
                 rentalRecordRepository,
                 machineInventoryRepository,
                 partInventoryRepository,
-                purchaseOrderRepository,
-                supplierRepository,
-                warehouseRepository,
                 stockBalanceRepository,
                 stockLotRepository,
                 stockLotService,
@@ -177,7 +187,9 @@ class HistoricalDataRepairServiceTests {
                 repairPartUsageRepository,
                 modificationWorkOrderLineRepository,
                 migrationExceptionService,
-                historicalRepairBackupService
+                historicalRepairBackupService,
+                historicalReferenceRepairService,
+                operationAuditService
         );
         return new Fixture(service, order, movement, line, outboundOrderRepository, stockMovementRepository,
                 stockMovementLineRepository, financialEventService, historicalRepairBackupService);

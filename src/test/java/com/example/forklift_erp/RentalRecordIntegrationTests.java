@@ -6,12 +6,15 @@ import com.example.forklift_erp.entity.Permission;
 import com.example.forklift_erp.entity.Role;
 import com.example.forklift_erp.entity.User;
 import com.example.forklift_erp.repository.CustomerRepository;
+import com.example.forklift_erp.repository.FinancialEventRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PermissionRepository;
+import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RentalRecordRepository;
 import com.example.forklift_erp.repository.RoleRepository;
 import com.example.forklift_erp.repository.UserRepository;
+import com.example.forklift_erp.service.FinancialEventService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -75,6 +78,12 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
     private RentalRecordRepository rentalRecordRepository;
 
     @Autowired
+    private RentalBillRepository rentalBillRepository;
+
+    @Autowired
+    private FinancialEventRepository financialEventRepository;
+
+    @Autowired
     private OutboundOrderRepository outboundOrderRepository;
 
     @Autowired
@@ -102,6 +111,7 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
         ordersToCleanup.clear();
 
         for (Long rentalId : rentalsToCleanup.reversed()) {
+            deleteRentalBillingFacts(rentalId);
             rentalRecordRepository.findById(rentalId).ifPresent(rentalRecordRepository::delete);
         }
         rentalsToCleanup.clear();
@@ -116,6 +126,21 @@ class RentalRecordIntegrationTests extends TestcontainersDatabaseSupport {
         }
         customersToCleanup.clear();
 
+    }
+
+    private void deleteRentalBillingFacts(Long rentalId) {
+        var bills = rentalBillRepository.findByRentalIdOrderByBillPeriodAsc(rentalId);
+        var financialEventIds = bills.stream()
+                .flatMap(bill -> financialEventRepository
+                        .findBySourceTypeAndSourceIdOrderByIdAsc(
+                                FinancialEventService.SOURCE_RENTAL_BILL,
+                                bill.getId()
+                        )
+                        .stream())
+                .map(event -> event.getId())
+                .toList();
+        rentalBillRepository.deleteAllInBatch(bills);
+        financialEventRepository.deleteAllByIdInBatch(financialEventIds);
     }
 
     @Test

@@ -18,7 +18,6 @@ import com.example.forklift_erp.repository.StockOperationLogRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.OperationAuditService;
-import com.example.forklift_erp.service.ResourceAttachmentService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
 import com.example.forklift_erp.service.StockLedgerService;
 import com.example.forklift_erp.service.StockLotService;
@@ -106,10 +105,9 @@ class OutboundOrderServiceImplTests {
         RentalRecordRepository rentalRecordRepository = mock(RentalRecordRepository.class);
         OperationAuditService operationAuditService = mock(OperationAuditService.class);
         CollaborationService collaborationService = mock(CollaborationService.class);
-        OutboundOrderFileStorage fileStorage = mock(OutboundOrderFileStorage.class);
-        OutboundUploadReadinessPolicy uploadReadinessPolicy = mock(OutboundUploadReadinessPolicy.class);
+        OutboundCustomerService outboundCustomerService = new OutboundCustomerService(customerRepository);
+        OutboundDocumentService outboundDocumentService = mock(OutboundDocumentService.class);
         OutboundResourceLockService resourceLockService = mock(OutboundResourceLockService.class);
-        ResourceAttachmentService resourceAttachmentService = mock(ResourceAttachmentService.class);
         ResourceVisibilityPolicy visibilityPolicy = mock(ResourceVisibilityPolicy.class);
         OutboundReceivablePolicy receivablePolicy = mock(OutboundReceivablePolicy.class);
         OutboundStockAccountingService stockAccountingService = mock(OutboundStockAccountingService.class);
@@ -143,16 +141,14 @@ class OutboundOrderServiceImplTests {
 
         OutboundOrderServiceImpl service = new OutboundOrderServiceImpl(
                 outboundOrderRepository,
-                customerRepository,
+                outboundCustomerService,
                 machineInventoryRepository,
                 partInventoryRepository,
                 rentalRecordRepository,
                 operationAuditService,
                 collaborationService,
-                fileStorage,
-                uploadReadinessPolicy,
+                outboundDocumentService,
                 resourceLockService,
-                resourceAttachmentService,
                 visibilityPolicy,
                 receivablePolicy,
                 stockAccountingService,

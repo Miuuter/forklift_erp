@@ -78,6 +78,10 @@ public class PartInventory implements CollaborativeResource {
     @Column(name = "quantity", nullable = false)
     private Integer quantity = 0; // 当前库存数量
 
+    @Min(value = 0, message = "补货点不能为负数")
+    @Column(name = "reorder_point", nullable = false)
+    private Integer reorderPoint = 5;
+
     @Column(name = "unit", length = 20)
     private String unit = "个"; // 单位
 

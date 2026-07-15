@@ -38,6 +38,14 @@ spring:
 logging:
   file:
     name: logs/application.log  # 日志文件路径
+  logback:
+    rollingpolicy:
+      file-name-pattern: logs/application.%d{yyyy-MM-dd}.%i.log.gz
+      max-file-size: 20MB
+      max-history: 30
+      total-size-cap: 1GB
+  pattern:
+    level: "%5p [requestId:%X{requestId:-none}]"
   level:
     com.example.forklift_erp: debug # 项目包路径下的日志级别设置为debug，便于开发调试
     org.springframework.web: info # Spring Web模块日志级别
@@ -53,6 +61,11 @@ jwt:
 forklift-erp:
   invoice-storage-dir: ${FORKLIFT_ERP_INVOICE_STORAGE_DIR:uploads/invoices}
   contract-storage-dir: ${FORKLIFT_ERP_CONTRACT_STORAGE_DIR:uploads/contracts}
+  import-storage-dir: ${FORKLIFT_ERP_IMPORT_STORAGE_DIR:uploads/imports}
+  import-retention:
+    enabled: ${FORKLIFT_ERP_IMPORT_RETENTION_ENABLED:true}
+    days: ${FORKLIFT_ERP_IMPORT_RETENTION_DAYS:30}
+    cron: ${FORKLIFT_ERP_IMPORT_RETENTION_CRON:0 15 2 * * *}
 
 forklift:
   admin:
@@ -76,8 +89,9 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,sbom
   endpoint:
     health:
       probes:
         enabled: true
+      show-details: when-authorized

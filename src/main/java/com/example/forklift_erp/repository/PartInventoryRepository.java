@@ -56,7 +56,7 @@ public interface PartInventoryRepository extends JpaRepository<PartInventory, Lo
             where (:includeLocked = true or coalesce(p.is_locked, 0) = 0)
               and (:stock is null
                    or (:stock = 'available' and coalesce(p.quantity, 0) > 0)
-                   or (:stock = 'low' and coalesce(p.quantity, 0) <= :lowStockThreshold))
+                   or (:stock = 'low' and coalesce(p.quantity, 0) <= coalesce(p.reorder_point, 5)))
               and (:keywordPrefix is null
                    or p.part_code like :keywordPrefix escape '!'
                    or (:fullTextKeyword is not null
@@ -77,7 +77,7 @@ public interface PartInventoryRepository extends JpaRepository<PartInventory, Lo
             where (:includeLocked = true or coalesce(p.is_locked, 0) = 0)
               and (:stock is null
                    or (:stock = 'available' and coalesce(p.quantity, 0) > 0)
-                   or (:stock = 'low' and coalesce(p.quantity, 0) <= :lowStockThreshold))
+                   or (:stock = 'low' and coalesce(p.quantity, 0) <= coalesce(p.reorder_point, 5)))
               and (:keywordPrefix is null
                    or p.part_code like :keywordPrefix escape '!'
                    or (:fullTextKeyword is not null
@@ -97,7 +97,6 @@ public interface PartInventoryRepository extends JpaRepository<PartInventory, Lo
             @Param("fullTextKeyword") String fullTextKeyword,
             @Param("includeLocked") boolean includeLocked,
             @Param("stock") String stock,
-            @Param("lowStockThreshold") int lowStockThreshold,
             Pageable pageable
     );
 
@@ -113,26 +112,25 @@ public interface PartInventoryRepository extends JpaRepository<PartInventory, Lo
 
     @Query("""
             select p from PartInventory p
-            where coalesce(p.quantity, 0) <= :threshold
+            where coalesce(p.quantity, 0) <= coalesce(p.reorderPoint, 5)
             order by coalesce(p.quantity, 0) asc, p.id asc
     """)
-    List<PartInventory> findLowStock(@Param("threshold") int threshold, Pageable pageable);
+    List<PartInventory> findLowStock(Pageable pageable);
 
     @Query("""
             select count(p) from PartInventory p
             where (:includeLocked = true or p.isLocked = false)
-              and coalesce(p.quantity, 0) <= :threshold
+              and coalesce(p.quantity, 0) <= coalesce(p.reorderPoint, 5)
             """)
-    long countLowStockTodos(@Param("threshold") int threshold, @Param("includeLocked") boolean includeLocked);
+    long countLowStockTodos(@Param("includeLocked") boolean includeLocked);
 
     @Query("""
             select p from PartInventory p
             where (:includeLocked = true or p.isLocked = false)
-              and coalesce(p.quantity, 0) <= :threshold
+              and coalesce(p.quantity, 0) <= coalesce(p.reorderPoint, 5)
             order by p.updatedAt desc, p.id desc
             """)
     List<PartInventory> findLowStockTodos(
-            @Param("threshold") int threshold,
             @Param("includeLocked") boolean includeLocked,
             Pageable pageable
     );

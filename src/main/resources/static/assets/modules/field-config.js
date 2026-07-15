@@ -130,6 +130,7 @@ export function createFields(deps) {
     { name: "sourceMachineId", label: "来源车辆 ID", type: "number", coerce: "int", step: "1" },
     { name: "warehouseId", label: "实际仓库", type: "select", coerce: "int", options: warehouseOptions },
     { name: "quantity", label: "数量", type: "number", coerce: "int", step: "1", required: true, defaultValue: 0 },
+    { name: "reorderPoint", label: "补货预警点", type: "number", coerce: "int", min: "0", step: "1", required: true, defaultValue: 5 },
     { name: "unit", label: "单位", defaultValue: "件" },
     { name: "purchasePrice", label: "采购价", type: "number", coerce: "decimal", step: "0.01" },
     { name: "landedUnitCost", label: "落地成本", type: "number", coerce: "decimal", step: "0.01" },

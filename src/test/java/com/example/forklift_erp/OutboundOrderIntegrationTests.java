@@ -6,14 +6,17 @@ import com.example.forklift_erp.entity.Permission;
 import com.example.forklift_erp.entity.Role;
 import com.example.forklift_erp.entity.User;
 import com.example.forklift_erp.repository.CustomerRepository;
+import com.example.forklift_erp.repository.FinancialEventRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.PermissionRepository;
+import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RoleRepository;
 import com.example.forklift_erp.repository.RentalRecordRepository;
 import com.example.forklift_erp.repository.StockMovementRepository;
 import com.example.forklift_erp.repository.UserRepository;
+import com.example.forklift_erp.service.FinancialEventService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
@@ -90,6 +93,12 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
     private RentalRecordRepository rentalRecordRepository;
 
     @Autowired
+    private RentalBillRepository rentalBillRepository;
+
+    @Autowired
+    private FinancialEventRepository financialEventRepository;
+
+    @Autowired
     private MachineInventoryRepository machineRepository;
 
     @Autowired
@@ -121,6 +130,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
     @AfterEach
     void tearDown() {
         for (Long rentalId : rentalsToCleanup.reversed()) {
+            deleteRentalBillingFacts(rentalId);
             rentalRecordRepository.findById(rentalId).ifPresent(rentalRecordRepository::delete);
         }
         rentalsToCleanup.clear();
@@ -145,6 +155,21 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
         }
         customersToCleanup.clear();
 
+    }
+
+    private void deleteRentalBillingFacts(Long rentalId) {
+        var bills = rentalBillRepository.findByRentalIdOrderByBillPeriodAsc(rentalId);
+        var financialEventIds = bills.stream()
+                .flatMap(bill -> financialEventRepository
+                        .findBySourceTypeAndSourceIdOrderByIdAsc(
+                                FinancialEventService.SOURCE_RENTAL_BILL,
+                                bill.getId()
+                        )
+                        .stream())
+                .map(event -> event.getId())
+                .toList();
+        rentalBillRepository.deleteAllInBatch(bills);
+        financialEventRepository.deleteAllByIdInBatch(financialEventIds);
     }
 
     @Test
@@ -193,7 +218,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 "file",
                 "early-invoice.pdf",
                 "application/pdf",
-                "not issued".getBytes(StandardCharsets.UTF_8)
+                "%PDF-1.4 not issued".getBytes(StandardCharsets.UTF_8)
         );
         mockMvc.perform(multipart("/api/outbound-orders/{id}/invoice", orderId)
                         .file(earlyInvoice)
@@ -206,7 +231,7 @@ class OutboundOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 "file",
                 "early-contract.pdf",
                 "application/pdf",
-                "contract".getBytes(StandardCharsets.UTF_8)
+                "%PDF-1.4 contract".getBytes(StandardCharsets.UTF_8)
         );
         String earlyContractResponse = mockMvc.perform(multipart("/api/outbound-orders/{id}/contract", orderId)
                         .file(earlyContract)

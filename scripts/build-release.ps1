@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidatePattern('^[0-9A-Za-z][0-9A-Za-z._-]*$')]
-    [string]$Version = (Get-Date -Format 'yyyyMMdd-HHmmss'),
+    [string]$Version,
 
     [ValidatePattern('^[a-z0-9._/-]+$')]
     [string]$ImageName = 'forklift-erp',
@@ -45,6 +44,24 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Docker CLI was not found. Install/start Docker Desktop before building an image.'
 }
 
+[xml]$pom = Get-Content -LiteralPath 'pom.xml' -Raw
+$namespace = [System.Xml.XmlNamespaceManager]::new($pom.NameTable)
+$namespace.AddNamespace('m', 'http://maven.apache.org/POM/4.0.0')
+$versionNode = $pom.SelectSingleNode('/m:project/m:version', $namespace)
+if (-not $versionNode -or [string]::IsNullOrWhiteSpace($versionNode.InnerText)) {
+    throw 'Project version is missing from pom.xml.'
+}
+$projectVersion = $versionNode.InnerText.Trim()
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $Version = $projectVersion
+}
+if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._-]*$') {
+    throw "Invalid release version: $Version"
+}
+if ($Version -ne $projectVersion) {
+    throw "Release version '$Version' must match pom.xml version '$projectVersion'."
+}
+
 $mavenArguments = @('clean', 'package')
 if ($SkipTests) {
     $mavenArguments += '-DskipTests'
@@ -71,6 +88,8 @@ $imageReference = "${ImageName}:${Version}"
 $buildArguments = @(
     'buildx', 'build',
     '--platform', $Platform,
+    '--build-arg', "APP_VERSION=$Version",
+    '--build-arg', "VCS_REF=$(git rev-parse --short=12 HEAD)",
     '--tag', $imageReference,
     '--tag', "${ImageName}:latest"
 )
@@ -94,9 +113,19 @@ $releaseEnvLines = Get-Content -LiteralPath $releaseEnvExample | ForEach-Object 
 Set-Content -LiteralPath $releaseEnvExample -Value $releaseEnvLines -Encoding ascii
 Copy-Item -LiteralPath 'deploy/synology/README.md' -Destination $releaseDirectory -Force
 Copy-Item -LiteralPath 'deploy/synology/update.sh' -Destination $releaseDirectory -Force
+Copy-Item -LiteralPath 'deploy/synology/backup.sh' -Destination $releaseDirectory -Force
+Copy-Item -LiteralPath 'deploy/synology/restore-drill.sh' -Destination $releaseDirectory -Force
 Copy-Item -LiteralPath $applicationJar.FullName -Destination (Join-Path $releaseDirectory $applicationJar.Name) -Force
+$sbom = 'target/classes/META-INF/sbom/application.cdx.json'
+if (-not (Test-Path -LiteralPath $sbom)) {
+    throw 'CycloneDX SBOM was not generated.'
+}
+Copy-Item -LiteralPath $sbom -Destination (Join-Path $releaseDirectory 'application.cdx.json') -Force
 
-$checksumFiles = @((Join-Path $releaseDirectory $applicationJar.Name))
+$checksumFiles = @(
+    (Join-Path $releaseDirectory $applicationJar.Name),
+    (Join-Path $releaseDirectory 'application.cdx.json')
+)
 if (-not $Push -and -not $NoExport) {
     $imageArchive = Join-Path $releaseDirectory "forklift-erp-${Version}-${safePlatform}.tar"
     Invoke-Checked -Command 'docker' -Arguments @('save', '--output', $imageArchive, $imageReference)

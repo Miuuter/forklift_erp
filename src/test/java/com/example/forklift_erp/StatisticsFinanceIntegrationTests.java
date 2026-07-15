@@ -1,27 +1,36 @@
 package com.example.forklift_erp;
 
-import com.example.forklift_erp.constant.ModificationWorkOrderStatus;
+import com.example.forklift_erp.constant.FinancialEventType;
 import com.example.forklift_erp.constant.MachineStockStatus;
+import com.example.forklift_erp.constant.ModificationWorkOrderStatus;
 import com.example.forklift_erp.constant.PartChangeAction;
 import com.example.forklift_erp.constant.RentalStatus;
 import com.example.forklift_erp.constant.RepairStatus;
 import com.example.forklift_erp.dto.StatisticsDashboardVO;
+import com.example.forklift_erp.entity.FinancialEvent;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.ModificationWorkOrder;
 import com.example.forklift_erp.entity.ModificationWorkOrderLine;
+import com.example.forklift_erp.entity.RentalBill;
 import com.example.forklift_erp.entity.RentalRecord;
 import com.example.forklift_erp.entity.RepairRecord;
+import com.example.forklift_erp.entity.StockMovement;
+import com.example.forklift_erp.entity.StockMovementLine;
+import com.example.forklift_erp.repository.FinancialEventRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
+import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RentalRecordRepository;
 import com.example.forklift_erp.repository.RepairRecordRepository;
+import com.example.forklift_erp.repository.StockMovementLineRepository;
+import com.example.forklift_erp.repository.StockMovementRepository;
+import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.StatisticsService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -41,9 +50,6 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
     private StatisticsService statisticsService;
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
-
-    @Autowired
     private RepairRecordRepository repairRecordRepository;
 
     @Autowired
@@ -58,14 +64,36 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
     @Autowired
     private MachineInventoryRepository machineInventoryRepository;
 
+    @Autowired
+    private StockMovementRepository stockMovementRepository;
+
+    @Autowired
+    private StockMovementLineRepository stockMovementLineRepository;
+
+    @Autowired
+    private FinancialEventRepository financialEventRepository;
+
+    @Autowired
+    private RentalBillRepository rentalBillRepository;
+
     private final List<Long> repairIds = new ArrayList<>();
     private final List<Long> rentalIds = new ArrayList<>();
+    private final List<Long> rentalBillIds = new ArrayList<>();
     private final List<Long> workOrderIds = new ArrayList<>();
     private final List<Long> machineIds = new ArrayList<>();
+    private final List<Long> stockMovementIds = new ArrayList<>();
+    private final List<Long> financialEventIds = new ArrayList<>();
 
     @AfterEach
     void cleanFinanceRows() {
-        jdbcTemplate.update("delete from stock_operation_log where resource_code like ?", STOCK_CODE_PREFIX + "%");
+        rentalBillRepository.deleteAllByIdInBatch(rentalBillIds);
+        rentalBillIds.clear();
+
+        financialEventRepository.deleteAllByIdInBatch(financialEventIds);
+        financialEventIds.clear();
+
+        stockMovementRepository.deleteAllByIdInBatch(stockMovementIds);
+        stockMovementIds.clear();
 
         for (Long workOrderId : workOrderIds.reversed()) {
             modificationWorkOrderLineRepository.findByWorkOrderIdOrderByIdAsc(workOrderId)
@@ -93,7 +121,7 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
     @Test
     void financeDashboardCombinesStockRepairRentalAndModificationWithExpectedTotals() {
         Long machineId = createMachine();
-        createStockRows();
+        createStockRows(machineId);
         createCompletedRepair();
         createReturnedRentalForFullMonth(machineId);
         createCompletedModificationWorkOrder(machineId);
@@ -105,47 +133,71 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         assertFinancialTotals(findPeriod(dashboard.getYearlyFinance(), String.valueOf(FINANCE_YEAR)));
     }
 
-    private void createStockRows() {
-        insertStockLog("MACHINE", "INBOUND", STOCK_CODE_PREFIX + "M-IN", 2, null, null,
-                "10000.00", "0.00", LocalDateTime.of(FINANCE_YEAR, 1, 5, 9, 0));
-        insertStockLog("MACHINE", "OUTBOUND", STOCK_CODE_PREFIX + "M-OUT", 1, null, null,
-                "10000.00", "16000.00", LocalDateTime.of(FINANCE_YEAR, 1, 10, 10, 0));
-        insertStockLog("PART", "ADJUST", STOCK_CODE_PREFIX + "P-ADJ-IN", 3, 10, 13,
-                "50.00", "80.00", LocalDateTime.of(FINANCE_YEAR, 1, 12, 11, 0));
-        insertStockLog("PART", "ADJUST", STOCK_CODE_PREFIX + "P-ADJ-OUT", 4, 13, 9,
-                "50.00", "80.00", LocalDateTime.of(FINANCE_YEAR, 1, 13, 11, 0));
+    private void createStockRows(Long machineId) {
+        saveStockMovement("MACHINE", machineId, "INBOUND", STOCK_CODE_PREFIX + "M-IN",
+                2, 0, 2, "10000.00", "0.00", "20000.00", "0.00",
+                LocalDate.of(FINANCE_YEAR, 1, 5));
+        Long outboundMovementId = saveStockMovement(
+                "MACHINE", machineId, "OUTBOUND", STOCK_CODE_PREFIX + "M-OUT",
+                -1, 2, 1, "10000.00", "16000.00", "10000.00", "16000.00",
+                LocalDate.of(FINANCE_YEAR, 1, 10)
+        );
+        long partResourceId = 90_000_000L + machineId;
+        saveStockMovement("PART", partResourceId, "INBOUND", STOCK_CODE_PREFIX + "P-IN",
+                3, 10, 13, "50.00", "80.00", "150.00", "240.00",
+                LocalDate.of(FINANCE_YEAR, 1, 12));
+        saveStockMovement("PART", partResourceId, "OUTBOUND", STOCK_CODE_PREFIX + "P-OUT",
+                -4, 13, 9, "50.00", "80.00", "200.00", "320.00",
+                LocalDate.of(FINANCE_YEAR, 1, 13));
+
+        postFinancialEvent(FinancialEventType.REVENUE, "16320.00",
+                FinancialEventService.SOURCE_OUTBOUND_ORDER, outboundMovementId);
+        postFinancialEvent(FinancialEventType.COST_OF_GOODS_SOLD, "10200.00",
+                FinancialEventService.SOURCE_OUTBOUND_ORDER, outboundMovementId);
     }
 
-    private void insertStockLog(
+    private Long saveStockMovement(
             String resourceType,
-            String operationType,
+            Long resourceId,
+            String movementType,
             String resourceCode,
-            Integer quantity,
+            Integer quantityDelta,
             Integer beforeQuantity,
             Integer afterQuantity,
             String unitCost,
             String unitRevenue,
-            LocalDateTime createdAt
+            String costAmount,
+            String lineAmount,
+            LocalDate businessDate
     ) {
-        jdbcTemplate.update("""
-                        insert into stock_operation_log
-                        (resource_type, operation_type, resource_code, resource_name, quantity,
-                         before_quantity, after_quantity, unit_cost, unit_revenue, operator, remark, created_at)
-                        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                resourceType,
-                operationType,
-                resourceCode,
-                resourceCode,
-                quantity,
-                beforeQuantity,
-                afterQuantity,
-                new BigDecimal(unitCost),
-                new BigDecimal(unitRevenue),
-                "finance-test",
-                "finance integration test",
-                createdAt
-        );
+        StockMovement movement = new StockMovement();
+        movement.setMovementNo(STOCK_CODE_PREFIX + unique("movement"));
+        movement.setMovementType(movementType);
+        movement.setResourceType(resourceType);
+        movement.setSourceType("STATISTICS_TEST");
+        movement.setSourceId(resourceId);
+        movement.setBusinessDate(businessDate);
+        movement.setBusinessType("STATISTICS_TEST");
+        movement.setOperator("finance-test");
+        StockMovement savedMovement = stockMovementRepository.save(movement);
+        stockMovementIds.add(savedMovement.getId());
+
+        StockMovementLine line = new StockMovementLine();
+        line.setMovementId(savedMovement.getId());
+        line.setResourceType(resourceType);
+        line.setResourceId(resourceId);
+        line.setResourceCode(resourceCode);
+        line.setResourceName(resourceCode);
+        line.setWarehouseId(defaultWarehouseId());
+        line.setQuantityDelta(quantityDelta);
+        line.setBeforeQuantity(beforeQuantity);
+        line.setAfterQuantity(afterQuantity);
+        line.setUnitCost(new BigDecimal(unitCost));
+        line.setUnitRevenue(new BigDecimal(unitRevenue));
+        line.setCostAmount(new BigDecimal(costAmount));
+        line.setLineAmount(new BigDecimal(lineAmount));
+        stockMovementLineRepository.save(line);
+        return savedMovement.getId();
     }
 
     private void createCompletedRepair() {
@@ -161,7 +213,16 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         repair.setPartsCost(new BigDecimal("80.00"));
         repair.setTotalFee(new BigDecimal("850.00"));
         repair.setStatus(RepairStatus.COMPLETED.code());
-        repairIds.add(repairRecordRepository.save(repair).getId());
+        RepairRecord savedRepair = repairRecordRepository.save(repair);
+        repairIds.add(savedRepair.getId());
+        postFinancialEvent(FinancialEventType.ACCOUNTS_RECEIVABLE, "850.00",
+                FinancialEventService.SOURCE_REPAIR, savedRepair.getId());
+        postFinancialEvent(FinancialEventType.REVENUE, "650.00",
+                FinancialEventService.SOURCE_REPAIR, savedRepair.getId());
+        postFinancialEvent(FinancialEventType.OPERATING_COST, "200.00",
+                FinancialEventService.SOURCE_REPAIR, savedRepair.getId());
+        postFinancialEvent(FinancialEventType.COST_OF_GOODS_SOLD, "80.00",
+                FinancialEventService.SOURCE_REPAIR, savedRepair.getId());
     }
 
     private Long createMachine() {
@@ -187,7 +248,27 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         rental.setStartDate(LocalDate.of(FINANCE_YEAR, 1, 1));
         rental.setEndDate(LocalDate.of(FINANCE_YEAR, 1, 31));
         rental.setStatus(RentalStatus.RETURNED.code());
-        rentalIds.add(rentalRecordRepository.save(rental).getId());
+        RentalRecord savedRental = rentalRecordRepository.save(rental);
+        rentalIds.add(savedRental.getId());
+
+        RentalBill bill = new RentalBill();
+        bill.setRentalId(savedRental.getId());
+        bill.setBillPeriod(LocalDate.of(FINANCE_YEAR, 1, 1));
+        bill.setBusinessDate(LocalDate.of(FINANCE_YEAR, 1, 31));
+        bill.setAmount(new BigDecimal("3100.00"));
+        RentalBill savedBill = rentalBillRepository.save(bill);
+        rentalBillIds.add(savedBill.getId());
+
+        FinancialEvent receivable = postFinancialEvent(
+                FinancialEventType.ACCOUNTS_RECEIVABLE,
+                "3100.00",
+                FinancialEventService.SOURCE_RENTAL_BILL,
+                savedBill.getId()
+        );
+        postFinancialEvent(FinancialEventType.REVENUE, "3100.00",
+                FinancialEventService.SOURCE_RENTAL_BILL, savedBill.getId());
+        savedBill.setFinancialEventId(receivable.getId());
+        rentalBillRepository.save(savedBill);
     }
 
     private void createCompletedModificationWorkOrder(Long machineId) {
@@ -202,6 +283,10 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         saveModificationLine(savedOrder.getId(), PartChangeAction.DISCOUNT.code(), "-120.00");
         saveModificationLine(savedOrder.getId(), PartChangeAction.DISCOUNT.code(), "45.00");
         saveModificationLine(savedOrder.getId(), PartChangeAction.STOCK_IN.code(), "-999.00");
+        postFinancialEvent(FinancialEventType.REVENUE, "120.00",
+                "MODIFICATION_WORK_ORDER", savedOrder.getId());
+        postFinancialEvent(FinancialEventType.OPERATING_COST, "45.00",
+                "MODIFICATION_WORK_ORDER", savedOrder.getId());
     }
 
     private void saveModificationLine(Long workOrderId, String oldPartAction, String priceDifference) {
@@ -212,6 +297,26 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         line.setOldPartAction(oldPartAction);
         line.setPriceDifference(new BigDecimal(priceDifference));
         modificationWorkOrderLineRepository.save(line);
+    }
+
+    private FinancialEvent postFinancialEvent(
+            String eventType,
+            String amount,
+            String sourceType,
+            Long sourceId
+    ) {
+        FinancialEvent event = new FinancialEvent();
+        event.setEventNo(STOCK_CODE_PREFIX + unique("event"));
+        event.setEventType(eventType);
+        event.setAmount(new BigDecimal(amount));
+        event.setBusinessDate(LocalDate.of(FINANCE_YEAR, 1, 31));
+        event.setSourceType(sourceType);
+        event.setSourceId(sourceId);
+        event.setIdempotencyKey(STOCK_CODE_PREFIX + unique("event-key"));
+        event.setCreatedBy("finance-test");
+        FinancialEvent savedEvent = financialEventRepository.save(event);
+        financialEventIds.add(savedEvent.getId());
+        return savedEvent;
     }
 
     private void assertFinancialTotals(StatisticsDashboardVO.FinancialRow row) {

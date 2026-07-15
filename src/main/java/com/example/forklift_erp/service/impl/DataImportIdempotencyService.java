@@ -1,6 +1,5 @@
 package com.example.forklift_erp.service.impl;
 
-import com.example.forklift_erp.entity.DataImportRow;
 import com.example.forklift_erp.repository.DataImportRowRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -24,22 +23,16 @@ class DataImportIdempotencyService {
                 ? context.fileFingerprint() + ":" + normalizedKey
                 : normalizedKey;
         String idempotencyKey = context.fileFingerprint() + ":" + normalize(sheetName) + ":" + rowNumber;
-        if (dataImportRowRepository.findByIdempotencyKey(idempotencyKey).isPresent()
-                || dataImportRowRepository.existsByImportTypeAndImportModeAndBusinessKey(
-                context.importType(), context.importMode(), globalBusinessKey)) {
-            return false;
-        }
-        DataImportRow row = new DataImportRow();
-        row.setImportJobId(context.importJobId());
-        row.setImportType(context.importType());
-        row.setImportMode(context.importMode());
-        row.setFileFingerprint(context.fileFingerprint());
-        row.setSheetName(normalize(sheetName));
-        row.setRowNumber(rowNumber);
-        row.setBusinessKey(globalBusinessKey);
-        row.setIdempotencyKey(idempotencyKey);
-        dataImportRowRepository.save(row);
-        return true;
+        return dataImportRowRepository.reserve(
+                context.importJobId(),
+                context.importType(),
+                context.importMode(),
+                context.fileFingerprint(),
+                normalize(sheetName),
+                rowNumber,
+                globalBusinessKey,
+                idempotencyKey
+        ) == 1;
     }
 
     private String normalize(String value) {

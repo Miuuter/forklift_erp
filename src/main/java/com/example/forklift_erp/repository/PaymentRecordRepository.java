@@ -11,6 +11,7 @@ import java.util.Optional;
 
 public interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Optional<PaymentRecord> findByIdempotencyKey(String idempotencyKey);
+    Optional<PaymentRecord> findByRequestId(String requestId);
     Optional<PaymentRecord> findByReversalOfPaymentId(Long reversalOfPaymentId);
 
     List<PaymentRecord> findBySourceTypeAndSourceIdOrderByPaymentDateAscIdAsc(String sourceType, Long sourceId);

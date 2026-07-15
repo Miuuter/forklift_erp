@@ -6,6 +6,8 @@ import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 public class PartInventoryVO {
@@ -21,6 +23,8 @@ public class PartInventoryVO {
     private Long sourceMachineId;
     private Long warehouseId;
     private Integer quantity;
+    private Integer reorderPoint;
+    private List<PartWarehouseBalanceVO> warehouseBalances = new ArrayList<>();
     private String unit;
     private BigDecimal purchasePrice;
     private BigDecimal landedUnitCost;
@@ -46,6 +50,7 @@ public class PartInventoryVO {
         vo.setSourceMachineId(entity.getSourceMachineId());
         vo.setWarehouseId(entity.getWarehouseId());
         vo.setQuantity(entity.getQuantity());
+        vo.setReorderPoint(entity.getReorderPoint());
         vo.setUnit(entity.getUnit());
         vo.setPurchasePrice(entity.getPurchasePrice());
         vo.setLandedUnitCost(entity.getLandedUnitCost());

@@ -55,6 +55,12 @@ public class RentalRecordController {
         return Result.success(service.findBills(id));
     }
 
+    @PostMapping("/{id}/bills/refresh")
+    @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)
+    public Result<List<RentalBillVO>> refreshBills(@PathVariable Long id) {
+        return Result.success("租赁账单已刷新", service.refreshBills(id));
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)

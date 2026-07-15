@@ -25,6 +25,7 @@ import com.example.forklift_erp.service.InventoryAdjustmentAccountingService;
 import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.PartInventoryService;
+import com.example.forklift_erp.service.PartInventoryViewAssembler;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
 import com.example.forklift_erp.service.StockLedgerService;
 import com.example.forklift_erp.service.StockLotService;
@@ -101,6 +102,12 @@ public class PartInventoryServiceImpl implements PartInventoryService {
     @Autowired
     private ResourceAttachmentRepository resourceAttachmentRepository;
 
+    @Autowired
+    private PartInventoryViewAssembler partInventoryViewAssembler;
+
+    @Autowired
+    private InventoryMasterDeletionGuard deletionGuard;
+
     @Override
     public List<PartInventory> findAll() {
         if (SecurityUtils.isAdminOrSuperAdmin()) {
@@ -119,15 +126,24 @@ public class PartInventoryServiceImpl implements PartInventoryService {
                 SearchKeywordSupport.fullTextBoolean(keyword),
                 SecurityUtils.isAdminOrSuperAdmin(),
                 stock == null || stock.isBlank() ? null : stock.trim(),
-                5,
                 ListPageSupport.pageRequest(page, size)
         );
         return PageResult.of(
-                result.getContent().stream().map(PartInventoryVO::fromEntity).toList(),
+                partInventoryViewAssembler.toVOs(result.getContent()),
                 normalizedPage,
                 normalizedSize,
                 result.getTotalElements()
         );
+    }
+
+    @Override
+    public PartInventoryVO toVO(PartInventory part) {
+        return partInventoryViewAssembler.toVO(part);
+    }
+
+    @Override
+    public List<PartInventoryVO> toVOs(List<PartInventory> parts) {
+        return partInventoryViewAssembler.toVOs(parts);
     }
 
     @Override
@@ -191,7 +207,11 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         if (part.getQuantity() == null) {
             part.setQuantity(0);
         }
+        if (part.getReorderPoint() == null) {
+            part.setReorderPoint(5);
+        }
         InventoryQuantities.requireNonNegative(part.getQuantity(), "Part quantity cannot be negative");
+        InventoryQuantities.requireNonNegative(part.getReorderPoint(), "Part reorder point cannot be negative");
         if (part.getWarehouseId() == null) {
             part.setWarehouseId(stockLedgerService.resolveWarehouseId(null));
         }
@@ -225,7 +245,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         }
         operationAuditService.record("Part", "CREATE", "PART", saved.getId(),
                 saved.getPartCode(), saved.getPartName(), "Create part", null, saved.getRemarks());
-        return PartInventoryVO.fromEntity(saved);
+        return toVO(saved);
     }
 
     @Override
@@ -256,7 +276,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         PartInventory saved = save(part);
         operationAuditService.record("Part", "UPDATE", "PART", saved.getId(),
                 saved.getPartCode(), saved.getPartName(), "Update part", null, saved.getRemarks());
-        return PartInventoryVO.fromEntity(saved);
+        return toVO(saved);
     }
 
     @Override
@@ -319,7 +339,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
                 dto.getOperator(),
                 valuationRemark
         );
-        return PartInventoryVO.fromEntity(saved);
+        return toVO(saved);
     }
 
     @Override
@@ -342,48 +362,10 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         }
         PartInventory existing = existingOpt.get();
         visibilityPolicy.ensureWritable(existing.getIsLocked(), "Part is locked and cannot be deleted");
-        ensureNoHistoricalReferences(id);
+        deletionGuard.ensurePartDeletable(id);
         stockLedgerService.deleteEmptyBalances(StockLedgerService.RESOURCE_PART, id);
         partRepository.deleteById(id);
         log.info("Delete part: id={}", id);
-    }
-
-    private void ensureNoHistoricalReferences(Long id) {
-        if (purchaseOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_PART, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has purchase records and cannot be deleted");
-        }
-        if (outboundOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_PART, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has outbound records and cannot be deleted");
-        }
-        if (modificationWorkOrderLineRepository.existsByNewPartId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has modification usage records and cannot be deleted");
-        }
-        if (repairPartUsageRepository.existsByPartId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has repair usage records and cannot be deleted");
-        }
-        if (configReplaceLogRepository.existsByNewPartId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has configuration replacement records and cannot be deleted");
-        }
-        if (stocktakingRecordRepository.existsByResourceTypeAndResourceId(
-                StockLedgerService.RESOURCE_PART, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has stocktaking records and cannot be deleted");
-        }
-        if (resourceAttachmentRepository.existsByResourceTypeAndResourceIdAndDeletedFalse(
-                StockLedgerService.RESOURCE_PART, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has active attachments and cannot be deleted");
-        }
-        if (stockLotRepository.existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
-                StockLedgerService.RESOURCE_PART, id, 0)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Part has remaining FIFO inventory and cannot be deleted");
-        }
     }
 
     @Override
@@ -484,7 +466,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         part.setInboundDate(businessDate.atStartOfDay());
         collaborationService.stampWrite(part);
         partRepository.saveAndFlush(part);
-        return PartInventoryVO.fromEntity(part);
+        return toVO(part);
     }
 
     @Override
@@ -526,7 +508,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         part.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, part.getId()));
         collaborationService.stampWrite(part);
         partRepository.saveAndFlush(part);
-        return PartInventoryVO.fromEntity(part);
+        return toVO(part);
     }
 
     private StockOperationLog saveStockLog(PartInventory part, String operationType, Integer quantity,

@@ -101,6 +101,10 @@ public class ResourceAttachmentStorage {
         fileStorageSupport.deleteQuietly(path, message);
     }
 
+    boolean isPreviewable(String contentType, String originalName) {
+        return fileStorageSupport.isPreviewable(contentType, originalName);
+    }
+
     private Path storageRoot(String storageScope) {
         return switch (storageScope) {
             case "LEGACY_ORDER_INVOICE" -> fileStorageSupport.storageRoot(invoiceStorageDir);

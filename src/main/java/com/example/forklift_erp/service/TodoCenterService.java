@@ -85,8 +85,8 @@ public class TodoCenterService {
         dashboard.setRentalDueCount(toSafeInt(rentalRepository.countDueSoonTodos(RentalStatus.ACTIVE.code(), rentalDueCutoff)));
         List<RentalRecord> dueRentals = rentalRepository.findDueSoonTodos(RentalStatus.ACTIVE.code(), rentalDueCutoff, queuePage());
 
-        dashboard.setLowStockCount(toSafeInt(partRepository.countLowStockTodos(LOW_PART_THRESHOLD, includeLocked)));
-        List<PartInventory> lowStockParts = partRepository.findLowStockTodos(LOW_PART_THRESHOLD, includeLocked, queuePage());
+        dashboard.setLowStockCount(toSafeInt(partRepository.countLowStockTodos(includeLocked)));
+        List<PartInventory> lowStockParts = partRepository.findLowStockTodos(includeLocked, queuePage());
 
         dashboard.setInStockVehicleCount(toSafeInt(machineRepository.countInStockVehicleTodos(includeLocked)));
         dashboard.setLongIdleVehicleCount(toSafeInt(machineRepository.countLongIdleVehicleTodos(
@@ -282,7 +282,8 @@ public class TodoCenterService {
                 "PART_LOW_STOCK",
                 "低库存",
                 safe(part.getPartCode(), "配件 " + part.getId()),
-                joinNonBlank(" / ", part.getPartName(), "库存 " + safeNumber(part.getQuantity()) + unit(part.getUnit()), "阈值 " + LOW_PART_THRESHOLD),
+                joinNonBlank(" / ", part.getPartName(), "库存 " + safeNumber(part.getQuantity()) + unit(part.getUnit()),
+                        "阈值 " + (part.getReorderPoint() == null ? LOW_PART_THRESHOLD : part.getReorderPoint())),
                 "danger",
                 "PART",
                 part.getId(),

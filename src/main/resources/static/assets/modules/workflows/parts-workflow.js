@@ -38,6 +38,7 @@ export function createPartsWorkflow(deps) {
           { label: "品牌", key: "partBrand" },
           { label: "分类", key: "partCategory" },
           { label: "数量", html: true, render: row => stockBadge(row.quantity, row.unit) },
+          { label: "补货点", key: "reorderPoint" },
           { label: "销售价", key: "salePrice", formatter: money },
           { label: "来源", key: "source" }
         ], rows, listTableOptions("part", "parts")))}

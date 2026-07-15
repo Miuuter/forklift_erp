@@ -5,9 +5,11 @@ import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.constant.RepairStatus;
 import com.example.forklift_erp.dto.RepairRecordCreateDTO;
 import com.example.forklift_erp.dto.RepairRecordVO;
+import com.example.forklift_erp.dto.VersionedBatchRequest;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.security.PermissionCodes;
 import com.example.forklift_erp.service.RepairRecordService;
+import com.example.forklift_erp.service.BatchBusinessOperationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
@@ -36,6 +38,9 @@ public class RepairRecordController {
 
     @Autowired
     private RepairRecordService repairService;
+
+    @Autowired
+    private BatchBusinessOperationService batchBusinessOperationService;
 
     @Data
     public static class StatusUpdateRequest {
@@ -99,6 +104,15 @@ public class RepairRecordController {
     @PreAuthorize(PermissionCodes.HAS_REPAIR_WRITE)
     public Result<RepairRecordVO> updateStatus(@PathVariable Long id, @Valid @RequestBody StatusUpdateRequest request) {
         return Result.success("Repair status updated", repairService.updateStatus(id, request.getStatus(), request.getVersion()));
+    }
+
+    @PostMapping("/batch-complete")
+    @PreAuthorize(PermissionCodes.HAS_REPAIR_WRITE)
+    public Result<java.util.List<RepairRecordVO>> batchComplete(
+            @Valid @RequestBody VersionedBatchRequest request
+    ) {
+        return Result.success("Repairs completed",
+                batchBusinessOperationService.completeRepairs(request));
     }
 
     @DeleteMapping("/{id}")

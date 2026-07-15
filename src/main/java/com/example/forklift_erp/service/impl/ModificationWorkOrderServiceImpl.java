@@ -5,7 +5,6 @@ import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.constant.MachineStockStatus;
 import com.example.forklift_erp.constant.ModificationWorkOrderStatus;
 import com.example.forklift_erp.constant.PartChangeAction;
-import com.example.forklift_erp.constant.FinancialEventType;
 import com.example.forklift_erp.dto.ModificationWorkOrderActionDTO;
 import com.example.forklift_erp.dto.ModificationWorkOrderCreateDTO;
 import com.example.forklift_erp.dto.ModificationWorkOrderVO;
@@ -17,7 +16,6 @@ import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.ModificationWorkOrder;
 import com.example.forklift_erp.entity.ModificationWorkOrderLine;
 import com.example.forklift_erp.entity.PartInventory;
-import com.example.forklift_erp.entity.StockLotConsumption;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.MachineConfigRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
@@ -26,10 +24,9 @@ import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.ConfigItemRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
-import com.example.forklift_erp.repository.StockLotConsumptionRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.ConfigReplaceService;
-import com.example.forklift_erp.service.FinancialEventService;
+import com.example.forklift_erp.service.ModificationAccountingService;
 import com.example.forklift_erp.service.ModificationWorkOrderService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
@@ -95,10 +92,7 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
     private StockLotService stockLotService;
 
     @Autowired
-    private StockLotConsumptionRepository stockLotConsumptionRepository;
-
-    @Autowired
-    private FinancialEventService financialEventService;
+    private ModificationAccountingService modificationAccountingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -274,8 +268,8 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             replaceRequest.setStockMovementSourceLineId(line.getId());
             ConfigReplaceLog replaceLog = configReplaceService.performPartReplace(replaceRequest);
             line.setReplaceLogId(replaceLog.getId());
-            line.setCostAmount(fifoCostForLine(workOrder.getId(), line.getId()));
-            BigDecimal capitalizationAmount = capitalizationAmount(line);
+            line.setCostAmount(modificationAccountingService.fifoCostForLine(workOrder.getId(), line.getId()));
+            BigDecimal capitalizationAmount = modificationAccountingService.capitalizationAmount(line);
             if ("PRE_SALE".equalsIgnoreCase(workOrder.getWorkOrderType())
                     && capitalizationAmount.signum() != 0) {
                 stockLotService.capitalizeSerializedAssetCost(
@@ -303,13 +297,13 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             workOrder.setRemark(joinRemark(workOrder.getRemark(), actionRemark));
         }
         ModificationWorkOrder savedOrder = workOrderRepository.save(workOrder);
-        postModificationFinancial(savedOrder, lines);
+        modificationAccountingService.postFinancial(savedOrder, lines);
 
         MachineInventory completedMachine = machineRepository.findByIdForUpdate(workOrder.getMachineId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
         if ("PRE_SALE".equalsIgnoreCase(savedOrder.getWorkOrderType())) {
             BigDecimal capitalizedCost = lines.stream()
-                    .map(this::capitalizationAmount)
+                    .map(modificationAccountingService::capitalizationAmount)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
             if (capitalizedCost.signum() != 0) {
                 BigDecimal updatedLandedCost =
@@ -529,76 +523,6 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
                 MOVEMENT_SOURCE_TYPE, workOrder.getId());
     }
 
-    private void postModificationFinancial(ModificationWorkOrder order, List<ModificationWorkOrderLine> lines) {
-        if (Boolean.TRUE.equals(order.getFinancialPosted())) {
-            return;
-        }
-        BigDecimal charge = lines.stream()
-                .map(ModificationWorkOrderLine::getChargeAmount)
-                .map(this::amountOrZero)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal cost = lines.stream()
-                .map(ModificationWorkOrderLine::getCostAmount)
-                .map(this::amountOrZero)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal returnedPartValue = lines.stream()
-                .map(this::returnedPartValue)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        String sourceType = "MODIFICATION_WORK_ORDER";
-        LocalDate date = order.getBusinessDate() == null ? LocalDate.now() : order.getBusinessDate();
-        if ("AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()) && charge.signum() > 0) {
-            financialEventService.post(FinancialEventType.ACCOUNTS_RECEIVABLE, charge, date,
-                    sourceType, order.getId(), null, "CUSTOMER", null, order.getCustomerName(),
-                    "After-sale modification receivable", "MODIFICATION:" + order.getId() + ":AR");
-            financialEventService.post(FinancialEventType.REVENUE, charge, date,
-                    sourceType, order.getId(), null, "CUSTOMER", null, order.getCustomerName(),
-                    "After-sale modification revenue", "MODIFICATION:" + order.getId() + ":REV");
-        }
-        if ("AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()) && cost.signum() > 0) {
-            financialEventService.post(
-                    FinancialEventType.OPERATING_COST,
-                    cost,
-                    date,
-                    sourceType,
-                    order.getId(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    "Modification FIFO cost",
-                    "MODIFICATION:" + order.getId() + ":COST"
-            );
-        }
-        if ("AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()) && returnedPartValue.signum() > 0) {
-            financialEventService.post(
-                    FinancialEventType.INVENTORY_GAIN,
-                    returnedPartValue,
-                    date,
-                    sourceType,
-                    order.getId(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    "Recovered old-part inventory value",
-                    "MODIFICATION:" + order.getId() + ":OLD-PART-RECOVERY"
-            );
-        }
-        order.setFinancialPosted(true);
-        workOrderRepository.save(order);
-    }
-
-    private BigDecimal fifoCostForLine(Long workOrderId, Long workOrderLineId) {
-        return stockLotConsumptionRepository
-                .findBySourceTypeAndSourceIdAndSourceLineIdOrderByIdAsc(
-                        MOVEMENT_SOURCE_TYPE, workOrderId, workOrderLineId)
-                .stream()
-                .filter(consumption -> consumption.getReversalOfConsumptionId() == null)
-                .map(StockLotConsumption::getTotalCost)
-                .map(this::amountOrZero)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
     private void restoreMachineStatusIfNoActiveOrder(Long machineId, Long canceledOrderId) {
         List<ModificationWorkOrder> machineOrders =
                 workOrderRepository.findByMachineIdOrderByCreatedAtDesc(machineId);
@@ -657,30 +581,6 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
                     "Modification discount cannot exceed the line charge");
         }
         return gross.subtract(discount);
-    }
-
-    private BigDecimal capitalizationAmount(ModificationWorkOrderLine line) {
-        return amountOrZero(line.getCostAmount()).subtract(returnedPartValue(line));
-    }
-
-    private BigDecimal returnedPartValue(ModificationWorkOrderLine line) {
-        if (!oldPartReturnsToInventory(line)) {
-            return BigDecimal.ZERO;
-        }
-        int quantity = line.getQuantity() == null || line.getQuantity() < 1 ? 1 : line.getQuantity();
-        BigDecimal unitCost = amountOrZero(line.getOldPartUnitCost());
-        return unitCost.signum() < 0 ? BigDecimal.ZERO : unitCost.multiply(BigDecimal.valueOf(quantity));
-    }
-
-    private boolean oldPartReturnsToInventory(ModificationWorkOrderLine line) {
-        String disposition = blankToNull(line.getOldPartDisposition());
-        if (disposition != null) {
-            disposition = disposition.toUpperCase(Locale.ROOT);
-            if ("SCRAP".equals(disposition) || "DISCARD".equals(disposition) || "NONE".equals(disposition)) {
-                return false;
-            }
-        }
-        return PartChangeAction.STOCK_IN.code().equalsIgnoreCase(line.getOldPartAction());
     }
 
     private BigDecimal amountOrZero(BigDecimal value) {

@@ -1,3 +1,4 @@
+import "./modules/client-reset-query.js";
 import { clearSession, createApiClient, readStoredToken, readStoredUser, saveSession } from "./modules/session.js";
 import { endpoints } from "./modules/routes.js";
 import { resetPage } from "./modules/paging.js";
@@ -35,6 +36,11 @@ import { createConfigWorkflow } from "./modules/workflows/configs-workflow.js";
 import { createOperationsWorkflow } from "./modules/workflows/operations-workflow.js";
 import { createDownloadActions } from "./modules/downloads.js";
 import { createVehicleDetailLoader } from "./modules/vehicle-detail-loader.js";
+import { createRequestId } from "./modules/request-id.js";
+import { versionedBatchPayload } from "./modules/batch-operations.js";
+import { createAccessControl, normalizeUser } from "./modules/access-control.js";
+import { createFilterOptions } from "./modules/filter-options.js";
+import { createEntityOptions } from "./modules/entity-options.js";
 
 const LIST_STATE_STORAGE_KEY = "forklift-erp:list-state:v1";
 const DETAIL_DRAWER_TRANSITION_MS = 240;
@@ -48,6 +54,19 @@ const state = createInitialState({
 restorePersistedListState();
 
 const api = createApiClient(() => state.token);
+const { hasRole, hasAnyRole, hasPermission, hasAnyPermission, canAccessTab, canWriteEntity } = createAccessControl({ state });
+const { configItemOptions, vehicleConfigItemOptions, vehicleConfigValueOptions, compareConfigItems, configValueOptionsForItem, powerTypeOptions, supplierFilterOptions, stockFilterOptions, filterPartRows, filterOutboundOrderRows, filterRentalRows, filterRepairRows, rentalDaysUntilEnd, dateOnlyTime, vehicleCategoryOptions, configSubCategoryOptions, configPartCategoryOptions, configValueOptions, configValuesWithItems, configItemLabel, configPartCategory, uniqueOptions, normalizePowerType, isManualForklift, vehicleModelKey } = createFilterOptions({
+  state, effectiveFieldValue, normalizeText,
+  isInvoiceUploadReady: (...args) => isInvoiceUploadReady(...args),
+  isContractUploadReady: (...args) => isContractUploadReady(...args)
+});
+const { decodeVehicleModelKey, vehicleModelLabel, vehicleNumberLabel, vehiclePartDefaultsForMachine, vehiclePartInstallDefaultsForMachine, vehicleModelGroups, vehiclesForModelKey, prepareVehicleModelSummary, modelSummaryForKey, fetchVehicleModelVehicles, vehicleModelOptions, vehicleNumberOptions, vehicleOutboundOptions, canOutboundVehicle, vehicleRentalOptions, vehicleOptions, customerOptions, customerEntryModeOptions, supplierOptions, purchaseResourceTypeOptions, purchaseResourceOptions, purchaseStatusOptions, purchaseConfigValueOptions, purchaseSpecificationModelOptions, stocktakingResourceTypeOptions, stocktakingResourceOptions, stocktakingStatusOptions, warehouseOptions, warehouseNameById, transferResourceTypeOptions, stockTransferResourceOptions, stockTransferResourceName, partCodeOptions, machineConfigOptions, machineConfigOptionLabel, machineConfigDictionaryLabel, compatiblePartOptions, discountConfigValueOptions, installPartCategoryOptions, installPartOptions, statusOptions, stockStatusOptions, oldPartActionOptions, inputTypeOptions, repairPartOptions, repairPersonOptions, rentalStatusOptions, paymentReversalOptions } = createEntityOptions({
+  state, api, endpoints, sortById, effectiveFieldValue, stockStatusLabel,
+  activeRentalForMachine, purchaseOrderResourceType, normalizeText, setPrefill,
+  dateValue, money, vehicleModelKey, normalizePowerType,
+  configValueOptionsForItem, configItemLabel, configPartCategory, compareConfigItems
+});
+
 const summaryCard = createSummaryCardRenderer({ icons, escapeAttr, escapeHtml });
 
 let els;
@@ -2300,6 +2319,8 @@ async function handleModalSubmit(event) {
 
   try {
     if (kind === "paymentRecord") {
+      payload.requestId = item.requestId || createRequestId("payment");
+      item.requestId = payload.requestId;
       await api(endpoints.payment.create, {
         method: "POST",
         body: payload
@@ -2310,8 +2331,15 @@ async function handleModalSubmit(event) {
         money(payload.amount)
       );
     } else if (kind === "paymentReversal") {
-      const url = `${endpoints.payment.reverse(payload.paymentId)}?remark=${encodeURIComponent(payload.remark || "")}`;
-      await api(url, { method: "POST" });
+      const requestId = item.requestId || createRequestId("payment-reversal");
+      item.requestId = requestId;
+      await api(endpoints.payment.reverse(payload.paymentId), {
+        method: "POST",
+        body: {
+          requestId,
+          remark: payload.remark || ""
+        }
+      });
       showContextSuccess("收付款记录已冲销", item.sourceLabel, "原记录保留，已生成反向流水");
     } else if (kind === "removedPartValuation") {
       await api(endpoints.part.valuation(item.id), {
@@ -2683,13 +2711,17 @@ async function openPaymentRecordModal(sourceType, sourceId, direction, sourceOve
     direction: normalizedDirection,
     amount: remaining > 0 ? formatDecimal(remaining) : "",
     paymentDate: todayInputDate(),
+    requestId: createRequestId("payment"),
     paymentRecords: records || []
   });
 }
 
 async function openRentalPaymentModal(rentalId) {
   const rental = findEntity("rental", rentalId);
-  const bills = await api(endpoints.rental.bills(rentalId));
+  let bills = await api(endpoints.rental.bills(rentalId));
+  if (!bills?.length) {
+    bills = await api(endpoints.rental.refreshBills(rentalId), { method: "POST" });
+  }
   if (!bills?.length) {
     showToast("当前租赁尚未生成账单；办理归还后会按租期生成应收账单", "info");
     return;
@@ -2736,6 +2768,7 @@ async function openRentalPaymentReversalModal(rentalId) {
     sourceLabel: rental.rentalNo || `租赁 #${rental.id}`,
     sourceMachineId: rental.machineId,
     paymentId: reversible[reversible.length - 1].id,
+    requestId: createRequestId("payment-reversal"),
     paymentRecords: records
   });
 }
@@ -2767,6 +2800,7 @@ async function openPaymentReversalModal(sourceType, sourceId) {
     sourceLabel: source.label,
     sourceMachineId: source.machineId,
     paymentId: reversible[reversible.length - 1].id,
+    requestId: createRequestId("payment-reversal"),
     paymentRecords: records || []
   });
 }
@@ -3119,7 +3153,10 @@ async function batchCompleteRepairs() {
     target: `${rows.length} 条维修记录`,
     impact: "所选记录会统一标记为已完成。"
   }))) return;
-  await Promise.all(rows.map(row => setRepairStatusDirect(row, "COMPLETED")));
+  await api(endpoints.repair.batchComplete, {
+    method: "POST",
+    body: versionedBatchPayload(rows)
+  });
   showContextSuccess("维修记录已批量完成", `${rows.length} 条`, "列表已刷新");
   clearBatchSelection("repair");
   markReferenceDataStale(["repair"]);
@@ -3139,7 +3176,10 @@ async function batchReceivePurchases() {
     target: `${rows.length} 条入库订单`,
     impact: "所选订单会统一标记为已收货，运费默认为 0。"
   }))) return;
-  await Promise.all(rows.map(row => setPurchaseReceivedDirect(row, true)));
+  await api(endpoints.purchaseOrder.batchReceive, {
+    method: "POST",
+    body: versionedBatchPayload(rows)
+  });
   showContextSuccess("入库订单已批量收货", `${rows.length} 条`, "入库列表已刷新");
   clearBatchSelection("purchaseOrder");
   resetPageAfterMutation("purchaseOrder");
@@ -3158,7 +3198,10 @@ async function batchCompleteStocktakes() {
     target: `${rows.length} 条盘点记录`,
     impact: "所选盘点会同步库存数量，入账后不能作为草稿继续编辑。"
   }))) return;
-  await Promise.all(rows.map(completeStocktakingDirect));
+  await api(endpoints.stocktaking.batchComplete, {
+    method: "POST",
+    body: versionedBatchPayload(rows)
+  });
   showContextSuccess("盘点记录已批量入账", `${rows.length} 条`, "库存数量已同步");
   clearBatchSelection("stocktaking");
   markReferenceDataStale(["vehicle", "part"]);
@@ -3178,7 +3221,10 @@ async function batchDeleteStocktakeDrafts() {
     target: `${rows.length} 条盘点草稿`,
     impact: "仅删除未入账草稿；删除后不可从列表恢复。"
   }))) return;
-  await Promise.all(rows.map(row => api(withVersion(endpoints.stocktaking.delete(row.id), row), { method: "DELETE" })));
+  await api(endpoints.stocktaking.batchDeleteDrafts, {
+    method: "POST",
+    body: versionedBatchPayload(rows)
+  });
   showContextSuccess("盘点草稿已批量删除", `${rows.length} 条`, "盘点列表已刷新");
   clearBatchSelection("stocktaking");
   resetPageAfterMutation("stocktaking");
@@ -3686,6 +3732,10 @@ function detailFields(kind, item) {
       ["分类", item.partCategory],
       ["适配车型", item.applicableModels],
       ["库存", `${item.quantity ?? 0}${item.unit || ""}`],
+      ["分仓余额", (item.warehouseBalances || []).map(balance =>
+        `${balance.warehouseName || balance.warehouseCode || `仓库 ${balance.warehouseId}`}：可用 ${balance.availableQuantity || 0} / 预留 ${balance.reservedQuantity || 0} / 锁定 ${balance.lockedQuantity || 0}`
+      ).join("；") || "-"],
+      ["补货预警点", item.reorderPoint ?? 5],
       ["采购价", money(item.purchasePrice)],
       ["落地成本", money(item.landedUnitCost)],
       ["销售价", money(item.salePrice)],
@@ -6547,855 +6597,6 @@ function modalSubtitle(kind) {
     switchUser: "输入另一个账号后立即进入对应权限。"
   };
   return subtitles[kind] || "";
-}
-
-function configItemOptions() {
-  return [...state.data.configItems]
-    .sort(compareConfigItems)
-    .map(item => ({
-    value: item.id,
-    label: configItemLabel(item)
-  }));
-}
-
-function vehicleConfigItemOptions() {
-  return [...state.data.vehicleConfigItems]
-    .sort((a, b) => [
-      Number(a.sortOrder || 0) - Number(b.sortOrder || 0),
-      String(a.specificationModel || "").localeCompare(String(b.specificationModel || ""), "zh-CN")
-    ].find(result => result !== 0) || 0)
-    .map(item => ({
-      value: item.id,
-      label: item.specificationModel || "-"
-    }));
-}
-
-function vehicleConfigValueOptions() {
-  const configItemId = effectiveFieldValue(state.modal?.item || {}, "configItemId");
-  if (!configItemId) return [];
-  return configValueOptionsForItem(configItemId);
-}
-
-function compareConfigItems(a, b) {
-  return [
-    String(a.category || "").localeCompare(String(b.category || ""), "zh-CN"),
-    String(a.subCategory || "").localeCompare(String(b.subCategory || ""), "zh-CN"),
-    String(a.itemName || "").localeCompare(String(b.itemName || ""), "zh-CN"),
-    Number(a.sortOrder || 0) - Number(b.sortOrder || 0)
-  ].find(result => result !== 0) || 0;
-}
-
-function configValueOptionsForItem(configItemId) {
-  const item = state.data.configItems.find(configItem => String(configItem.id) === String(configItemId));
-  return (state.data.configValueMap[configItemId] || [])
-    .map(value => ({
-      value: value.id,
-      label: value.valueLabel || "-",
-      meta: {
-        configItemId: item?.id,
-        configValueId: value.id,
-        valueLabel: value.valueLabel,
-        valueCode: value.valueCode,
-        itemLabel: item ? configItemLabel(item) : "",
-        unit: item?.unit
-      }
-    }));
-}
-
-function powerTypeOptions() {
-  return [
-    { value: "内燃叉车", label: "内燃叉车" },
-    { value: "电动叉车", label: "电动叉车" },
-    { value: "手动叉车", label: "手动叉车" }
-  ];
-}
-
-function supplierFilterOptions() {
-  return uniqueOptions(state.data.vehicles.map(item => item.supplier));
-}
-
-function stockFilterOptions() {
-  return [
-    { value: "inStock", label: "有库存" },
-    { value: "longIdle", label: "长期未动" },
-    { value: "empty", label: "库存为 0" }
-  ];
-}
-
-function filterPartRows(rows = []) {
-  const stock = state.filters.parts?.stock || "";
-  if (!stock) return rows;
-  return rows.filter(row => {
-    const quantity = Number(row.quantity || 0);
-    if (stock === "available") return quantity > 0;
-    if (stock === "low") return quantity <= Number(state.data.todoCenter?.lowStockThreshold ?? 5);
-    return true;
-  });
-}
-
-function filterOutboundOrderRows(rows = []) {
-  const stage = state.filters.outboundOrders?.stage || "";
-  if (!stage) return rows;
-  return rows.filter(row => {
-    if (stage === "payment") return !row.paymentSettled;
-    if (stage === "overdue") return Number(row.overdueDays || 0) > 0;
-    if (stage === "salesReport") return Boolean(row.paymentSettled) && !Boolean(row.salesReported);
-    if (stage === "invoiceApplication") return Boolean(row.paymentSettled) && Boolean(row.salesReported) && !Boolean(row.invoiceApplied);
-    if (stage === "invoiceFile") return isInvoiceUploadReady(row) && !row.invoiceFileAvailable;
-    if (stage === "contractFile") return isContractUploadReady(row) && !row.contractFileAvailable;
-    if (stage === "closed") {
-      return Boolean(row.paymentSettled)
-        && Boolean(row.salesReported)
-        && Boolean(row.invoiceApplied)
-        && (!isInvoiceUploadReady(row) || Boolean(row.invoiceFileAvailable))
-        && (!isContractUploadReady(row) || Boolean(row.contractFileAvailable));
-    }
-    return true;
-  });
-}
-
-function filterRentalRows(rows = []) {
-  const status = state.filters.rentals?.status || "";
-  if (!status) return rows;
-  return rows.filter(row => {
-    const active = row.status === "ACTIVE";
-    const daysUntilEnd = rentalDaysUntilEnd(row.endDate);
-    if (status === "active") return active;
-    if (status === "returned") return row.status === "RETURNED";
-    if (status === "dueSoon") return active && daysUntilEnd !== null && daysUntilEnd <= 7;
-    if (status === "overdue") return active && daysUntilEnd !== null && daysUntilEnd < 0;
-    return true;
-  });
-}
-
-function filterRepairRows(rows = []) {
-  const status = state.filters.repairs?.status || "";
-  if (!status) return rows;
-  return rows.filter(row => {
-    const completed = row.status === "COMPLETED";
-    if (status === "completed") return completed;
-    if (status === "pending") return !completed;
-    return true;
-  });
-}
-
-function rentalDaysUntilEnd(value) {
-  const end = dateOnlyTime(value);
-  if (end === null) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.floor((end - today.getTime()) / 86400000);
-}
-
-function dateOnlyTime(value) {
-  if (!value) return null;
-  const [year, month, day] = String(value).split("-").map(part => Number(part));
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day).getTime();
-}
-
-function vehicleCategoryOptions() {
-  return uniqueOptions([
-    "电动叉车",
-    "手动叉车",
-    "内燃叉车",
-    ...state.data.configItems.map(item => item.category)
-  ]);
-}
-
-function configSubCategoryOptions() {
-  return uniqueOptions([
-    "货叉",
-    "电池",
-    "轮胎",
-    ...state.data.configItems.map(item => item.subCategory),
-    ...state.data.configItems.map(item => item.itemName)
-  ]);
-}
-
-function configPartCategoryOptions() {
-  return uniqueOptions([
-    ...state.data.configItems.map(item => item.subCategory || item.itemName),
-    ...state.data.parts.map(item => item.partCategory),
-    "货叉",
-    "电池",
-    "轮胎"
-  ]);
-}
-
-function configValueOptions() {
-  const selectedCategory = normalizeText(state.modal?.item?.partCategory);
-  return configValuesWithItems()
-    .filter(entry => !selectedCategory || normalizeText(configPartCategory(entry.item)) === selectedCategory)
-    .map(entry => ({
-      value: entry.value.valueLabel,
-      label: `${entry.value.valueLabel || "-"} · ${configItemLabel(entry.item)}`,
-      meta: {
-        configItemId: entry.item.id,
-        configValueId: entry.value.id,
-        partCategory: configPartCategory(entry.item)
-      }
-    }));
-}
-
-function configValuesWithItems() {
-  return state.data.configItems.flatMap(item => {
-    const values = state.data.configValueMap[item.id] || [];
-    return values.map(value => ({ item, value }));
-  });
-}
-
-function configItemLabel(item) {
-  return [
-    item.category,
-    item.subCategory,
-    item.itemName
-  ].filter(Boolean).join(" / ") || "-";
-}
-
-function configPartCategory(item) {
-  return item?.subCategory || item?.itemName || "";
-}
-
-function uniqueOptions(values) {
-  return [...new Set((values || []).map(value => String(value || "").trim()).filter(Boolean))]
-    .map(value => ({ value, label: value }));
-}
-
-function normalizePowerType(machineType) {
-  const value = String(machineType || "").trim();
-  if (value.includes("手动")) return "手动叉车";
-  if (value.includes("电动") || value.toUpperCase().includes("CPD")) return "电动叉车";
-  if (value.includes("内燃") || value.includes("燃油") || value.toUpperCase().includes("CPC")) return "内燃叉车";
-  return value;
-}
-
-function isManualForklift(machineType) {
-  return normalizePowerType(machineType) === "手动叉车";
-}
-
-function vehicleModelKey(item) {
-  return encodeURIComponent(JSON.stringify([
-    String(item?.name || "").trim(),
-    String(item?.specificationModel || "").trim(),
-    normalizePowerType(item?.machineType)
-  ]));
-}
-
-function decodeVehicleModelKey(key) {
-  try {
-    const [name, specificationModel, machineType] = JSON.parse(decodeURIComponent(key || ""));
-    return { name, specificationModel, machineType };
-  } catch (error) {
-    return { name: "", specificationModel: "", machineType: "" };
-  }
-}
-
-function vehicleModelLabel(model) {
-  return `${model?.name || "-"} · ${model?.specificationModel || "-"}`;
-}
-
-function vehicleNumberLabel(item) {
-  return `${item?.vehicleProductNumber || item?.id || "-"} · ${item?.name || "-"} / ${item?.specificationModel || "-"}`;
-}
-
-function vehiclePartDefaultsForMachine(machine = {}) {
-  const entity = {
-    __placeholders: {
-      partCode: machine.vehicleProductNumber ? `请输入 ${machine.vehicleProductNumber} 的配件编码` : "请输入配件编码",
-      partName: "请选择或输入配件名称",
-      partCategory: "例如：轮胎 / 电池 / 属具 / 安全附件",
-      remarks: machine.vehicleProductNumber ? `来自整车 ${vehicleNumberLabel(machine)}` : "记录配件来源或安装说明"
-    }
-  };
-  const modelLabel = machine.name || machine.specificationModel ? vehicleModelLabel(machine) : "";
-  setPrefill(entity, "source", "整车新增", "预填：整车新增");
-  setPrefill(entity, "sourceMachineId", machine.id, machine.id ? `预填：${vehicleNumberLabel(machine)}` : undefined);
-  setPrefill(entity, "applicableModels", modelLabel, modelLabel ? `预填：${modelLabel}` : undefined);
-  setPrefill(entity, "quantity", 1, "默认：1");
-  return entity;
-}
-
-function vehiclePartInstallDefaultsForMachine(machine = {}) {
-  const entity = {};
-  setPrefill(entity, "machineId", machine.id, machine.id ? `预填：${vehicleNumberLabel(machine)}` : undefined);
-  setPrefill(entity, "quantity", 1, "默认：1");
-  return entity;
-}
-
-function vehicleModelGroups() {
-  const groups = new Map();
-  for (const vehicle of state.data.vehicles) {
-    const modelKey = vehicleModelKey(vehicle);
-    const modelOnly = Boolean(vehicle.modelOnly);
-    if (!groups.has(modelKey)) {
-      groups.set(modelKey, {
-        id: modelKey,
-        modelKey,
-        name: vehicle.name,
-        specificationModel: vehicle.specificationModel,
-        machineType: normalizePowerType(vehicle.machineType),
-        supplier: vehicle.supplier,
-        warehouseName: vehicle.warehouseName,
-        purchasePrice: vehicle.purchasePrice,
-        salePrice: vehicle.salePrice,
-        settlementPrice: vehicle.settlementPrice,
-        modelTemplateId: modelOnly ? vehicle.id : null,
-        vehicles: [],
-        vehicleNumbers: "",
-        unitCount: 0,
-        inventoryCount: 0
-      });
-    }
-    const group = groups.get(modelKey);
-    if (!group.supplier && vehicle.supplier) group.supplier = vehicle.supplier;
-    if (!group.warehouseName && vehicle.warehouseName) group.warehouseName = vehicle.warehouseName;
-    if (!group.purchasePrice && vehicle.purchasePrice) group.purchasePrice = vehicle.purchasePrice;
-    if (!group.salePrice && vehicle.salePrice) group.salePrice = vehicle.salePrice;
-    if (!group.settlementPrice && vehicle.settlementPrice) group.settlementPrice = vehicle.settlementPrice;
-    if (modelOnly) {
-      group.modelTemplateId = vehicle.id;
-      continue;
-    }
-    group.vehicles.push(vehicle);
-    group.unitCount += 1;
-    group.inventoryCount += Number(vehicle.inventoryCount || 0);
-  }
-  return [...groups.values()]
-    .map(group => ({
-      ...group,
-      vehicles: [...group.vehicles].sort((a, b) => String(a.vehicleProductNumber || "").localeCompare(String(b.vehicleProductNumber || ""), "zh-CN")),
-      vehicleNumbers: group.vehicles.map(vehicle => vehicle.vehicleProductNumber).filter(Boolean).join(" ")
-    }))
-    .sort((a, b) => vehicleModelLabel(a).localeCompare(vehicleModelLabel(b), "zh-CN"));
-}
-
-function vehiclesForModelKey(modelKey) {
-  if (!modelKey) return [];
-  return state.data.vehicles
-    .filter(vehicle => vehicleModelKey(vehicle) === modelKey && !vehicle.modelOnly)
-    .sort((a, b) => String(a.vehicleProductNumber || "").localeCompare(String(b.vehicleProductNumber || ""), "zh-CN"));
-}
-
-function prepareVehicleModelSummary(row = {}) {
-  const model = {
-    ...row,
-    modelQueryMachineType: String(row.machineType || "").trim(),
-    machineType: normalizePowerType(row.machineType),
-    unitCount: Number(row.unitCount || 0),
-    inventoryCount: Number(row.inventoryCount || 0),
-    vehicleNumbers: row.vehicleNumbers || "",
-    vehicles: []
-  };
-  model.modelKey = vehicleModelKey(model);
-  model.id = model.modelKey;
-  return model;
-}
-
-function modelSummaryForKey(modelKey) {
-  if (!modelKey) return null;
-  return (state.data.vehicleModels || []).find(item => item.modelKey === modelKey)
-    || vehicleModelGroups().find(item => item.modelKey === modelKey)
-    || null;
-}
-
-async function fetchVehicleModelVehicles(modelKey) {
-  if (!modelKey) return [];
-  const model = modelSummaryForKey(modelKey) || decodeVehicleModelKey(modelKey);
-  const params = new URLSearchParams();
-  params.set("name", model.name || "");
-  params.set("specificationModel", model.specificationModel || "");
-  params.set("machineType", model.modelQueryMachineType ?? model.machineType ?? "");
-  params.set("stock", state.filters.vehicles?.stock || "");
-  const rows = await api(`${endpoints.vehicle.modelVehicles}?${params.toString()}`);
-  return sortById(rows, false).sort((a, b) => String(a.vehicleProductNumber || "").localeCompare(String(b.vehicleProductNumber || ""), "zh-CN"));
-}
-function vehicleModelOptions() {
-  return vehicleModelGroups().map(group => ({
-    value: group.modelKey,
-    label: `${vehicleModelLabel(group)}（${group.machineType || "未分类"} / ${group.inventoryCount} 台库存）`
-  }));
-}
-
-function vehicleNumberOptions() {
-  const modelKey = effectiveFieldValue(state.modal?.item, "vehicleModelKey");
-  return vehiclesForModelKey(modelKey).map(item => ({
-    value: item.id,
-    label: `${item.vehicleProductNumber || item.id}（${stockStatusLabel(item.stockStatus)}）`,
-    meta: {
-      modelKey,
-      vehicleProductNumber: item.vehicleProductNumber,
-      frameNumber: item.frameNumber,
-      engineNumber: item.engineNumber
-    }
-  }));
-}
-
-function vehicleOutboundOptions() {
-  const modelKey = state.modal?.item?.__modelKey;
-  const vehicles = modelKey ? vehiclesForModelKey(modelKey) : state.data.vehicles.filter(item => !item.modelOnly);
-  return vehicles
-    .filter(canOutboundVehicle)
-    .map(item => ({
-      value: item.id,
-      label: `${item.vehicleProductNumber || item.id} · ${item.name || "-"} / ${item.specificationModel || "-"}（在库 ${item.inventoryCount || 0} 台）`,
-      meta: {
-        settlementPrice: item.settlementPrice,
-        salePrice: item.salePrice,
-        stockStatus: item.stockStatus
-      }
-    }));
-}
-
-function canOutboundVehicle(item) {
-  return !item.modelOnly
-    && Number(item.inventoryCount || 0) > 0
-    && !["OUTBOUND", "RENTED"].includes(item.stockStatus)
-    && !activeRentalForMachine(item.id);
-}
-
-function vehicleRentalOptions() {
-  const currentRentalId = state.modal?.item?.id;
-  return state.data.vehicles
-    .filter(item => !item.modelOnly)
-    .filter(item => Number(item.inventoryCount || 0) > 0 && !["OUTBOUND", "RENTED"].includes(item.stockStatus))
-    .filter(item => {
-      const rental = activeRentalForMachine(item.id);
-      return !rental || Number(rental.id) === Number(currentRentalId);
-    })
-    .map(item => ({
-      value: item.id,
-      label: `${item.vehicleProductNumber || item.id} · ${item.name || "-"} / ${item.specificationModel || "-"}`
-    }));
-}
-
-function vehicleOptions() {
-  return state.data.vehicles.filter(item => !item.modelOnly).map(item => ({
-    value: item.id,
-    label: `${vehicleNumberLabel(item)}${activeRentalForMachine(item.id) ? " · 租赁中" : ""}`
-  }));
-}
-
-function customerOptions() {
-  return state.data.customers.map(item => ({
-    value: item.id,
-    label: `${item.companyName || "-"}${item.contactName ? " · " + item.contactName : ""}`,
-    meta: {
-      contactPhone: item.contactPhone,
-      taxOrIdNumber: item.taxOrIdNumber
-    }
-  }));
-}
-
-function customerEntryModeOptions() {
-  return [
-    { value: "existing", label: "选择现有客户" },
-    { value: "quickCreate", label: "直接录入并新建客户" }
-  ];
-}
-
-function supplierOptions() {
-  const currentSupplierId = Number(effectiveFieldValue(state.modal?.item || {}, "supplierId") || 0);
-  return state.data.suppliers
-    .filter(item => item.active !== false || Number(item.id) === currentSupplierId)
-    .map(item => ({
-    value: item.id,
-    label: `${item.supplierName || "-"}${item.active === false ? "（已停用）" : ""}${item.contactName ? " / " + item.contactName : ""}`,
-    meta: {
-      contactPhone: item.contactPhone,
-      supplierType: item.supplierType
-    }
-  }));
-}
-
-function purchaseResourceTypeOptions() {
-  return [
-    { value: "PART", label: "配件订单" },
-    { value: "MACHINE", label: "整车订单" }
-  ];
-}
-
-function purchaseResourceOptions() {
-  if (purchaseOrderResourceType() !== "PART") {
-    return [];
-  }
-  return state.data.parts.filter(part => !part.isLocked).map(part => ({
-    value: part.id,
-    label: `${part.partCode || part.id} · ${part.partName || "-"} / ${part.specification || "-"}（当前 ${part.quantity ?? 0}${part.unit || ""}）`,
-    meta: {
-      partCode: part.partCode,
-      partName: part.partName,
-      specification: part.specification,
-      unit: part.unit,
-      warehouseId: part.warehouseId
-    }
-  }));
-}
-
-function purchaseStatusOptions() {
-  return [
-    { value: "ORDERED", label: "已下单" },
-    { value: "PARTIAL", label: "部分到货" },
-    { value: "ARRIVED", label: "已到货" },
-    { value: "RECEIVED", label: "已收货" },
-    { value: "CANCELED", label: "已取消" }
-  ];
-}
-function purchaseConfigValueOptions() {
-  const configItemId = effectiveFieldValue(state.modal?.item || {}, "configItemId");
-  if (!configItemId) return [];
-  return configValueOptionsForItem(configItemId);
-}
-
-function purchaseSpecificationModelOptions() {
-  return [...state.data.vehicleConfigItems]
-    .sort((left, right) => [
-      Number(left.sortOrder || 0) - Number(right.sortOrder || 0),
-      String(left.specificationModel || "").localeCompare(String(right.specificationModel || ""), "zh-CN")
-    ].find(result => result !== 0) || 0)
-    .map(item => ({
-      value: item.specificationModel || "",
-      label: item.specificationModel || "-"
-    }))
-    .filter(option => option.value);
-}
-
-function stocktakingResourceTypeOptions() {
-  return [
-    { value: "PART", label: "配件" },
-    { value: "MACHINE", label: "整车" }
-  ];
-}
-
-function stocktakingResourceOptions() {
-  const type = String(effectiveFieldValue(state.modal?.item || {}, "resourceType") || "PART").toUpperCase();
-  if (type === "MACHINE") {
-    return state.data.vehicles
-      .filter(item => !item.modelOnly)
-      .map(item => ({
-        value: item.id,
-        label: `${vehicleNumberLabel(item)} / 总库存 ${item.inventoryCount ?? 0}`
-      }));
-  }
-  return state.data.parts.map(item => ({
-    value: item.id,
-    label: `${item.partCode || "-"} / ${item.partName || "-"} / 总库存 ${item.quantity ?? 0}${item.unit || ""}`
-  }));
-}
-
-function stocktakingStatusOptions() {
-  return [
-    { value: "DRAFT", label: "草稿" }
-  ];
-}
-
-function warehouseOptions() {
-  return state.data.warehouses.map(item => ({
-    value: item.id,
-    label: `${item.warehouseName || "-"}（${item.warehouseCode || "-"}）`
-  }));
-}
-
-function warehouseNameById(id) {
-  return state.data.warehouses.find(item => Number(item.id) === Number(id))?.warehouseName || "未分配仓库";
-}
-
-function transferResourceTypeOptions() {
-  return [
-    { value: "PART", label: "配件" },
-    { value: "MACHINE", label: "整车" }
-  ];
-}
-
-function stockTransferResourceOptions() {
-  const type = String(effectiveFieldValue(state.modal?.item || {}, "resourceType") || "PART").toUpperCase();
-  if (type === "MACHINE") {
-    return state.data.vehicles
-      .filter(item => !item.modelOnly)
-      .filter(item => Number(item.inventoryCount || 0) > 0)
-      .filter(item => item.stockStatus !== "RENTED" && !activeRentalForMachine(item.id))
-      .map(item => ({
-        value: item.id,
-        label: `${vehicleNumberLabel(item)} / ${warehouseNameById(item.warehouseId)} / 库存 ${item.inventoryCount ?? 0}`,
-        meta: {
-          warehouseId: item.warehouseId,
-          version: item.version
-        }
-      }));
-  }
-  return state.data.parts
-    .filter(item => Number(item.quantity || 0) > 0)
-    .map(item => ({
-      value: item.id,
-      label: `${item.partCode || "-"} · ${item.partName || "-"} / ${warehouseNameById(item.warehouseId)} / 库存 ${item.quantity ?? 0}${item.unit || ""}`,
-      meta: {
-        warehouseId: item.warehouseId,
-        version: item.version
-      }
-    }));
-}
-
-function stockTransferResourceName(payload = {}) {
-  const type = String(payload.resourceType || "PART").toUpperCase();
-  const rows = type === "MACHINE" ? state.data.vehicles : state.data.parts;
-  const resource = rows.find(item => Number(item.id) === Number(payload.resourceId));
-  if (!resource) return "调拨对象";
-  return type === "MACHINE" ? vehicleNumberLabel(resource) : `${resource.partCode || "-"} · ${resource.partName || "-"}`;
-}
-
-function partCodeOptions() {
-  return state.data.parts.filter(item => !item.isLocked).map(item => ({
-    value: item.partCode,
-    label: `${item.partCode || "-"} · ${item.partName || "-"}（库存 ${item.quantity ?? 0}${item.unit || ""}）`
-  }));
-}
-
-function machineConfigOptions() {
-  return (state.modal?.context?.machineConfigs || []).map(item => ({
-    value: item.id,
-    label: machineConfigOptionLabel(item)
-  }));
-}
-
-function machineConfigOptionLabel(item) {
-  return `${machineConfigDictionaryLabel(item)} · ${item.selectedValue || "-"}`;
-}
-
-function machineConfigDictionaryLabel(config) {
-  const item = state.data.configItems.find(configItem => String(configItem.id) === String(config.configItemId));
-  return item ? configItemLabel(item) : (config.itemName || "-");
-}
-
-function compatiblePartOptions() {
-  return (state.modal?.context?.compatibleParts || []).map(item => ({
-    value: item.id,
-    label: `${item.partCode || "-"} · ${item.partName || "-"}（库存 ${item.quantity ?? 0}${item.unit || ""}）`
-  }));
-}
-
-function discountConfigValueOptions() {
-  const configId = effectiveFieldValue(state.modal?.item || {}, "machineConfigId");
-  const config = (state.modal?.context?.machineConfigs || [])
-    .find(item => String(item.id) === String(configId));
-  return (state.data.configValueMap[config?.configItemId] || []).map(value => ({
-    value: value.id,
-    label: value.valueLabel || "-"
-  }));
-}
-
-function installPartCategoryOptions() {
-  const availableCategories = new Set(state.data.parts
-    .filter(part => !part.isLocked)
-    .filter(part => Number(part.quantity || 0) > 0)
-    .map(part => normalizeText(part.partCategory))
-    .filter(Boolean));
-  return state.data.configItems
-    .filter(item => availableCategories.has(normalizeText(configPartCategory(item))))
-    .sort(compareConfigItems)
-    .map(item => ({
-      value: item.id,
-      label: configItemLabel(item)
-    }));
-}
-
-function installPartOptions() {
-  const selectedItem = state.data.configItems.find(item => String(item.id) === String(state.modal?.item?.configItemId));
-  const selectedCategory = normalizeText(configPartCategory(selectedItem));
-  return state.data.parts
-    .filter(part => !part.isLocked)
-    .filter(part => Number(part.quantity || 0) > 0)
-    .filter(part => !selectedCategory || normalizeText(part.partCategory) === selectedCategory)
-    .map(part => ({
-      value: part.id,
-      label: `${part.partCode || "-"} · ${part.partName || "-"}（库存 ${part.quantity ?? 0}${part.unit || ""}）`
-    }));
-}
-
-function statusOptions() {
-  return [
-    { value: "PENDING", label: "待处理" },
-    { value: "COMPLETED", label: "已完成" }
-  ];
-}
-
-function stockStatusOptions() {
-  return [
-    { value: "PENDING_INBOUND", label: "待入库" },
-    { value: "IN_STOCK", label: "在库" },
-    { value: "RENTED", label: "租赁中" },
-    { value: "PENDING_MODIFICATION", label: "待改装" },
-    { value: "MODIFYING", label: "改装中" },
-    { value: "PENDING_OUTBOUND", label: "待出库" },
-    { value: "OUTBOUND", label: "已出库" }
-  ];
-}
-
-function oldPartActionOptions() {
-  return [
-    { value: "DISCOUNT", label: "旧件折价" },
-    { value: "STOCK_IN", label: "拆下件入库" },
-    { value: "DISCARD", label: "不入库" }
-  ];
-}
-
-function inputTypeOptions() {
-  return [
-    { value: "SELECT", label: "下拉选择" },
-    { value: "TEXT", label: "文本输入" },
-    { value: "NUMBER", label: "数字输入" },
-    { value: "BOOLEAN", label: "开关选项" }
-  ];
-}
-
-function normalizeUser(data) {
-  if (!data) return null;
-  const roles = data.roles || [];
-  return {
-    username: data.username,
-    jobTag: data.jobTag,
-    roles,
-    permissions: data.permissions || defaultPermissionsForRoles(roles)
-  };
-}
-
-function hasRole(role) {
-  return Boolean(state.user?.roles?.includes(role));
-}
-
-function hasAnyRole(...roles) {
-  return roles.some(role => hasRole(role));
-}
-
-function repairPartOptions() {
-  return state.data.parts.filter(item => !item.isLocked).map(item => ({
-    value: item.id,
-    label: `${item.partCode || "-"} · ${item.partName || "-"}（库存 ${item.quantity ?? 0}${item.unit || ""}）`
-  }));
-}
-
-function repairPersonOptions() {
-  return [
-    ...state.data.repairUsers.map(item => ({
-      value: item.id,
-      label: item.username || `用户 ${item.id}`
-    })),
-    { value: "OTHER", label: "其他" }
-  ];
-}
-
-function rentalStatusOptions() {
-  if (state.modal?.item?.financialPosted) {
-    return [{ value: "RETURNED", label: "已归还（已生成账单）" }];
-  }
-  return [
-    { value: "ACTIVE", label: "租赁中" },
-    { value: "RETURNED", label: "已归还" }
-  ];
-}
-
-function paymentReversalOptions() {
-  const records = state.modal?.item?.paymentRecords || [];
-  const reversedIds = new Set(records
-    .map(record => record.reversalOfPaymentId)
-    .filter(Boolean)
-    .map(String));
-  return records
-    .filter(record =>
-      Number(record.amount || 0) > 0
-      && !record.reversalOfPaymentId
-      && !reversedIds.has(String(record.id))
-    )
-    .map(record => ({
-      value: record.id,
-      label: `${record.sourceLabel ? `${record.sourceLabel} · ` : ""}${record.paymentNo || `#${record.id}`} · ${dateValue(record.paymentDate) || "-"} · ${record.direction === "PAYMENT" ? "付款" : "收款"} ${money(record.amount)}`
-    }));
-}
-
-function hasPermission(permission) {
-  return hasRole("SUPER_ADMIN") || Boolean(state.user?.permissions?.includes(permission));
-}
-
-function hasAnyPermission(...permissions) {
-  return permissions.some(permission => hasPermission(permission));
-}
-
-function defaultPermissionsForRoles(roles = []) {
-  const permissionMap = {
-    SUPER_ADMIN: [
-      "vehicle:write",
-      "part:write",
-      "repair:write",
-      "config:write",
-      "replace:write",
-      "stock:adjust",
-      "log:read",
-      "user:read",
-      "user:write",
-      "user:admin"
-    ],
-    ADMIN: [
-      "vehicle:write",
-      "part:write",
-      "repair:write",
-      "config:write",
-      "replace:write",
-      "stock:adjust",
-      "log:read"
-    ],
-    USER: [
-      "vehicle:write",
-      "part:write",
-      "repair:write",
-      "config:write",
-      "replace:write",
-      "stock:adjust"
-    ]
-  };
-  return [...new Set(roles.flatMap(role => permissionMap[role] || []))];
-}
-
-function canAccessTab(tab) {
-  if (tab === "stockMovements") return false;
-  const rolesByTab = {
-    imports: ["SUPER_ADMIN"],
-    maintenance: ["SUPER_ADMIN"],
-    users: ["SUPER_ADMIN"]
-  };
-  const permissionsByTab = {
-    modifications: "replace:write",
-    outboundOrders: "stock:adjust",
-    rentals: "stock:adjust",
-    customers: "vehicle:write",
-    suppliers: "stock:adjust",
-    purchases: "stock:adjust",
-    stocktakes: "stock:adjust",
-    warehouses: "stock:adjust",
-    stats: "log:read",
-    logs: "log:read",
-    imports: "stock:adjust",
-    users: "user:read",
-  };
-  if (rolesByTab[tab] && !hasAnyRole(...rolesByTab[tab])) return false;
-  return !permissionsByTab[tab] || hasPermission(permissionsByTab[tab]);
-}
-
-function canWriteEntity(kind) {
-  const permissionsByKind = {
-    vehicle: "vehicle:write",
-    part: "part:write",
-    repair: "repair:write",
-    rental: "stock:adjust",
-    supplier: "stock:adjust",
-    warehouse: "stock:adjust",
-    purchaseOrder: "stock:adjust",
-    stocktaking: "stock:adjust",
-    configItem: "config:write",
-    configValue: "config:write",
-    vehicleConfigItem: "config:write",
-    vehicleConfigValue: "config:write",
-    customer: "vehicle:write"
-  };
-  return !permissionsByKind[kind] || hasPermission(permissionsByKind[kind]);
 }
 
 function detailItem(label, value) {

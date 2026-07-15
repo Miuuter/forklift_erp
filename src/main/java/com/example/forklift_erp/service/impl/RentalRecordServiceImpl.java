@@ -22,6 +22,7 @@ import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.RentalRecordService;
+import com.example.forklift_erp.service.RentalBillingService;
 import com.example.forklift_erp.service.RentalRevenueCalculator;
 import com.example.forklift_erp.service.StockLedgerService;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
@@ -34,7 +35,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.YearMonth;
 import java.util.List;
 import java.util.Locale;
 
@@ -71,6 +71,9 @@ public class RentalRecordServiceImpl implements RentalRecordService {
 
     @Autowired
     private FinancialEventService financialEventService;
+
+    @Autowired
+    private RentalBillingService rentalBillingService;
 
     @Override
     @Transactional(readOnly = true)
@@ -123,16 +126,12 @@ public class RentalRecordServiceImpl implements RentalRecordService {
         if (!rentalRecordRepository.existsById(id)) {
             throw new BusinessException(ResultCode.NOT_FOUND, "租赁记录不存在");
         }
-        return rentalBillRepository.findByRentalIdOrderByBillPeriodAsc(id).stream()
-                .map(bill -> RentalBillVO.fromEntity(
-                        bill,
-                        paymentRecordRepository.totalForSource(
-                                FinancialEventService.SOURCE_RENTAL_BILL,
-                                bill.getId(),
-                                com.example.forklift_erp.entity.PaymentRecord.DIRECTION_RECEIPT
-                        )
-                ))
-                .toList();
+        return rentalBillingService.billViews(id);
+    }
+
+    @Override
+    public List<RentalBillVO> refreshBills(Long id) {
+        return rentalBillingService.refresh(id);
     }
 
     @Override
@@ -251,7 +250,7 @@ public class RentalRecordServiceImpl implements RentalRecordService {
         RentalRecord saved = rentalRecordRepository.saveAndFlush(record);
         if (RentalRecord.STATUS_ACTIVE.equals(before.getStatus()) && RentalRecord.STATUS_RETURNED.equals(saved.getStatus())) {
             releaseRentalVehicle(saved);
-            generateRentalBills(saved, true);
+            rentalBillingService.refreshFinal(saved);
         } else if (RentalRecord.STATUS_RETURNED.equals(before.getStatus()) && RentalRecord.STATUS_ACTIVE.equals(saved.getStatus())) {
             freezeRentalVehicle(saved);
         }
@@ -368,46 +367,6 @@ public class RentalRecordServiceImpl implements RentalRecordService {
                 : MachineStockStatus.PENDING_INBOUND.code());
         collaborationService.stampWrite(machine);
         machineRepository.save(machine);
-    }
-
-    private void generateRentalBills(RentalRecord record, boolean finalBill) {
-        LocalDate start = record.getStartDate();
-        if (start == null) {
-            return;
-        }
-        LocalDate end;
-        if (finalBill) {
-            end = record.getReturnDate() == null ? record.getEndDate() : record.getReturnDate();
-        } else {
-            end = LocalDate.now();
-        }
-        if (end == null || end.isBefore(start)) {
-            return;
-        }
-        rentalRevenueCalculator.monthlyAmounts(record, start, end).forEach((period, amount) -> {
-            LocalDate billPeriod = period.atDay(1);
-            if (rentalBillRepository.findByRentalIdAndBillPeriod(record.getId(), billPeriod).isPresent()) {
-                return;
-            }
-            RentalBill bill = new RentalBill();
-            bill.setRentalId(record.getId());
-            bill.setBillPeriod(billPeriod);
-            bill.setBusinessDate(finalBill && period.equals(YearMonth.from(end)) ? end : period.atEndOfMonth());
-            bill.setAmount(amount);
-            RentalBill savedBill = rentalBillRepository.save(bill);
-            var event = financialEventService.postRentalBill(
-                    savedBill.getId(),
-                    record.getId(),
-                    record.getCustomerId(),
-                    record.getCustomerName(),
-                    savedBill.getBusinessDate(),
-                    amount
-            );
-            savedBill.setFinancialEventId(event.getId());
-            rentalBillRepository.save(savedBill);
-            record.setFinancialPosted(true);
-        });
-        rentalRecordRepository.save(record);
     }
 
     private void copyCustomer(RentalRecord record, Long customerId, String destination) {

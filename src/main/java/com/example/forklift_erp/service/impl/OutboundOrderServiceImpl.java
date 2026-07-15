@@ -10,7 +10,6 @@ import com.example.forklift_erp.dto.OutboundOrderUpdateDTO;
 import com.example.forklift_erp.dto.OutboundOrderVO;
 import com.example.forklift_erp.dto.PartOutboundOrderCreateDTO;
 import com.example.forklift_erp.dto.VehicleOutboundOrderCreateDTO;
-import com.example.forklift_erp.entity.Customer;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.OutboundOrder;
 import com.example.forklift_erp.entity.PartInventory;
@@ -18,7 +17,6 @@ import com.example.forklift_erp.entity.StockMovement;
 import com.example.forklift_erp.entity.StockMovementLine;
 import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.exception.BusinessException;
-import com.example.forklift_erp.repository.CustomerRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
@@ -31,7 +29,6 @@ import com.example.forklift_erp.service.FinancialEventService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.OutboundOrderService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
-import com.example.forklift_erp.service.ResourceAttachmentService;
 import com.example.forklift_erp.service.StockLedgerService;
 import com.example.forklift_erp.service.StockLotService;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
@@ -56,16 +53,14 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
     private static final String SOURCE_TYPE = "OUTBOUND_ORDER";
 
     private final OutboundOrderRepository outboundOrderRepository;
-    private final CustomerRepository customerRepository;
+    private final OutboundCustomerService outboundCustomerService;
     private final MachineInventoryRepository machineRepository;
     private final PartInventoryRepository partRepository;
     private final RentalRecordRepository rentalRecordRepository;
     private final OperationAuditService operationAuditService;
     private final CollaborationService collaborationService;
-    private final OutboundOrderFileStorage fileStorage;
-    private final OutboundUploadReadinessPolicy uploadReadinessPolicy;
+    private final OutboundDocumentService outboundDocumentService;
     private final OutboundResourceLockService resourceLockService;
-    private final ResourceAttachmentService resourceAttachmentService;
     private final ResourceVisibilityPolicy visibilityPolicy;
     private final OutboundReceivablePolicy receivablePolicy;
     private final OutboundStockAccountingService stockAccountingService;
@@ -78,16 +73,14 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
 
     public OutboundOrderServiceImpl(
             OutboundOrderRepository outboundOrderRepository,
-            CustomerRepository customerRepository,
+            OutboundCustomerService outboundCustomerService,
             MachineInventoryRepository machineRepository,
             PartInventoryRepository partRepository,
             RentalRecordRepository rentalRecordRepository,
             OperationAuditService operationAuditService,
             CollaborationService collaborationService,
-            OutboundOrderFileStorage fileStorage,
-            OutboundUploadReadinessPolicy uploadReadinessPolicy,
+            OutboundDocumentService outboundDocumentService,
             OutboundResourceLockService resourceLockService,
-            ResourceAttachmentService resourceAttachmentService,
             ResourceVisibilityPolicy visibilityPolicy,
             OutboundReceivablePolicy receivablePolicy,
             OutboundStockAccountingService stockAccountingService,
@@ -99,16 +92,14 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
             StockOperationLogRepository stockOperationLogRepository
     ) {
         this.outboundOrderRepository = outboundOrderRepository;
-        this.customerRepository = customerRepository;
+        this.outboundCustomerService = outboundCustomerService;
         this.machineRepository = machineRepository;
         this.partRepository = partRepository;
         this.rentalRecordRepository = rentalRecordRepository;
         this.operationAuditService = operationAuditService;
         this.collaborationService = collaborationService;
-        this.fileStorage = fileStorage;
-        this.uploadReadinessPolicy = uploadReadinessPolicy;
+        this.outboundDocumentService = outboundDocumentService;
         this.resourceLockService = resourceLockService;
-        this.resourceAttachmentService = resourceAttachmentService;
         this.visibilityPolicy = visibilityPolicy;
         this.receivablePolicy = receivablePolicy;
         this.stockAccountingService = stockAccountingService;
@@ -200,7 +191,6 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
                 before -> "Vehicle stock is insufficient"
         );
 
-        Customer customer = findCustomer(request.getCustomerId());
         OutboundOrder order = new OutboundOrder();
         order.setOrderNo(nextOrderNo());
         order.setResourceType(OutboundOrder.RESOURCE_MACHINE);
@@ -211,7 +201,7 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         order.setSpecificationModel(machine.getSpecificationModel());
         order.setQuantity(1);
         order.setUnit("\u53f0");
-        copyCustomer(order, customer);
+        outboundCustomerService.copyCustomer(order, request.getCustomerId());
         BigDecimal unitSalePrice = resolveUnitSalePrice(
                 request.getUnitSalePrice(), request.getSettlementPrice(), request.getSalePrice(), machine.getSalePrice());
         BigDecimal lineAmount = resolveLineAmount(request.getLineAmount(), request.getReceivableAmount(), unitSalePrice, 1);
@@ -263,7 +253,7 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         machine.setStockStatus(machine.getInventoryCount() > 0 ? MachineStockStatus.IN_STOCK.code() : MachineStockStatus.OUTBOUND.code());
         machine.setSalePrice(MoneyValues.firstNonNegativeOrNull(request.getSalePrice(), machine.getSalePrice()));
         machine.setSalesDate(toMachineSalesDate(request.getSalesDate()));
-        machine.setDestination1(customer.getCompanyName());
+        machine.setDestination1(order.getCustomerName());
         machine.setIsSalesReported(yesNo(order.getSalesReported()));
         machine.setSalesReportDate(order.getSalesReportDate());
         machine.setIsInvoiceApplied(yesNo(order.getInvoiceApplied()));
@@ -312,7 +302,6 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         );
         int quantity = stockChange.quantity();
 
-        Customer customer = findCustomer(request.getCustomerId());
         OutboundOrder order = new OutboundOrder();
         order.setOrderNo(nextOrderNo());
         order.setResourceType(OutboundOrder.RESOURCE_PART);
@@ -323,7 +312,7 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         order.setSpecificationModel(part.getSpecification());
         order.setQuantity(quantity);
         order.setUnit(part.getUnit());
-        copyCustomer(order, customer);
+        outboundCustomerService.copyCustomer(order, request.getCustomerId());
         BigDecimal unitSalePrice = resolveUnitSalePrice(
                 request.getUnitSalePrice(), request.getSettlementPrice(), part.getSalePrice(), part.getSettlementPrice());
         BigDecimal lineAmount = resolveLineAmount(request.getLineAmount(), request.getReceivableAmount(), unitSalePrice, quantity);
@@ -508,72 +497,25 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
     @Override
     @Transactional
     public OutboundOrderVO uploadInvoice(Long id, MultipartFile file, Long version) {
-        OutboundOrder order = outboundOrderRepository.findByIdForUpdate(id)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Outbound order not found"));
-        ensureOrderVisible(order);
-        collaborationService.validateWrite(order, version);
-        if (!uploadReadinessPolicy.isInvoiceUploadReady(order)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "Order is not ready for invoice upload");
-        }
-        StoredOutboundFile storedFile = fileStorage.storeInvoice(order.getId(), file, order.getInvoiceStoredFileName());
-
-        order.setInvoiceStoredFileName(storedFile.storedFileName());
-        order.setInvoiceOriginalName(storedFile.originalName());
-        order.setInvoiceContentType(storedFile.contentType());
-        order.setInvoiceFileSize(storedFile.fileSize());
-        order.setInvoiceUploadedAt(storedFile.uploadedAt());
-        collaborationService.stampWrite(order);
-
-        OutboundOrder saved = outboundOrderRepository.saveAndFlush(order);
-        resourceAttachmentService.recordLegacyOrderAttachment(saved, "INVOICE", storedFile);
-        operationAuditService.record("Outbound order", "UPLOAD_INVOICE", "OUTBOUND_ORDER", saved.getId(),
-                saved.getOrderNo(), saved.getCustomerName(), "Upload invoice: " + storedFile.originalName(),
-                saved.getOperator(), saved.getOrderRemark(), SOURCE_TYPE, saved.getId());
-        return OutboundOrderVO.fromEntity(saved);
+        return outboundDocumentService.uploadInvoice(id, file, version);
     }
 
     @Override
     @Transactional(readOnly = true)
     public OutboundInvoiceDownload downloadInvoice(Long id) {
-        OutboundOrder order = visibleOrderById(id)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Outbound order not found"));
-        return fileStorage.downloadInvoice(order);
+        return outboundDocumentService.downloadInvoice(id);
     }
 
     @Override
     @Transactional
     public OutboundOrderVO uploadContract(Long id, MultipartFile file, Long version) {
-        OutboundOrder order = outboundOrderRepository.findByIdForUpdate(id)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Outbound order not found"));
-        ensureOrderVisible(order);
-        collaborationService.validateWrite(order, version);
-        if (!uploadReadinessPolicy.isContractUploadReady(order)) {
-            throw new BusinessException(ResultCode.PARAM_ERROR, "Order is not ready for contract upload");
-        }
-
-        StoredOutboundFile storedFile = fileStorage.storeContract(order.getId(), file, order.getContractStoredFileName());
-
-        order.setContractStoredFileName(storedFile.storedFileName());
-        order.setContractOriginalName(storedFile.originalName());
-        order.setContractContentType(storedFile.contentType());
-        order.setContractFileSize(storedFile.fileSize());
-        order.setContractUploadedAt(storedFile.uploadedAt());
-        collaborationService.stampWrite(order);
-
-        OutboundOrder saved = outboundOrderRepository.saveAndFlush(order);
-        resourceAttachmentService.recordLegacyOrderAttachment(saved, "CONTRACT", storedFile);
-        operationAuditService.record("Outbound order", "UPLOAD_CONTRACT", "OUTBOUND_ORDER", saved.getId(),
-                saved.getOrderNo(), saved.getCustomerName(), "Upload contract: " + storedFile.originalName(),
-                saved.getOperator(), saved.getOrderRemark(), SOURCE_TYPE, saved.getId());
-        return OutboundOrderVO.fromEntity(saved);
+        return outboundDocumentService.uploadContract(id, file, version);
     }
 
     @Override
     @Transactional(readOnly = true)
     public OutboundInvoiceDownload downloadContract(Long id) {
-        OutboundOrder order = visibleOrderById(id)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Outbound order not found"));
-        return fileStorage.downloadContract(order);
+        return outboundDocumentService.downloadContract(id);
     }
 
     private Optional<OutboundOrder> visibleOrderById(Long id) {
@@ -589,20 +531,6 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
 
     private void ensureResourceVisible(boolean locked, ResultCode resultCode, String message) {
         visibilityPolicy.ensureVisible(locked, resultCode, message);
-    }
-
-    private Customer findCustomer(Long customerId) {
-        return customerRepository.findByIdForUpdate(customerId)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Customer not found"));
-    }
-
-    private void copyCustomer(OutboundOrder order, Customer customer) {
-        order.setCustomerId(customer.getId());
-        order.setCustomerName(customer.getCompanyName());
-        order.setCustomerAddress(customer.getAddress());
-        order.setContactName(customer.getContactName());
-        order.setContactPhone(customer.getContactPhone());
-        order.setTaxOrIdNumber(customer.getTaxOrIdNumber());
     }
 
     private void syncLegacyOutboundFlags(OutboundOrder order) {

@@ -45,6 +45,8 @@ services:
       FORKLIFT_ERP_ATTACHMENT_STORAGE_DIR: /data/uploads/attachments
       FORKLIFT_ERP_INVOICE_STORAGE_DIR: /data/uploads/invoices
       FORKLIFT_ERP_CONTRACT_STORAGE_DIR: /data/uploads/contracts
+      FORKLIFT_ERP_IMPORT_STORAGE_DIR: /data/uploads/imports
+      FORKLIFT_ERP_IMPORT_RETENTION_DAYS: ${ERP_IMPORT_RETENTION_DAYS:-30}
       LOGGING_FILE_NAME: /data/logs/application.log
       TZ: ${TZ:-Asia/Shanghai}
     ports:
@@ -52,4 +54,3 @@ services:
     volumes:
       - ./data/uploads:/data/uploads
       - ./data/logs:/data/logs
-

@@ -10,6 +10,7 @@ import com.example.forklift_erp.entity.DataImportJob;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.DataImportJobRepository;
 import com.example.forklift_erp.service.DataImportService;
+import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.util.ListPageSupport;
 import com.example.forklift_erp.util.SecurityUtils;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -27,6 +28,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -43,6 +45,7 @@ public class DataImportServiceImpl implements DataImportService {
     private final DataImportTemplateBuilder templateBuilder;
     private final DataImportWorkbookReader workbookReader;
     private final DataImportWorkbookValidator workbookValidator;
+    private final OperationAuditService operationAuditService;
     private final TransactionTemplate importTransactionTemplate;
 
     public DataImportServiceImpl(
@@ -55,7 +58,8 @@ public class DataImportServiceImpl implements DataImportService {
             DataImportFileStorage importFileStorage,
             DataImportTemplateBuilder templateBuilder,
             DataImportWorkbookReader workbookReader,
-            DataImportWorkbookValidator workbookValidator
+            DataImportWorkbookValidator workbookValidator,
+            OperationAuditService operationAuditService
     ) {
         this.importTransactionTemplate = new TransactionTemplate(transactionManager);
         this.jobRepository = jobRepository;
@@ -67,6 +71,7 @@ public class DataImportServiceImpl implements DataImportService {
         this.templateBuilder = templateBuilder;
         this.workbookReader = workbookReader;
         this.workbookValidator = workbookValidator;
+        this.operationAuditService = operationAuditService;
     }
 
     @Override
@@ -112,7 +117,8 @@ public class DataImportServiceImpl implements DataImportService {
         ValidationResult validation = profile.validate(stagedFile);
         job.setTotalRows(validation.totalRows());
         job.setValidRows(validation.validRows());
-        job.setErrorRows(validation.errors().size());
+        job.setErrorRows(validation.errorRows());
+        job.setErrorDetails(validation.errors().size());
         job.setSummary(validation.summary());
         job.setErrorRowsJson(writeJson(validation.errors()));
         Map<String, Object> snapshot = new java.util.LinkedHashMap<>(validation.snapshot());
@@ -154,6 +160,20 @@ public class DataImportServiceImpl implements DataImportService {
                     result == null ? 0 : result.skippedRows(),
                     result == null ? "Import completed" : result.summary(),
                     SecurityUtils.currentUsername()
+            );
+            operationAuditService.record(
+                    "Data import",
+                    "CONFIRM",
+                    "DATA_IMPORT_JOB",
+                    completedJob.getId(),
+                    String.valueOf(completedJob.getId()),
+                    completedJob.getOriginalFileName(),
+                    "Import confirmed: imported=" + completedJob.getImportedRows()
+                            + ", skipped=" + completedJob.getSkippedRows(),
+                    SecurityUtils.currentUsername(),
+                    completedJob.getSummary(),
+                    "DATA_IMPORT_JOB",
+                    completedJob.getId()
             );
             return toValidationVO(completedJob, List.of(), true);
         } catch (RuntimeException ex) {
@@ -270,8 +290,9 @@ public class DataImportServiceImpl implements DataImportService {
             WorkbookSnapshot snapshot = workbookReader.readVehicleWorkbook(file);
             List<DataImportErrorVO> errors = workbookValidator.validateVehicleRows(snapshot);
             int totalRows = snapshot.totalRows();
-            int validRows = Math.max(0, totalRows - errors.size());
-            return new ValidationResult(totalRows, validRows, errors, errors.isEmpty(),
+            int errorRows = distinctErrorRows(errors);
+            int validRows = Math.max(0, totalRows - errorRows);
+            return new ValidationResult(totalRows, validRows, errorRows, errors, errors.isEmpty(),
                     errors.isEmpty() ? "Workbook validated successfully" : "Workbook validation found " + errors.size() + " row issues",
                     Map.of("sheets", snapshot.sheetSizes()));
         }
@@ -304,8 +325,9 @@ public class DataImportServiceImpl implements DataImportService {
             WorkbookSnapshot snapshot = workbookReader.readPartsWorkbook(file);
             List<DataImportErrorVO> errors = workbookValidator.validatePartRows(snapshot);
             int totalRows = snapshot.sheetRows("Parts").size();
-            int validRows = Math.max(0, totalRows - errors.size());
-            return new ValidationResult(totalRows, validRows, errors, errors.isEmpty(),
+            int errorRows = distinctErrorRows(errors);
+            int validRows = Math.max(0, totalRows - errorRows);
+            return new ValidationResult(totalRows, validRows, errorRows, errors, errors.isEmpty(),
                     errors.isEmpty() ? "Workbook validated successfully" : "Workbook validation found " + errors.size() + " row issues",
                     Map.of("sheet", "Parts", "rows", totalRows));
         }
@@ -322,7 +344,21 @@ public class DataImportServiceImpl implements DataImportService {
         }
     }
 
-    private record ValidationResult(int totalRows, int validRows, List<DataImportErrorVO> errors, boolean importable,
+    private int distinctErrorRows(List<DataImportErrorVO> errors) {
+        return (int) errors.stream()
+                .map(error -> new ErrorRowKey(
+                        Objects.toString(error.getSheetName(), ""),
+                        error.getRowNumber()
+                ))
+                .distinct()
+                .count();
+    }
+
+    private record ErrorRowKey(String sheetName, Integer rowNumber) {
+    }
+
+    private record ValidationResult(int totalRows, int validRows, int errorRows,
+                                    List<DataImportErrorVO> errors, boolean importable,
                                     String summary, Map<String, Object> snapshot) {
     }
 

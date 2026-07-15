@@ -40,6 +40,9 @@ public class MigrationException {
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
 
+    @Column(name = "resolved_by", length = 50)
+    private String resolvedBy;
+
     @PrePersist
     public void prePersist() {
         createdAt = LocalDateTime.now();

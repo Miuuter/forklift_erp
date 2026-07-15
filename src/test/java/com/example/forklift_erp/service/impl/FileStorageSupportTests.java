@@ -59,7 +59,7 @@ class FileStorageSupportTests {
                 "file",
                 "invoice.pdf",
                 "application/pdf",
-                "payload".getBytes(StandardCharsets.UTF_8)
+                "%PDF-1.4\npayload".getBytes(StandardCharsets.UTF_8)
         );
 
         FileStorageSupport.StoredFile stored = fileStorageSupport.store(
@@ -76,7 +76,7 @@ class FileStorageSupportTests {
         assertThat(stored.originalName()).isEqualTo("invoice.pdf");
         assertThat(stored.contentType()).isEqualTo("application/pdf");
         assertThat(stored.fileExtension()).isEqualTo("pdf");
-        assertThat(Files.readString(stored.filePath())).isEqualTo("payload");
+        assertThat(Files.readString(stored.filePath())).isEqualTo("%PDF-1.4\npayload");
     }
 
     @Test
@@ -101,6 +101,28 @@ class FileStorageSupportTests {
                 tempDir,
                 "stored.exe",
                 originalName,
+                PDF_ONLY,
+                "Invalid path",
+                "Save failed"
+        ))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Unsupported file type");
+    }
+
+    @Test
+    void storeRejectsSpoofedPdfSignature() {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "invoice.pdf",
+                "application/pdf",
+                "not-a-pdf".getBytes(StandardCharsets.UTF_8)
+        );
+
+        assertThatThrownBy(() -> fileStorageSupport.store(
+                file,
+                tempDir,
+                "stored.pdf",
+                "invoice.pdf",
                 PDF_ONLY,
                 "Invalid path",
                 "Save failed"

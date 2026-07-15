@@ -125,6 +125,9 @@ public interface RentalRecordRepository extends JpaRepository<RentalRecord, Long
 
     List<RentalRecord> findByStatusOrderByUpdatedAtDescIdDesc(String status, Pageable pageable);
 
+    @Query("select r.id from RentalRecord r where r.status = :status order by r.id asc")
+    List<Long> findIdsByStatus(@Param("status") String status);
+
     @Query("""
             select count(r) from RentalRecord r
             where r.status = :status

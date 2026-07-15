@@ -16,7 +16,8 @@ This directory is copied into every release produced by
    runs as UID/GID `10001`; grant that identity write access to uploads/logs.
 6. Create a Container Manager project from `compose.yaml`, or run
    `docker compose up -d` over SSH.
-7. Verify `http://<nas-ip>:<ERP_HTTP_PORT>/actuator/health`, then log in.
+7. Configure `ERP_BACKUP_REMOTE_DIR` on a separate volume or mounted remote share.
+8. Verify `http://<nas-ip>:<ERP_HTTP_PORT>/actuator/health`, then log in.
 
 Do not expose MySQL port 3306. Restrict the ERP port to the LAN in the DSM
 firewall. Prefer a DSM reverse proxy with HTTPS for browser PWA support.
@@ -29,22 +30,43 @@ firewall. Prefer a DSM reverse proxy with HTTPS for browser PWA support.
 4. Recreate the app service with `docker compose up -d app`.
 5. Check health, login, attachments, and the main business pages.
 
-The same process is automated by `update.sh`. For an offline image TAR:
+The same process is automated by `update.sh`. The supplied version must match
+the Maven project version and `/actuator/info`. For an offline image TAR:
 
 ```sh
-sh update.sh 1.0.1 forklift-erp-1.0.1-linux-amd64.tar
+sh update.sh 0.2.0-rc.1 forklift-erp-0.2.0-rc.1-linux-amd64.tar
 ```
 
 When `ERP_IMAGE` points to a registry, omit the TAR and the script pulls the
 new tag:
 
 ```sh
-sh update.sh 1.0.1
+sh update.sh 0.2.0-rc.1
 ```
 
-The script refuses to continue if MySQL is not running, creates a logical
-database dump and uploads archive under `backup/<timestamp>`, changes
-`ERP_VERSION`, and recreates only the application container.
+The script refuses to continue if MySQL is not running, invokes `backup.sh`,
+changes `ERP_VERSION`, recreates only the application container, waits for
+health `UP`, and verifies the build version from `/actuator/info`.
+
+## Backup and restore drill
+
+Create a daily backup manually:
+
+```sh
+sh backup.sh daily
+```
+
+The script keeps seven daily and four weekly copies. It also copies them to
+`ERP_BACKUP_REMOTE_DIR`. Configure DSM Task Scheduler to run it every night.
+
+Run an isolated monthly restore drill:
+
+```sh
+sh restore-drill.sh
+```
+
+The drill validates checksums and uploads, starts a temporary MySQL container,
+restores the dump, checks the restored tables, and then removes the container.
 
 Flyway upgrades the schema on startup. Rolling back therefore requires a
 matching database backup as well as the previous image tag.

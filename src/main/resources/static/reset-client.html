@@ -41,25 +41,6 @@
     <h1>正在重置本地缓存</h1>
     <p>页面会自动返回登录页，请稍候。</p>
   </main>
-  <script>
-    async function resetClient() {
-      try {
-        if ("serviceWorker" in navigator) {
-          const registrations = await navigator.serviceWorker.getRegistrations();
-          await Promise.all(registrations.map(registration => registration.unregister()));
-        }
-        if ("caches" in window) {
-          const keys = await caches.keys();
-          await Promise.all(keys.map(key => caches.delete(key)));
-        }
-        localStorage.clear();
-        sessionStorage.clear();
-      } finally {
-        location.replace("/?clientReset=" + Date.now());
-      }
-    }
-
-    resetClient();
-  </script>
+  <script type="module" src="/assets/modules/client-reset.js"></script>
 </body>
 </html>

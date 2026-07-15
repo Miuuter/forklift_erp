@@ -15,6 +15,7 @@ public class MigrationExceptionVO {
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime resolvedAt;
+    private String resolvedBy;
 
     public static MigrationExceptionVO fromEntity(MigrationException entity) {
         MigrationExceptionVO vo = new MigrationExceptionVO();
@@ -26,6 +27,7 @@ public class MigrationExceptionVO {
         vo.setStatus(entity.getStatus());
         vo.setCreatedAt(entity.getCreatedAt());
         vo.setResolvedAt(entity.getResolvedAt());
+        vo.setResolvedBy(entity.getResolvedBy());
         return vo;
     }
 }

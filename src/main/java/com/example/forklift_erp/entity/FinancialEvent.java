@@ -64,6 +64,9 @@ public class FinancialEvent {
     @Column(name = "reversal_of_event_id")
     private Long reversalOfEventId;
 
+    @Column(name = "created_by", length = 50)
+    private String createdBy;
+
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 

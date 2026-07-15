@@ -10,6 +10,9 @@ import java.time.LocalDate;
 
 @Data
 public class PaymentRecordCreateDTO {
+    @NotBlank(message = "Request ID is required")
+    private String requestId;
+
     @NotBlank(message = "Payment direction is required")
     private String direction;
 

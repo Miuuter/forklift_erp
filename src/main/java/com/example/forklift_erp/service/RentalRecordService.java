@@ -19,6 +19,8 @@ public interface RentalRecordService {
 
     List<RentalBillVO> findBills(Long id);
 
+    List<RentalBillVO> refreshBills(Long id);
+
     RentalRecordVO create(RentalRecordCreateDTO request);
 
     RentalRecordVO update(Long id, RentalRecordUpdateDTO request);

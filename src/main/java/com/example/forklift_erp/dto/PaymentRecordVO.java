@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 public class PaymentRecordVO {
     private Long id;
     private String paymentNo;
+    private String requestId;
     private String direction;
     private BigDecimal amount;
     private LocalDate paymentDate;
@@ -21,12 +22,14 @@ public class PaymentRecordVO {
     private Long financialEventId;
     private String remark;
     private Long reversalOfPaymentId;
+    private String createdBy;
     private LocalDateTime createdAt;
 
     public static PaymentRecordVO fromEntity(PaymentRecord entity) {
         PaymentRecordVO vo = new PaymentRecordVO();
         vo.setId(entity.getId());
         vo.setPaymentNo(entity.getPaymentNo());
+        vo.setRequestId(entity.getRequestId());
         vo.setDirection(entity.getDirection());
         vo.setAmount(entity.getAmount());
         vo.setPaymentDate(entity.getPaymentDate());
@@ -37,6 +40,7 @@ public class PaymentRecordVO {
         vo.setFinancialEventId(entity.getFinancialEventId());
         vo.setRemark(entity.getRemark());
         vo.setReversalOfPaymentId(entity.getReversalOfPaymentId());
+        vo.setCreatedBy(entity.getCreatedBy());
         vo.setCreatedAt(entity.getCreatedAt());
         return vo;
     }

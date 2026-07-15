@@ -1,6 +1,10 @@
 HELP.md
 target/
 dist/
+node_modules/
+coverage/
+playwright-report/
+test-results/
 logs/
 uploads/
 /deploy/synology/.env

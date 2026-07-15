@@ -88,7 +88,8 @@ public class AttachmentController {
                 mediaType = MediaType.APPLICATION_OCTET_STREAM;
             }
         }
-        ContentDisposition disposition = inline
+        boolean inlineAllowed = inline && attachment.previewable();
+        ContentDisposition disposition = inlineAllowed
                 ? ContentDisposition.inline().filename(attachment.originalName(), StandardCharsets.UTF_8).build()
                 : ContentDisposition.attachment().filename(attachment.originalName(), StandardCharsets.UTF_8).build();
         return ResponseEntity.ok()

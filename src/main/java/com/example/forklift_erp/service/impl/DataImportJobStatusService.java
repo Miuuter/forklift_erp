@@ -20,11 +20,11 @@ public class DataImportJobStatusService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DataImportJob markImporting(Long jobId) {
-        DataImportJob job = findJob(jobId);
-        job.setStatus("IMPORTING");
-        job.setStartedAt(LocalDateTime.now());
-        job.setFinishedAt(null);
-        return jobRepository.save(job);
+        if (jobRepository.claimReadyForImport(jobId) != 1) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Import job has already been confirmed or is no longer ready");
+        }
+        return findJob(jobId);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)

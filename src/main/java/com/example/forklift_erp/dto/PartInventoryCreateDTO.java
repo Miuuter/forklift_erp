@@ -46,6 +46,9 @@ public class PartInventoryCreateDTO {
     @Min(value = 0, message = "数量不能为负数")
     private Integer quantity = 0;
 
+    @Min(value = 0, message = "补货点不能为负数")
+    private Integer reorderPoint = 5;
+
     private String unit;
 
     @DecimalMin(value = "0.00", message = "\u91c7\u8d2d\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
@@ -77,6 +80,7 @@ public class PartInventoryCreateDTO {
             entity.setWarehouseId(this.warehouseId);
         }
         entity.setQuantity(this.quantity);
+        entity.setReorderPoint(this.reorderPoint);
         entity.setUnit(this.unit);
         entity.setPurchasePrice(this.purchasePrice);
         entity.setLandedUnitCost(this.landedUnitCost);
@@ -102,6 +106,7 @@ public class PartInventoryCreateDTO {
             entity.setWarehouseId(this.warehouseId);
         }
         entity.setQuantity(this.quantity);
+        entity.setReorderPoint(this.reorderPoint);
         entity.setUnit(this.unit);
         entity.setPurchasePrice(this.purchasePrice);
         entity.setLandedUnitCost(this.landedUnitCost);

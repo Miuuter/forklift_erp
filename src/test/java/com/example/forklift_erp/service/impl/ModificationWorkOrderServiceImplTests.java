@@ -27,6 +27,7 @@ import com.example.forklift_erp.repository.StockLotConsumptionRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.ConfigReplaceService;
 import com.example.forklift_erp.service.FinancialEventService;
+import com.example.forklift_erp.service.ModificationAccountingService;
 import com.example.forklift_erp.service.OperationAuditService;
 import com.example.forklift_erp.service.ResourceVisibilityPolicy;
 import com.example.forklift_erp.service.StockLedgerService;
@@ -281,6 +282,7 @@ class ModificationWorkOrderServiceImplTests {
         ReflectionTestUtils.setField(service, "collaborationService", mock(CollaborationService.class));
         ReflectionTestUtils.setField(service, "operationAuditService", mock(OperationAuditService.class));
         ReflectionTestUtils.setField(service, "visibilityPolicy", new ResourceVisibilityPolicy());
+        ReflectionTestUtils.setField(service, "modificationAccountingService", mock(ModificationAccountingService.class));
         StockLedgerService stockLedgerService = mock(StockLedgerService.class);
         when(stockLedgerService.resolveWarehouseId(any())).thenReturn(1L);
         when(stockLedgerService.availableQuantity(any(), any(), any())).thenReturn(1);
@@ -365,8 +367,15 @@ class ModificationWorkOrderServiceImplTests {
         ReflectionTestUtils.setField(service, "visibilityPolicy", new ResourceVisibilityPolicy());
         ReflectionTestUtils.setField(service, "stockLedgerService", stockLedgerService);
         ReflectionTestUtils.setField(service, "stockLotService", stockLotService);
-        ReflectionTestUtils.setField(service, "stockLotConsumptionRepository", consumptionRepository);
-        ReflectionTestUtils.setField(service, "financialEventService", financialEventService);
+        ReflectionTestUtils.setField(
+                service,
+                "modificationAccountingService",
+                new ModificationAccountingService(
+                        workOrderRepository,
+                        consumptionRepository,
+                        financialEventService
+                )
+        );
 
         return new CompletionFixture(
                 service,

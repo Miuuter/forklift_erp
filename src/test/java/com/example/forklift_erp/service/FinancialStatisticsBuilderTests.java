@@ -85,41 +85,7 @@ class FinancialStatisticsBuilderTests {
     }
 
     @Test
-    void hybridRowsKeepUnpostedHistoryWithoutDoubleCountingPostedSales() {
-        OutboundOrder sale = new OutboundOrder();
-        sale.setId(1L);
-        sale.setSalesDate(LocalDate.of(SELECTED_YEAR, 1, 10));
-        sale.setQuantity(1);
-        sale.setLineAmount(new BigDecimal("100.00"));
-        sale.setReceivedAmount(new BigDecimal("40.00"));
-        sale.setLastPaymentDate(LocalDate.of(SELECTED_YEAR, 1, 10));
-        sale.setStockOperationLogId(10L);
-        StockOperationLog saleLog = stockLog("OUTBOUND", 1, 1, 0, "60.00", "100.00", 10);
-        saleLog.setId(10L);
-
-        RepairRecord repair = completedRepair();
-        repair.setId(2L);
-        repair.setRepairFee(new BigDecimal("50.00"));
-        repair.setPartsFee(new BigDecimal("20.00"));
-        repair.setRepairExpense(new BigDecimal("10.00"));
-        repair.setPartsCost(new BigDecimal("5.00"));
-        repair.setReceivableAmount(new BigDecimal("70.00"));
-        repair.setTotalFee(new BigDecimal("70.00"));
-
-        RentalRecord rental = new RentalRecord();
-        rental.setId(3L);
-        rental.setMonthlyRentalPrice(new BigDecimal("3100.00"));
-        rental.setStartDate(LocalDate.of(SELECTED_YEAR, 1, 1));
-        rental.setStatus(RentalStatus.ACTIVE.code());
-
-        PurchaseOrder purchase = new PurchaseOrder();
-        purchase.setId(4L);
-        purchase.setStatus("RECEIVED");
-        purchase.setReceivedDate(LocalDate.of(SELECTED_YEAR, 1, 5));
-        purchase.setQuantity(2);
-        purchase.setTotalAmount(new BigDecimal("200.00"));
-        purchase.setFreightAmount(new BigDecimal("20.00"));
-
+    void eventRowsUseOnlyPostedFinancialFacts() {
         List<FinancialEvent> events = List.of(
                 event(FinancialEventType.REVENUE, "100.00", "OUTBOUND_ORDER", 1L),
                 event(FinancialEventType.COST_OF_GOODS_SOLD, "60.00", "OUTBOUND_ORDER", 1L),
@@ -128,36 +94,15 @@ class FinancialStatisticsBuilderTests {
         );
 
         StatisticsDashboardVO.FinancialRow january = findPeriod(
-                builder.buildMonthlyRowsHybrid(
-                        SELECTED_YEAR,
-                        events,
-                        List.of(saleLog),
-                        List.of(purchase),
-                        List.of(sale),
-                        Map.of(10L, saleLog),
-                        List.of(repair),
-                        List.of(rental),
-                        List.of(),
-                        List.of(),
-                        Map.of()
-                ),
+                builder.buildMonthlyRowsFromEvents(SELECTED_YEAR, events),
                 "2026-01"
         );
 
-        assertThat(january.getInboundQuantity()).isEqualTo(2);
-        assertThat(january.getOutboundQuantity()).isEqualTo(1);
-        assertThat(january.getRepairOrders()).isEqualTo(1);
-        assertThat(january.getRentalOrders()).isEqualTo(1);
-        assertMoney(january.getInboundCost(), "220.00");
         assertMoney(january.getOutboundRevenue(), "100.00");
         assertMoney(january.getOutboundCost(), "60.00");
-        assertMoney(january.getRepairIncome(), "70.00");
-        assertMoney(january.getRepairExpense(), "10.00");
-        assertMoney(january.getRepairPartsCost(), "5.00");
-        assertMoney(january.getRentalIncome(), "3100.00");
         assertMoney(january.getInventoryGain(), "15.00");
-        assertMoney(january.getTotalIncome(), "3285.00");
-        assertMoney(january.getTotalExpense(), "75.00");
+        assertMoney(january.getTotalIncome(), "115.00");
+        assertMoney(january.getTotalExpense(), "60.00");
         assertMoney(january.getNetCashflow(), "40.00");
     }
 

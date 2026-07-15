@@ -16,6 +16,7 @@ import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.service.impl.OutboundReceivablePolicy;
 import com.example.forklift_erp.util.MoneyValues;
+import com.example.forklift_erp.util.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +35,7 @@ public class PaymentRecordService {
     private final RepairRecordRepository repairRecordRepository;
     private final RentalBillRepository rentalBillRepository;
     private final ModificationWorkOrderRepository modificationWorkOrderRepository;
+    private final OperationAuditService operationAuditService;
 
     public PaymentRecordService(
             PaymentRecordRepository paymentRecordRepository,
@@ -43,7 +45,8 @@ public class PaymentRecordService {
             PurchaseOrderRepository purchaseOrderRepository,
             RepairRecordRepository repairRecordRepository,
             RentalBillRepository rentalBillRepository,
-            ModificationWorkOrderRepository modificationWorkOrderRepository
+            ModificationWorkOrderRepository modificationWorkOrderRepository,
+            OperationAuditService operationAuditService
     ) {
         this.paymentRecordRepository = paymentRecordRepository;
         this.financialEventService = financialEventService;
@@ -53,6 +56,7 @@ public class PaymentRecordService {
         this.repairRecordRepository = repairRecordRepository;
         this.rentalBillRepository = rentalBillRepository;
         this.modificationWorkOrderRepository = modificationWorkOrderRepository;
+        this.operationAuditService = operationAuditService;
     }
 
     @Transactional(readOnly = true)
@@ -68,6 +72,11 @@ public class PaymentRecordService {
 
     @Transactional
     public PaymentRecordVO create(PaymentRecordCreateDTO request) {
+        String requestId = normalizeRequestId(request.getRequestId());
+        PaymentRecord existing = paymentRecordRepository.findByRequestId("PAYMENT-REQUEST:" + requestId).orElse(null);
+        if (existing != null) {
+            return PaymentRecordVO.fromEntity(existing);
+        }
         String direction = normalizeDirection(request.getDirection());
         String sourceType = normalizeSourceType(request.getSourceType());
         validateSourceExists(sourceType, request.getSourceId());
@@ -82,14 +91,34 @@ public class PaymentRecordService {
                 sourceType,
                 request.getSourceId(),
                 trimToNull(request.getRemark()),
-                "PAYMENT:" + sourceType + ":" + request.getSourceId() + ":" + java.util.UUID.randomUUID()
+                "PAYMENT-REQUEST:" + requestId
         );
         syncOutboundReceipt(sourceType, request.getSourceId());
+        operationAuditService.record(
+                "Payment",
+                "CREATE",
+                "PAYMENT_RECORD",
+                saved.getId(),
+                saved.getPaymentNo(),
+                sourceType + ":" + request.getSourceId(),
+                direction + " " + saved.getAmount(),
+                SecurityUtils.currentUsername(),
+                saved.getRemark(),
+                sourceType,
+                request.getSourceId()
+        );
         return PaymentRecordVO.fromEntity(saved);
     }
 
     @Transactional
-    public PaymentRecordVO reverse(Long id, String remark) {
+    public PaymentRecordVO reverse(Long id, String requestId, String remark) {
+        String normalizedRequestId = normalizeRequestId(requestId);
+        PaymentRecord requested = paymentRecordRepository
+                .findByRequestId("PAYMENT-REVERSAL-REQUEST:" + normalizedRequestId)
+                .orElse(null);
+        if (requested != null) {
+            return PaymentRecordVO.fromEntity(requested);
+        }
         PaymentRecord original = paymentRecordRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Payment record not found"));
         if (original.getReversalOfPaymentId() != null || original.getAmount() == null || original.getAmount().signum() <= 0) {
@@ -113,11 +142,24 @@ public class PaymentRecordService {
                 original.getSourceType(),
                 original.getSourceId(),
                 trimToNull(remark) == null ? "Payment reversal" : trimToNull(remark),
-                "PAYMENT-REVERSAL:" + original.getId()
+                "PAYMENT-REVERSAL-REQUEST:" + normalizedRequestId
         );
         reversal.setReversalOfPaymentId(original.getId());
         paymentRecordRepository.save(reversal);
         syncOutboundReceipt(original.getSourceType(), original.getSourceId());
+        operationAuditService.record(
+                "Payment",
+                "REVERSE",
+                "PAYMENT_RECORD",
+                reversal.getId(),
+                reversal.getPaymentNo(),
+                original.getPaymentNo(),
+                "Reverse payment " + original.getPaymentNo(),
+                SecurityUtils.currentUsername(),
+                reversal.getRemark(),
+                original.getSourceType(),
+                original.getSourceId()
+        );
         return PaymentRecordVO.fromEntity(reversal);
     }
 
@@ -172,6 +214,17 @@ public class PaymentRecordService {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Payment source type is required");
         }
         return normalized.toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeRequestId(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Request ID is required");
+        }
+        if (normalized.length() > 120) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Request ID is too long");
+        }
+        return normalized;
     }
 
     private void validateSourceExists(String sourceType, Long sourceId) {

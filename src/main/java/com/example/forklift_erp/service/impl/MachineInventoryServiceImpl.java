@@ -128,6 +128,9 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
     @Autowired
     private ResourceAttachmentRepository resourceAttachmentRepository;
 
+    @Autowired
+    private InventoryMasterDeletionGuard deletionGuard;
+
     @Override
     public List<MachineInventory> findAll() {
         if (SecurityUtils.isAdminOrSuperAdmin()) {
@@ -550,56 +553,10 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
         }
         MachineInventory existing = existingOpt.get();
         visibilityPolicy.ensureWritable(existing.getIsLocked(), "该记录已被锁定，您无权删除");
-        ensureNoHistoricalReferences(id);
+        deletionGuard.ensureMachineDeletable(id);
         stockLedgerService.deleteEmptyBalances(StockLedgerService.RESOURCE_MACHINE, id);
         machineConfigService.deleteByMachineId(id);
         repository.deleteById(id);
-    }
-
-    private void ensureNoHistoricalReferences(Long id) {
-        if (purchaseOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_MACHINE, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has purchase records and cannot be deleted");
-        }
-        if (outboundOrderRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_MACHINE, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has outbound records and cannot be deleted");
-        }
-        if (rentalRecordRepository.existsByMachineId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has rental records and cannot be deleted");
-        }
-        if (repairRecordRepository.existsByMachineId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has repair records and cannot be deleted");
-        }
-        if (modificationWorkOrderRepository.existsByMachineId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has modification records and cannot be deleted");
-        }
-        if (configReplaceLogRepository.existsByMachineId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has configuration replacement records and cannot be deleted");
-        }
-        if (partInventoryRepository.existsBySourceMachineId(id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle is referenced as the source of a part and cannot be deleted");
-        }
-        if (stocktakingRecordRepository.existsByResourceTypeAndResourceId(
-                StockLedgerService.RESOURCE_MACHINE, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has stocktaking records and cannot be deleted");
-        }
-        if (resourceAttachmentRepository.existsByResourceTypeAndResourceIdAndDeletedFalse(
-                StockLedgerService.RESOURCE_MACHINE, id)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has active attachments and cannot be deleted");
-        }
-        if (stockLotRepository.existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
-                StockLedgerService.RESOURCE_MACHINE, id, 0)) {
-            throw new BusinessException(ResultCode.CONFLICT,
-                    "Vehicle has remaining FIFO inventory and cannot be deleted");
-        }
     }
 
     private MachineInventory adjustStock(Long id, StockAdjustRequestDTO request, boolean inbound) {

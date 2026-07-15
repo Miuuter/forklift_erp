@@ -1,45 +1,85 @@
-# Testing
+# 测试手册
 
-The default Maven test run is safe on machines without Docker. Tests tagged with
-`docker-integration` are excluded by default in `pom.xml`, so these commands run
-only the unit and non-Docker tests:
+## 前端
 
-```powershell
-.\mvnw.cmd "-Dfrontend.skip=true" test
-.\mvnw.cmd "-Dfrontend.skip=true" verify
-```
-
-Run the frontend packaging and encoding checks separately when you do not need a
-full Maven lifecycle:
+安装锁定依赖并执行静态检查：
 
 ```powershell
+npm.cmd ci --cache target/npm-cache
 npm.cmd run check
 ```
 
-Use the Docker integration profile when you want to run the Spring Boot API
-integration tests backed by Testcontainers MySQL:
+Vitest 单元测试及 V8 覆盖率：
 
 ```powershell
-.\mvnw.cmd -Pdocker-integration-tests test
+npm.cmd run test:unit
 ```
 
-That profile requires a working Docker daemon and pulls `mysql:8.0.43` through
-Testcontainers. The integration test datasource in
-`src/test/resources/application.yml` is a sentinel value and is overridden by
-`TestcontainersDatabaseSupport` when the container starts.
+当前前端单元测试覆盖请求 ID 复用和批量请求按 ID 排序/版本传递。
 
-Before using a data restore backup file, validate it with the super-admin
-dry-run endpoint `POST /api/admin/data-restore/dry-run`. The actual restore
-endpoint still requires the restore switch and `RESTORE-DATA-BACKUP`
-confirmation phrase.
+## Java 单元测试与覆盖率
 
-Before starting a production instance, run with the `prod` profile in an
-environment that provides these required variables:
+默认测试不要求 Docker，并排除 `docker-integration` 标签：
 
 ```powershell
-$env:FORKLIFT_ERP_JWT_SECRET = "<32-byte-or-longer-secret>"
-$env:FORKLIFT_ERP_JWT_EXPIRATION = "86400000"
-$env:FORKLIFT_ERP_DB_PASSWORD = "<database-password>"
-$env:FORKLIFT_ERP_ADMIN_PASSWORD = "<bootstrap-admin-password>"
-.\mvnw.cmd "-Dspring-boot.run.profiles=prod" spring-boot:run
+.\mvnw.cmd clean verify "-Dfrontend.skip=true"
+java scripts/CheckCoverageBaseline.java
+```
+
+JaCoCo 报告位于 `target/site/jacoco`。基线记录在 `scripts/jacoco-baseline.properties`，CI 禁止仓库级指令、分支、行或方法覆盖率下降。
+
+## MySQL Testcontainers
+
+```powershell
+.\mvnw.cmd -Pdocker-integration-tests test "-Dfrontend.skip=true"
+```
+
+要求 Docker daemon 可用。测试使用 `mysql:8.0.43`，数据源由 `TestcontainersDatabaseSupport` 动态覆盖，不应指向日常业务库。
+
+重点验证：
+
+- 付款和冲销幂等；
+- 导入任务并发确认；
+- 采购、销售、维修、改装、调拨和盘点后的分仓/FIFO 对账；
+- 统计 MySQL 聚合 SQL；
+- Flyway 新建库与升级路径。
+
+## Playwright
+
+针对已启动的测试环境：
+
+```powershell
+$env:E2E_BASE_URL = "http://127.0.0.1:8080"
+$env:E2E_USERNAME = "<username>"
+$env:E2E_PASSWORD = "<password>"
+npx playwright install chromium
+npm.cmd run test:e2e
+```
+
+未提供账号时测试会明确跳过。CI 使用临时 MySQL 和测试账号启动应用后执行核心模块加载冒烟。
+
+## 发布前命令
+
+```powershell
+npm.cmd run check
+npm.cmd run test:unit
+.\mvnw.cmd clean verify "-Dfrontend.skip=true"
+java scripts/CheckCoverageBaseline.java
+.\mvnw.cmd -Pdocker-integration-tests test "-Dfrontend.skip=true"
+git diff --check
+```
+
+还应验证：
+
+- `target/forklift-erp-0.2.0-rc.1.jar` 存在；
+- `target/classes/META-INF/sbom/application.cdx.json` 存在；
+- `/actuator/health` 为 `UP`；
+- `/actuator/info` 的构建版本和 Git 信息正确。
+
+## 数据恢复测试
+
+应用内数据恢复先调用超级管理员 dry-run，再使用确认短语执行。Synology 数据库和附件恢复演练使用：
+
+```sh
+sh deploy/synology/restore-drill.sh [backup-directory]
 ```

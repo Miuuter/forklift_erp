@@ -22,6 +22,8 @@ public interface StockBalanceRepository extends JpaRepository<StockBalance, Long
 
     List<StockBalance> findByResourceTypeAndResourceId(String resourceType, Long resourceId);
 
+    List<StockBalance> findByResourceTypeAndResourceIdIn(String resourceType, List<Long> resourceIds);
+
     List<StockBalance> findByWarehouseId(Long warehouseId);
 
     boolean existsByWarehouseId(Long warehouseId);

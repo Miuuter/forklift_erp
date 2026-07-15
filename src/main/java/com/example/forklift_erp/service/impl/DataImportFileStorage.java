@@ -9,6 +9,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
+import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
@@ -75,6 +76,18 @@ public class DataImportFileStorage {
 
     void registerRollbackCleanup(Path file) {
         fileStorageSupport.registerRollbackCleanup(file, "Failed to delete import file");
+    }
+
+    void delete(String stagedFileName) {
+        if (stagedFileName == null || stagedFileName.isBlank()) {
+            return;
+        }
+        Path file = resolve(stagedFileName);
+        try {
+            Files.deleteIfExists(file);
+        } catch (IOException ex) {
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "Failed to delete expired import file");
+        }
     }
 
     String fingerprint(Path file) {

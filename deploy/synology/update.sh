@@ -34,19 +34,13 @@ if ! docker compose ps --status running --services | grep -qx 'mysql'; then
     exit 1
 fi
 
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-BACKUP_DIR="backup/$TIMESTAMP"
-mkdir -p "$BACKUP_DIR"
-
-echo "Backing up MySQL to $BACKUP_DIR/forklift_erp.sql"
-docker compose exec -T mysql sh -c \
-    'exec mysqldump --single-transaction --routines --triggers -uroot -p"$MYSQL_ROOT_PASSWORD" forklift_erp' \
-    > "$BACKUP_DIR/forklift_erp.sql"
-
-if [ -d data/uploads ]; then
-    echo "Backing up uploads to $BACKUP_DIR/uploads.tar.gz"
-    tar -czf "$BACKUP_DIR/uploads.tar.gz" -C data uploads
+if [ ! -f backup.sh ]; then
+    echo "backup.sh is missing from the release directory." >&2
+    exit 1
 fi
+sh backup.sh --pre-release
+
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 ENV_TMP=".env.$TIMESTAMP.tmp"
 awk -v version="$VERSION" '
@@ -69,5 +63,34 @@ echo "Recreating the ERP application container"
 docker compose up -d --no-deps app
 docker compose ps app
 
-echo "Upgrade completed. Verify /actuator/health, login, attachments, and business pages."
-echo "Backup: $BACKUP_DIR"
+set -a
+# shellcheck disable=SC1091
+. ./.env
+set +a
+BASE_URL="http://127.0.0.1:${ERP_HTTP_PORT:-8080}"
+ready=false
+attempt=0
+while [ "$attempt" -lt 60 ]; do
+    if HEALTH_JSON=$(curl -fsS "$BASE_URL/actuator/health" 2>/dev/null) \
+        && echo "$HEALTH_JSON" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"UP"'; then
+        ready=true
+        break
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+done
+if [ "$ready" != "true" ]; then
+    echo "Application health check failed after 120 seconds: $BASE_URL/actuator/health" >&2
+    docker compose logs --tail=200 app >&2
+    exit 1
+fi
+
+INFO_JSON=$(curl -fsS "$BASE_URL/actuator/info")
+if ! echo "$INFO_JSON" | grep -Eq "\"version\"[[:space:]]*:[[:space:]]*\"$VERSION\""; then
+    echo "Application is healthy but build version does not match $VERSION." >&2
+    echo "$INFO_JSON" >&2
+    exit 1
+fi
+
+echo "Upgrade completed: health=UP, version=$VERSION"
+echo "Run login, attachment, and core business smoke tests before closing the release."

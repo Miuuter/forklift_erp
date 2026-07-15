@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - develop
+      - master
+      - "codex/**"
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: frontend-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run test:unit
+      - run: git diff --check
+
+  unit:
+    name: unit-tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: ./mvnw --batch-mode clean verify -Dfrontend.skip=true
+      - run: java scripts/CheckCoverageBaseline.java
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: target/site/jacoco
+
+  mysql-integration:
+    name: mysql-testcontainers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: ./mvnw --batch-mode -Pdocker-integration-tests test -Dfrontend.skip=true
+
+  e2e:
+    name: playwright-smoke
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0.43
+        env:
+          MYSQL_ROOT_PASSWORD: e2e-root-password
+          MYSQL_DATABASE: forklift_erp
+          MYSQL_USER: forklift_erp
+          MYSQL_PASSWORD: e2e-app-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysql -h 127.0.0.1 -uforklift_erp -pe2e-app-password -D forklift_erp -e 'SELECT 1'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: ./mvnw --batch-mode package -DskipTests
+      - name: Start application
+        env:
+          FORKLIFT_ERP_DB_URL: jdbc:mysql://127.0.0.1:3306/forklift_erp?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+          FORKLIFT_ERP_DB_USERNAME: forklift_erp
+          FORKLIFT_ERP_DB_PASSWORD: e2e-app-password
+          FORKLIFT_ERP_JWT_SECRET: e2e-jwt-secret-with-more-than-32-bytes
+          FORKLIFT_ERP_ADMIN_USERNAME: e2e-admin
+          FORKLIFT_ERP_ADMIN_PASSWORD: e2e-admin-password
+          FORKLIFT_ERP_SEED_DEMO_DATA: "true"
+        run: |
+          nohup java -jar target/forklift-erp-0.2.0-rc.1.jar > target/e2e-app.log 2>&1 &
+          echo $! > target/e2e-app.pid
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/actuator/health | grep -q '"UP"'; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat target/e2e-app.log
+          exit 1
+      - run: npm run test:e2e
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+          E2E_USERNAME: e2e-admin
+          E2E_PASSWORD: e2e-admin-password
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+            target/e2e-app.log
+
+  package:
+    name: package-artifact
+    needs:
+      - frontend
+      - unit
+      - mysql-integration
+      - e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - run: ./mvnw --batch-mode package -DskipTests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forklift-erp-0.2.0-rc.1
+          path: |
+            target/forklift-erp-0.2.0-rc.1.jar
+            target/classes/META-INF/sbom/application.cdx.json

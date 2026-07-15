@@ -3,8 +3,10 @@ package com.example.forklift_erp.controller;
 import com.example.forklift_erp.common.Result;
 import com.example.forklift_erp.dto.PurchaseOrderDTO;
 import com.example.forklift_erp.dto.PurchaseOrderVO;
+import com.example.forklift_erp.dto.VersionedBatchRequest;
 import com.example.forklift_erp.security.PermissionCodes;
 import com.example.forklift_erp.service.PurchaseOrderService;
+import com.example.forklift_erp.service.BatchBusinessOperationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +32,9 @@ import java.math.BigDecimal;
 public class PurchaseOrderController {
     @Autowired
     private PurchaseOrderService service;
+
+    @Autowired
+    private BatchBusinessOperationService batchBusinessOperationService;
 
     @GetMapping
     public Result<?> getAll(@RequestParam(defaultValue = "true") boolean paged,
@@ -62,6 +67,15 @@ public class PurchaseOrderController {
                                                @RequestParam boolean received,
                                                @RequestParam(required = false) Long version) {
         return Result.success(received ? "入库订单已收货" : "入库订单已改为待收货", service.setReceived(id, received, version));
+    }
+
+    @PostMapping("/batch-receive")
+    @PreAuthorize(PermissionCodes.HAS_STOCK_ADJUST)
+    public Result<java.util.List<PurchaseOrderVO>> batchReceive(
+            @Valid @RequestBody VersionedBatchRequest request
+    ) {
+        return Result.success("采购订单已批量收货",
+                batchBusinessOperationService.receivePurchases(request));
     }
 
     @PutMapping("/{id}/freight")

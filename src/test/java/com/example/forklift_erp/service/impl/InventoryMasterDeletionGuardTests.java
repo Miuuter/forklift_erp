@@ -216,6 +216,20 @@ class InventoryMasterDeletionGuardTests {
         ReflectionTestUtils.setField(service, "stockLedgerService", stockLedgerService);
         ReflectionTestUtils.setField(service, "machineConfigService", machineConfigService);
         ReflectionTestUtils.setField(service, "visibilityPolicy", new ResourceVisibilityPolicy());
+        ReflectionTestUtils.setField(service, "deletionGuard", new InventoryMasterDeletionGuard(
+                purchaseOrderRepository,
+                outboundOrderRepository,
+                rentalRecordRepository,
+                repairRecordRepository,
+                modificationWorkOrderRepository,
+                mock(ModificationWorkOrderLineRepository.class),
+                mock(RepairPartUsageRepository.class),
+                configReplaceLogRepository,
+                partInventoryRepository,
+                stocktakingRecordRepository,
+                resourceAttachmentRepository,
+                stockLotRepository
+        ));
 
         return new MachineFixture(
                 service,
@@ -266,6 +280,20 @@ class InventoryMasterDeletionGuardTests {
         ReflectionTestUtils.setField(service, "resourceAttachmentRepository", resourceAttachmentRepository);
         ReflectionTestUtils.setField(service, "stockLedgerService", stockLedgerService);
         ReflectionTestUtils.setField(service, "visibilityPolicy", new ResourceVisibilityPolicy());
+        ReflectionTestUtils.setField(service, "deletionGuard", new InventoryMasterDeletionGuard(
+                purchaseOrderRepository,
+                outboundOrderRepository,
+                mock(RentalRecordRepository.class),
+                mock(RepairRecordRepository.class),
+                mock(ModificationWorkOrderRepository.class),
+                modificationWorkOrderLineRepository,
+                repairPartUsageRepository,
+                configReplaceLogRepository,
+                partInventoryRepository,
+                stocktakingRecordRepository,
+                resourceAttachmentRepository,
+                stockLotRepository
+        ));
 
         return new PartFixture(
                 service,

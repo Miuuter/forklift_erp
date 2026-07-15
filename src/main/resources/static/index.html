@@ -8,27 +8,6 @@
   <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
   <link rel="stylesheet" href="/assets/app.css?v=20260715-polish-v2">
-  <script>
-    if (new URLSearchParams(location.search).has("resetClient")) {
-      window.__FORKLIFT_CLIENT_RESETTING__ = true;
-      (async () => {
-        try {
-          if ("serviceWorker" in navigator) {
-            const registrations = await navigator.serviceWorker.getRegistrations();
-            await Promise.all(registrations.map(registration => registration.unregister()));
-          }
-          if ("caches" in window) {
-            const keys = await caches.keys();
-            await Promise.all(keys.map(key => caches.delete(key)));
-          }
-          localStorage.clear();
-          sessionStorage.clear();
-        } finally {
-          location.replace("/?clientReset=" + Date.now());
-        }
-      })();
-    }
-  </script>
   <script type="module" src="/assets/app.js?v=20260715-polish-v2"></script>
 </head>
 <body>
