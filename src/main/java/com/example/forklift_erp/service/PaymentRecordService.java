@@ -36,6 +36,7 @@ public class PaymentRecordService {
     private final RentalBillRepository rentalBillRepository;
     private final ModificationWorkOrderRepository modificationWorkOrderRepository;
     private final OperationAuditService operationAuditService;
+    private final RequestIdempotencyGuard requestIdempotencyGuard;
 
     public PaymentRecordService(
             PaymentRecordRepository paymentRecordRepository,
@@ -46,7 +47,8 @@ public class PaymentRecordService {
             RepairRecordRepository repairRecordRepository,
             RentalBillRepository rentalBillRepository,
             ModificationWorkOrderRepository modificationWorkOrderRepository,
-            OperationAuditService operationAuditService
+            OperationAuditService operationAuditService,
+            RequestIdempotencyGuard requestIdempotencyGuard
     ) {
         this.paymentRecordRepository = paymentRecordRepository;
         this.financialEventService = financialEventService;
@@ -57,6 +59,7 @@ public class PaymentRecordService {
         this.rentalBillRepository = rentalBillRepository;
         this.modificationWorkOrderRepository = modificationWorkOrderRepository;
         this.operationAuditService = operationAuditService;
+        this.requestIdempotencyGuard = requestIdempotencyGuard;
     }
 
     @Transactional(readOnly = true)
@@ -73,7 +76,8 @@ public class PaymentRecordService {
     @Transactional
     public PaymentRecordVO create(PaymentRecordCreateDTO request) {
         String requestId = normalizeRequestId(request.getRequestId());
-        PaymentRecord existing = paymentRecordRepository.findByRequestId("PAYMENT-REQUEST:" + requestId).orElse(null);
+        String persistedRequestId = "PAYMENT-REQUEST:" + requestId;
+        PaymentRecord existing = paymentRecordRepository.findByRequestId(persistedRequestId).orElse(null);
         if (existing != null) {
             return PaymentRecordVO.fromEntity(existing);
         }
@@ -82,6 +86,9 @@ public class PaymentRecordService {
         validateSourceExists(sourceType, request.getSourceId());
         validateDirectionForSource(direction, sourceType);
         validateSourceReadyForPayment(sourceType, request.getSourceId());
+        if (!requestIdempotencyGuard.claim("PAYMENT_CREATE", requestId)) {
+            return existingRequest(persistedRequestId);
+        }
         PaymentRecord saved = financialEventService.recordPayment(
                 direction,
                 MoneyValues.zeroIfNullOrNegative(request.getAmount()),
@@ -91,7 +98,7 @@ public class PaymentRecordService {
                 sourceType,
                 request.getSourceId(),
                 trimToNull(request.getRemark()),
-                "PAYMENT-REQUEST:" + requestId
+                persistedRequestId
         );
         syncOutboundReceipt(sourceType, request.getSourceId());
         operationAuditService.record(
@@ -113,8 +120,9 @@ public class PaymentRecordService {
     @Transactional
     public PaymentRecordVO reverse(Long id, String requestId, String remark) {
         String normalizedRequestId = normalizeRequestId(requestId);
+        String persistedRequestId = "PAYMENT-REVERSAL-REQUEST:" + normalizedRequestId;
         PaymentRecord requested = paymentRecordRepository
-                .findByRequestId("PAYMENT-REVERSAL-REQUEST:" + normalizedRequestId)
+                .findByRequestId(persistedRequestId)
                 .orElse(null);
         if (requested != null) {
             return PaymentRecordVO.fromEntity(requested);
@@ -133,6 +141,9 @@ public class PaymentRecordService {
             throw new BusinessException(ResultCode.CONFLICT,
                     "Payment reversal would make the source total negative");
         }
+        if (!requestIdempotencyGuard.claim("PAYMENT_REVERSE", normalizedRequestId)) {
+            return existingRequest(persistedRequestId);
+        }
         PaymentRecord reversal = financialEventService.recordPayment(
                 original.getDirection(),
                 original.getAmount().negate(),
@@ -142,7 +153,7 @@ public class PaymentRecordService {
                 original.getSourceType(),
                 original.getSourceId(),
                 trimToNull(remark) == null ? "Payment reversal" : trimToNull(remark),
-                "PAYMENT-REVERSAL-REQUEST:" + normalizedRequestId
+                persistedRequestId
         );
         reversal.setReversalOfPaymentId(original.getId());
         paymentRecordRepository.save(reversal);
@@ -161,6 +172,15 @@ public class PaymentRecordService {
                 original.getSourceId()
         );
         return PaymentRecordVO.fromEntity(reversal);
+    }
+
+    private PaymentRecordVO existingRequest(String persistedRequestId) {
+        return paymentRecordRepository.findByRequestIdForUpdate(persistedRequestId)
+                .map(PaymentRecordVO::fromEntity)
+                .orElseThrow(() -> new BusinessException(
+                        ResultCode.CONFLICT,
+                        "Request is already being processed; retry with the same requestId"
+                ));
     }
 
     private void syncOutboundReceipt(String sourceType, Long sourceId) {

@@ -22,7 +22,7 @@ class FlywayUpgradeIntegrationTests {
     private static final DockerImageName MYSQL_IMAGE = DockerImageName.parse("mysql:8.0.43");
 
     @Test
-    void v36SnapshotUpgradesThroughV43WithoutValidationDrift() throws Exception {
+    void v36SnapshotUpgradesThroughV45WithoutValidationDrift() throws Exception {
         try (MySQLContainer<?> mysql = new MySQLContainer<>(MYSQL_IMAGE)
                 .withDatabaseName("forklift_erp_upgrade")
                 .withUsername("forklift")
@@ -50,7 +50,7 @@ class FlywayUpgradeIntegrationTests {
                     WHERE success = 1
                     ORDER BY installed_rank DESC
                     LIMIT 1
-                    """)).isEqualTo("43");
+                    """)).isEqualTo("45");
             assertThat(queryString(mysql,
                     "SELECT request_id FROM payment_record WHERE id = ?",
                     legacyFacts.paymentId()))
@@ -74,6 +74,12 @@ class FlywayUpgradeIntegrationTests {
                         'chk_stock_balance_available'
                       )
                     """)).isEqualTo(4);
+            assertThat(queryLong(mysql, """
+                    SELECT COUNT(*)
+                    FROM information_schema.tables
+                    WHERE table_schema = DATABASE()
+                      AND table_name = 'request_idempotency'
+                    """)).isEqualTo(1);
 
             assertThatThrownBy(() -> executeUpdate(
                     mysql,

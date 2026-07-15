@@ -17,11 +17,21 @@ public class StatisticsProjectionRepository {
     }
 
     public List<FinancialSummary> monthlyFinancial(LocalDate start, LocalDate end) {
-        return financial(start, end, "DATE_FORMAT(business_date, '%Y-%m')");
+        return financial(
+                start,
+                end,
+                "DATE_FORMAT(business_date, '%Y-%m')",
+                "DATE_FORMAT(m.business_date, '%Y-%m')"
+        );
     }
 
     public List<FinancialSummary> yearlyFinancial(LocalDate start, LocalDate end) {
-        return financial(start, end, "CAST(YEAR(business_date) AS CHAR)");
+        return financial(
+                start,
+                end,
+                "CAST(YEAR(business_date) AS CHAR)",
+                "CAST(YEAR(m.business_date) AS CHAR)"
+        );
     }
 
     public List<ResourceFlowSummary> resourceFlows(LocalDate start, LocalDate end) {
@@ -149,10 +159,15 @@ public class StatisticsProjectionRepository {
                 ));
     }
 
-    private List<FinancialSummary> financial(LocalDate start, LocalDate end, String periodExpression) {
+    private List<FinancialSummary> financial(
+            LocalDate start,
+            LocalDate end,
+            String financialPeriodExpression,
+            String movementPeriodExpression
+    ) {
         String sql = """
                 SELECT
-                    %s AS period,
+                    period,
                     SUM(inbound_quantity) AS inbound_quantity,
                     SUM(outbound_quantity) AS outbound_quantity,
                     SUM(inbound_cost) AS inbound_cost,
@@ -173,53 +188,54 @@ public class StatisticsProjectionRepository {
                     SUM(modification_orders) AS modification_orders
                 FROM (
                     SELECT
-                        business_date,
+                        %s AS period,
                         0 AS inbound_quantity,
                         0 AS outbound_quantity,
                         0 AS inbound_cost,
-                        CASE WHEN event_type = 'REVENUE' AND source_type = 'OUTBOUND_ORDER'
-                             THEN amount ELSE 0 END AS outbound_revenue,
-                        CASE WHEN event_type = 'COST_OF_GOODS_SOLD' AND source_type = 'OUTBOUND_ORDER'
-                             THEN amount ELSE 0 END AS outbound_cost,
-                        CASE WHEN event_type = 'REVENUE' AND source_type = 'REPAIR'
-                             THEN amount ELSE 0 END AS repair_income,
-                        CASE WHEN event_type = 'ACCOUNTS_RECEIVABLE' AND source_type = 'REPAIR'
-                             THEN amount ELSE 0 END AS repair_receivable,
-                        CASE WHEN event_type = 'OPERATING_COST' AND source_type = 'REPAIR'
-                             THEN amount ELSE 0 END AS repair_expense,
-                        CASE WHEN event_type = 'COST_OF_GOODS_SOLD' AND source_type = 'REPAIR'
-                             THEN amount ELSE 0 END AS repair_parts_cost,
-                        CASE WHEN event_type = 'REVENUE' AND source_type = 'RENTAL_BILL'
-                             THEN amount ELSE 0 END AS rental_income,
-                        CASE WHEN event_type = 'REVENUE'
-                                  AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL')
-                             THEN amount ELSE 0 END AS modification_income,
-                        CASE WHEN event_type IN ('OPERATING_COST', 'COST_OF_GOODS_SOLD')
-                                  AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR')
-                             THEN amount ELSE 0 END AS modification_expense,
-                        CASE WHEN event_type = 'INVENTORY_GAIN' THEN amount ELSE 0 END AS inventory_gain,
-                        CASE WHEN event_type = 'INVENTORY_LOSS' THEN amount ELSE 0 END AS inventory_loss,
-                        CASE WHEN event_type = 'CASH_RECEIPT' THEN amount
-                             WHEN event_type = 'CASH_PAYMENT' THEN -amount
-                             ELSE 0 END AS net_cashflow,
-                        CASE WHEN event_type = 'ACCOUNTS_RECEIVABLE' AND source_type = 'REPAIR'
-                             THEN SIGN(amount) ELSE 0 END AS repair_orders,
-                        CASE WHEN event_type = 'REVENUE' AND source_type = 'RENTAL_BILL'
-                             THEN SIGN(amount) ELSE 0 END AS rental_orders,
-                        CASE WHEN event_type = 'REVENUE'
-                                  AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL')
-                             THEN SIGN(amount) ELSE 0 END AS modification_orders
+                        SUM(CASE WHEN event_type = 'REVENUE' AND source_type = 'OUTBOUND_ORDER'
+                                 THEN amount ELSE 0 END) AS outbound_revenue,
+                        SUM(CASE WHEN event_type = 'COST_OF_GOODS_SOLD' AND source_type = 'OUTBOUND_ORDER'
+                                 THEN amount ELSE 0 END) AS outbound_cost,
+                        SUM(CASE WHEN event_type = 'REVENUE' AND source_type = 'REPAIR'
+                                 THEN amount ELSE 0 END) AS repair_income,
+                        SUM(CASE WHEN event_type = 'ACCOUNTS_RECEIVABLE' AND source_type = 'REPAIR'
+                                 THEN amount ELSE 0 END) AS repair_receivable,
+                        SUM(CASE WHEN event_type = 'OPERATING_COST' AND source_type = 'REPAIR'
+                                 THEN amount ELSE 0 END) AS repair_expense,
+                        SUM(CASE WHEN event_type = 'COST_OF_GOODS_SOLD' AND source_type = 'REPAIR'
+                                 THEN amount ELSE 0 END) AS repair_parts_cost,
+                        SUM(CASE WHEN event_type = 'REVENUE' AND source_type = 'RENTAL_BILL'
+                                 THEN amount ELSE 0 END) AS rental_income,
+                        SUM(CASE WHEN event_type = 'REVENUE'
+                                      AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL')
+                                 THEN amount ELSE 0 END) AS modification_income,
+                        SUM(CASE WHEN event_type IN ('OPERATING_COST', 'COST_OF_GOODS_SOLD')
+                                      AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR')
+                                 THEN amount ELSE 0 END) AS modification_expense,
+                        SUM(CASE WHEN event_type = 'INVENTORY_GAIN' THEN amount ELSE 0 END) AS inventory_gain,
+                        SUM(CASE WHEN event_type = 'INVENTORY_LOSS' THEN amount ELSE 0 END) AS inventory_loss,
+                        SUM(CASE WHEN event_type = 'CASH_RECEIPT' THEN amount
+                                 WHEN event_type = 'CASH_PAYMENT' THEN -amount
+                                 ELSE 0 END) AS net_cashflow,
+                        SUM(CASE WHEN event_type = 'ACCOUNTS_RECEIVABLE' AND source_type = 'REPAIR'
+                                 THEN SIGN(amount) ELSE 0 END) AS repair_orders,
+                        SUM(CASE WHEN event_type = 'REVENUE' AND source_type = 'RENTAL_BILL'
+                                 THEN SIGN(amount) ELSE 0 END) AS rental_orders,
+                        SUM(CASE WHEN event_type = 'REVENUE'
+                                      AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL')
+                                 THEN SIGN(amount) ELSE 0 END) AS modification_orders
                     FROM financial_event
                     WHERE business_date >= :startDate
                       AND business_date <= :endDate
+                    GROUP BY %s
 
                     UNION ALL
 
                     SELECT
-                        m.business_date,
-                        CASE WHEN l.quantity_delta > 0 THEN l.quantity_delta ELSE 0 END AS inbound_quantity,
-                        CASE WHEN l.quantity_delta < 0 THEN -l.quantity_delta ELSE 0 END AS outbound_quantity,
-                        CASE WHEN l.quantity_delta > 0 THEN COALESCE(l.cost_amount, 0) ELSE 0 END AS inbound_cost,
+                        %s AS period,
+                        SUM(CASE WHEN l.quantity_delta > 0 THEN l.quantity_delta ELSE 0 END) AS inbound_quantity,
+                        SUM(CASE WHEN l.quantity_delta < 0 THEN -l.quantity_delta ELSE 0 END) AS outbound_quantity,
+                        SUM(CASE WHEN l.quantity_delta > 0 THEN COALESCE(l.cost_amount, 0) ELSE 0 END) AS inbound_cost,
                         0 AS outbound_revenue,
                         0 AS outbound_cost,
                         0 AS repair_income,
@@ -239,10 +255,16 @@ public class StatisticsProjectionRepository {
                     JOIN stock_movement m ON m.id = l.movement_id
                     WHERE m.business_date >= :startDate
                       AND m.business_date <= :endDate
+                    GROUP BY %s
                 ) facts
-                GROUP BY %s
+                GROUP BY period
                 ORDER BY period
-                """.formatted(periodExpression, periodExpression);
+                """.formatted(
+                financialPeriodExpression,
+                financialPeriodExpression,
+                movementPeriodExpression,
+                movementPeriodExpression
+        );
         return jdbcTemplate.query(sql, dates(start, end), (rs, rowNum) -> new FinancialSummary(
                 rs.getString("period"),
                 rs.getLong("inbound_quantity"),

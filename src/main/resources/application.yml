@@ -1,5 +1,16 @@
 server:
   port: ${FORKLIFT_ERP_SERVER_PORT:8080} # 服务端口
+  tomcat:
+    threads:
+      max: ${FORKLIFT_ERP_HTTP_MAX_THREADS:64}
+      min-spare: ${FORKLIFT_ERP_HTTP_MIN_SPARE_THREADS:8}
+    accept-count: ${FORKLIFT_ERP_HTTP_ACCEPT_COUNT:100}
+    max-connections: ${FORKLIFT_ERP_HTTP_MAX_CONNECTIONS:512}
+    connection-timeout: ${FORKLIFT_ERP_HTTP_CONNECTION_TIMEOUT:20s}
+  compression:
+    enabled: true
+    min-response-size: 2KB
+    mime-types: application/json,application/javascript,text/css,text/html,text/plain
   http:
     port: ${FORKLIFT_ERP_HTTP_PORT:8080} # HTTP 跳转端口
   ssl:
@@ -17,7 +28,15 @@ spring:
     username: ${FORKLIFT_ERP_DB_USERNAME:root} # 数据库用户名，请根据实际情况修改
     password: ${FORKLIFT_ERP_DB_PASSWORD:ChH060118} # 数据库密码，请通过环境变量配置，避免提交真实口令
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${FORKLIFT_ERP_DB_POOL_MAX_SIZE:12}
+      minimum-idle: ${FORKLIFT_ERP_DB_POOL_MIN_IDLE:2}
+      connection-timeout: ${FORKLIFT_ERP_DB_CONNECTION_TIMEOUT:20000}
+      validation-timeout: ${FORKLIFT_ERP_DB_VALIDATION_TIMEOUT:3000}
+      idle-timeout: ${FORKLIFT_ERP_DB_IDLE_TIMEOUT:300000}
+      max-lifetime: ${FORKLIFT_ERP_DB_MAX_LIFETIME:1500000}
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: validate # 结构变更由 Flyway 管理，启动时只校验实体与表结构
     show-sql: true # 控制台显示SQL语句，开发环境建议开启

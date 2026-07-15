@@ -3,7 +3,8 @@
     "build": "java scripts/BuildFrontend.java",
     "check": "java scripts/BuildFrontend.java && java scripts/CheckCodeQuality.java",
     "test:unit": "vitest run --coverage",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:load": "node scripts/stability-load-test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

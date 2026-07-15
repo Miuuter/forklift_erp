@@ -22,6 +22,11 @@ This directory is copied into every release produced by
 Do not expose MySQL port 3306. Restrict the ERP port to the LAN in the DSM
 firewall. Prefer a DSM reverse proxy with HTTPS for browser PWA support.
 
+The supplied defaults cap the application at 1536 MiB and MySQL at 768 MiB,
+use a 12-connection application pool, and cap MySQL at 50 connections. They
+were validated in the local 0.2.0-rc.1 stress environment; keep them as the
+initial NAS settings and tune only from measured DSM/Container Manager data.
+
 ## Upgrade
 
 1. Back up MySQL with a consistent `mysqldump` and snapshot `data/uploads`.
@@ -65,8 +70,17 @@ Run an isolated monthly restore drill:
 sh restore-drill.sh
 ```
 
-The drill validates checksums and uploads, starts a temporary MySQL container,
-restores the dump, checks the restored tables, and then removes the container.
+The drill requires the configured ERP image to be available locally. It
+validates checksums and uploads, starts an isolated MySQL container, restores
+the dump, verifies every active attachment file, starts an isolated ERP
+application, and checks health, build version, login, inventory access,
+critical tables, Flyway version, and a sample attachment download. It removes
+the temporary containers, network, and extracted files on exit.
+
+`ERP_JWT_SECRET` and `ERP_ADMIN_PASSWORD` must be present. If the restored
+database uses a different existing login, set `ERP_RESTORE_LOGIN_USERNAME` and
+`ERP_RESTORE_LOGIN_PASSWORD` for the drill without changing the normal
+bootstrap account settings.
 
 Flyway upgrades the schema on startup. Rolling back therefore requires a
 matching database backup as well as the previous image tag.

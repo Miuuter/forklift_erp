@@ -7,6 +7,13 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_0900_ai_ci
+      - --innodb-buffer-pool-size=${ERP_MYSQL_BUFFER_POOL_SIZE:-256M}
+      - --innodb-log-buffer-size=${ERP_MYSQL_LOG_BUFFER_SIZE:-8M}
+      - --key-buffer-size=${ERP_MYSQL_KEY_BUFFER_SIZE:-1M}
+      - --max-connections=${ERP_MYSQL_MAX_CONNECTIONS:-50}
+      - --table-open-cache=${ERP_MYSQL_TABLE_OPEN_CACHE:-1000}
+      - --performance-schema-digests-size=${ERP_MYSQL_PS_DIGESTS_SIZE:-1000}
+      - --performance-schema-events-statements-history-long-size=${ERP_MYSQL_PS_STATEMENT_HISTORY_LONG_SIZE:-1000}
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
       MYSQL_DATABASE: forklift_erp
@@ -15,6 +22,8 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./data/mysql:/var/lib/mysql
+    mem_limit: ${ERP_MYSQL_MEMORY_LIMIT:-768m}
+    pids_limit: 256
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
       interval: 10s
@@ -47,6 +56,11 @@ services:
       FORKLIFT_ERP_CONTRACT_STORAGE_DIR: /data/uploads/contracts
       FORKLIFT_ERP_IMPORT_STORAGE_DIR: /data/uploads/imports
       FORKLIFT_ERP_IMPORT_RETENTION_DAYS: ${ERP_IMPORT_RETENTION_DAYS:-30}
+      FORKLIFT_ERP_DB_POOL_MAX_SIZE: ${ERP_DB_POOL_MAX_SIZE:-12}
+      FORKLIFT_ERP_DB_POOL_MIN_IDLE: ${ERP_DB_POOL_MIN_IDLE:-2}
+      FORKLIFT_ERP_HTTP_MAX_THREADS: ${ERP_HTTP_MAX_THREADS:-64}
+      FORKLIFT_ERP_HTTP_MIN_SPARE_THREADS: ${ERP_HTTP_MIN_SPARE_THREADS:-8}
+      JAVA_TOOL_OPTIONS: "${ERP_JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=60.0 -XX:InitialRAMPercentage=10.0 -XX:+ExitOnOutOfMemoryError}"
       LOGGING_FILE_NAME: /data/logs/application.log
       TZ: ${TZ:-Asia/Shanghai}
     ports:
@@ -54,3 +68,6 @@ services:
     volumes:
       - ./data/uploads:/data/uploads
       - ./data/logs:/data/logs
+    mem_limit: ${ERP_APP_MEMORY_LIMIT:-1536m}
+    pids_limit: 256
+    stop_grace_period: 45s

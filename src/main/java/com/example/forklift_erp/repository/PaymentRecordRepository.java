@@ -1,6 +1,8 @@
 package com.example.forklift_erp.repository;
 
 import com.example.forklift_erp.entity.PaymentRecord;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -12,6 +14,11 @@ import java.util.Optional;
 public interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Long> {
     Optional<PaymentRecord> findByIdempotencyKey(String idempotencyKey);
     Optional<PaymentRecord> findByRequestId(String requestId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select payment from PaymentRecord payment where payment.requestId = :requestId")
+    Optional<PaymentRecord> findByRequestIdForUpdate(@Param("requestId") String requestId);
+
     Optional<PaymentRecord> findByReversalOfPaymentId(Long reversalOfPaymentId);
 
     List<PaymentRecord> findBySourceTypeAndSourceIdOrderByPaymentDateAscIdAsc(String sourceType, Long sourceId);

@@ -7,8 +7,12 @@ import com.example.forklift_erp.repository.StatisticsProjectionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class StatisticsService {
@@ -41,12 +45,16 @@ public class StatisticsService {
         StatisticsDashboardVO dashboard = new StatisticsDashboardVO();
         dashboard.setSelectedYear(selectedYear);
         dashboard.setGeneratedAt(LocalDateTime.now());
+        List<StatisticsProjectionRepository.FinancialSummary> monthlyHistory =
+                projectionRepository.monthlyFinancial(historyStart, selectedEnd);
         dashboard.setMonthlyFinance(projectionMapper.monthlyRows(
                 selectedYear,
-                projectionRepository.monthlyFinancial(selectedStart, selectedEnd)
+                monthlyHistory.stream()
+                        .filter(row -> row.period().startsWith(String.valueOf(selectedYear)))
+                        .toList()
         ));
         dashboard.setYearlyFinance(projectionMapper.yearlyRows(
-                projectionRepository.yearlyFinancial(historyStart, selectedEnd)
+                aggregateYears(monthlyHistory)
         ));
         dashboard.setAnnualSummary(projectionMapper.annualRow(
                 selectedYear, dashboard.getYearlyFinance()));
@@ -70,6 +78,75 @@ public class StatisticsService {
             );
         }
         return dashboard;
+    }
+
+    private List<StatisticsProjectionRepository.FinancialSummary> aggregateYears(
+            List<StatisticsProjectionRepository.FinancialSummary> monthlyRows
+    ) {
+        Map<String, StatisticsProjectionRepository.FinancialSummary> years = new LinkedHashMap<>();
+        for (StatisticsProjectionRepository.FinancialSummary row : monthlyRows) {
+            String year = row.period().substring(0, 4);
+            years.merge(year, rowWithPeriod(row, year), this::add);
+        }
+        return List.copyOf(years.values());
+    }
+
+    private StatisticsProjectionRepository.FinancialSummary rowWithPeriod(
+            StatisticsProjectionRepository.FinancialSummary row,
+            String period
+    ) {
+        return new StatisticsProjectionRepository.FinancialSummary(
+                period,
+                row.inboundQuantity(),
+                row.outboundQuantity(),
+                row.inboundCost(),
+                row.outboundRevenue(),
+                row.outboundCost(),
+                row.repairIncome(),
+                row.repairReceivable(),
+                row.repairExpense(),
+                row.repairPartsCost(),
+                row.rentalIncome(),
+                row.modificationIncome(),
+                row.modificationExpense(),
+                row.inventoryGain(),
+                row.inventoryLoss(),
+                row.netCashflow(),
+                row.repairOrders(),
+                row.rentalOrders(),
+                row.modificationOrders()
+        );
+    }
+
+    private StatisticsProjectionRepository.FinancialSummary add(
+            StatisticsProjectionRepository.FinancialSummary left,
+            StatisticsProjectionRepository.FinancialSummary right
+    ) {
+        return new StatisticsProjectionRepository.FinancialSummary(
+                left.period(),
+                left.inboundQuantity() + right.inboundQuantity(),
+                left.outboundQuantity() + right.outboundQuantity(),
+                money(left.inboundCost()).add(money(right.inboundCost())),
+                money(left.outboundRevenue()).add(money(right.outboundRevenue())),
+                money(left.outboundCost()).add(money(right.outboundCost())),
+                money(left.repairIncome()).add(money(right.repairIncome())),
+                money(left.repairReceivable()).add(money(right.repairReceivable())),
+                money(left.repairExpense()).add(money(right.repairExpense())),
+                money(left.repairPartsCost()).add(money(right.repairPartsCost())),
+                money(left.rentalIncome()).add(money(right.rentalIncome())),
+                money(left.modificationIncome()).add(money(right.modificationIncome())),
+                money(left.modificationExpense()).add(money(right.modificationExpense())),
+                money(left.inventoryGain()).add(money(right.inventoryGain())),
+                money(left.inventoryLoss()).add(money(right.inventoryLoss())),
+                money(left.netCashflow()).add(money(right.netCashflow())),
+                left.repairOrders() + right.repairOrders(),
+                left.rentalOrders() + right.rentalOrders(),
+                left.modificationOrders() + right.modificationOrders()
+        );
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     public ListSummaryVO listSummary(String type, String keyword) {

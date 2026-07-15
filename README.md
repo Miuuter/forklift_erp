@@ -32,6 +32,10 @@ npm.cmd run test:unit
 .\mvnw.cmd clean verify "-Dfrontend.skip=true"
 java scripts/CheckCoverageBaseline.java
 .\mvnw.cmd -Pdocker-integration-tests test "-Dfrontend.skip=true"
+$env:E2E_BASE_URL = "http://127.0.0.1:8080"
+$env:E2E_USERNAME = "<username>"
+$env:E2E_PASSWORD = "<password>"
+npm.cmd run test:e2e
 git diff --check
 ```
 
@@ -40,7 +44,7 @@ git diff --check
 ## 数据库迁移
 
 - V37–V40 是已发布且不可修改的迁移。
-- 本轮新增迁移从 V41 开始。
+- 本轮新增迁移为 V41–V45，后续数据库变更从 V46 开始。
 - 升级旧库前必须完成备份和历史修复 dry-run；阻塞异常应先处理，再应用直接外键与数量约束。
 
 详见 [迁移说明](docs/MIGRATIONS.md)。
@@ -54,6 +58,8 @@ git diff --check
 - `deploy/synology/restore-drill.sh` 使用隔离 MySQL 容器验证数据库和附件可恢复。
 
 发布清单见 [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)，恢复手册见 [RESTORE_RUNBOOK.md](docs/RESTORE_RUNBOOK.md)。
+
+本地等价环境的容量、并发和恢复结果见 [0.2.0-rc.1 稳定性报告](docs/STABILITY_REPORT_0.2.0-rc.1.md)。真实 Synology 的 CPU 架构、磁盘和网络性能仍须在目标 NAS 上执行发布清单。
 
 ## 架构说明
 

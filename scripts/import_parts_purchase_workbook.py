@@ -45,7 +45,7 @@ class ImportStats:
 
 class PartsImportClient(ApiClient):
     def list_parts(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/api/parts")
+        return self._request("GET", "/api/parts?paged=false")
 
     def create_part(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/api/parts", payload)

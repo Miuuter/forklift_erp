@@ -1,4 +1,6 @@
 spring:
+  jpa:
+    open-in-view: false
   datasource:
     url: jdbc:mysql://testcontainers-required/should_be_overridden
     username: forklift

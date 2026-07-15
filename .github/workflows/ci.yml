@@ -28,6 +28,21 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run test:unit
+      - name: Validate Synology deployment files
+        run: |
+          sh -n deploy/synology/backup.sh
+          sh -n deploy/synology/restore-drill.sh
+          sh -n deploy/synology/update.sh
+          (
+            set -a
+            . deploy/synology/.env.example
+            set +a
+            test -n "$ERP_JAVA_TOOL_OPTIONS"
+          )
+          docker compose \
+            --env-file deploy/synology/.env.example \
+            -f deploy/synology/compose.yaml \
+            config --quiet
       - run: git diff --check
 
   unit:

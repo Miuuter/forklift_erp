@@ -196,7 +196,7 @@ class SeedClient(ApiClient):
         return self._request("POST", "/api/config/values", payload)
 
     def list_machines(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/api/inventory")
+        return self._request("GET", "/api/inventory?paged=false")
 
     def inbound_machine(self, machine_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("PUT", f"/api/inventory/{machine_id}/inbound", payload)
@@ -206,7 +206,7 @@ class SeedClient(ApiClient):
         return self._request("PUT", f"/api/inventory/{machine_id}/configs{suffix}", payload)
 
     def list_parts(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/api/parts")
+        return self._request("GET", "/api/parts?paged=false")
 
     def create_part(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/api/parts", payload)

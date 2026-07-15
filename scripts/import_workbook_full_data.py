@@ -45,13 +45,13 @@ class FullImportStats:
 
 class FullImportClient(ApiClient):
     def list_customers(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/api/customers")
+        return self._request("GET", "/api/customers?paged=false")
 
     def list_machines(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/api/inventory")
+        return self._request("GET", "/api/inventory?paged=false")
 
     def list_orders(self) -> list[dict[str, Any]]:
-        return self._request("GET", "/api/outbound-orders")
+        return self._request("GET", "/api/outbound-orders?paged=false")
 
 
 def non_empty_rows(sheet: Any) -> list[tuple[int, tuple[Any, ...]]]:

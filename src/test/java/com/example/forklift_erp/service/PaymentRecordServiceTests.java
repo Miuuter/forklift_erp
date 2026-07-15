@@ -25,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 class PaymentRecordServiceTests {
@@ -169,6 +170,26 @@ class PaymentRecordServiceTests {
         assertThat(reversal.getReversalOfPaymentId()).isEqualTo(42L);
     }
 
+    @Test
+    void duplicateClaimReturnsCommittedPayment() {
+        Fixture fixture = fixture();
+        PaymentRecord existing = payment(51L, "10.00", LocalDate.of(2026, 7, 15));
+        existing.setRequestId("PAYMENT-REQUEST:request-OUTBOUND_ORDER-31");
+        when(fixture.outboundOrderRepository.existsById(31L)).thenReturn(true);
+        when(fixture.requestIdempotencyGuard.claim(anyString(), anyString())).thenReturn(false);
+        when(fixture.paymentRecordRepository.findByRequestIdForUpdate(existing.getRequestId()))
+                .thenReturn(Optional.of(existing));
+
+        var result = fixture.service.create(request(
+                PaymentRecord.DIRECTION_RECEIPT,
+                FinancialEventService.SOURCE_OUTBOUND_ORDER,
+                31L
+        ));
+
+        assertThat(result.getId()).isEqualTo(51L);
+        verifyNoInteractions(fixture.financialEventService);
+    }
+
     private PaymentRecord payment(Long id, String amount, LocalDate date) {
         PaymentRecord record = new PaymentRecord();
         record.setId(id);
@@ -199,6 +220,8 @@ class PaymentRecordServiceTests {
         RentalBillRepository rentalBillRepository = mock(RentalBillRepository.class);
         ModificationWorkOrderRepository modificationWorkOrderRepository =
                 mock(ModificationWorkOrderRepository.class);
+        RequestIdempotencyGuard requestIdempotencyGuard = mock(RequestIdempotencyGuard.class);
+        when(requestIdempotencyGuard.claim(anyString(), anyString())).thenReturn(true);
         PaymentRecordService service = new PaymentRecordService(
                 paymentRecordRepository,
                 financialEventService,
@@ -208,7 +231,8 @@ class PaymentRecordServiceTests {
                 repairRecordRepository,
                 rentalBillRepository,
                 modificationWorkOrderRepository,
-                mock(OperationAuditService.class)
+                mock(OperationAuditService.class),
+                requestIdempotencyGuard
         );
         return new Fixture(
                 service,
@@ -217,7 +241,8 @@ class PaymentRecordServiceTests {
                 outboundOrderRepository,
                 purchaseOrderRepository,
                 repairRecordRepository,
-                modificationWorkOrderRepository
+                modificationWorkOrderRepository,
+                requestIdempotencyGuard
         );
     }
 
@@ -228,7 +253,8 @@ class PaymentRecordServiceTests {
             OutboundOrderRepository outboundOrderRepository,
             PurchaseOrderRepository purchaseOrderRepository,
             RepairRecordRepository repairRecordRepository,
-            ModificationWorkOrderRepository modificationWorkOrderRepository
+            ModificationWorkOrderRepository modificationWorkOrderRepository,
+            RequestIdempotencyGuard requestIdempotencyGuard
     ) {
     }
 }

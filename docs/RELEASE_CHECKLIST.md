@@ -3,7 +3,7 @@
 ## 构建前
 
 - [ ] `pom.xml`、镜像标签和 CHANGELOG 版本一致。
-- [ ] V37–V40 未修改，新增迁移编号连续。
+- [ ] V37–V40 未修改，V41–V45 校验和稳定，后续迁移从 V46 开始。
 - [ ] 历史修复 dry-run 无阻塞异常。
 - [ ] 工作树只包含本次发布改动。
 
@@ -15,6 +15,7 @@
 - [ ] `java scripts/CheckCoverageBaseline.java`
 - [ ] `mvn -Pdocker-integration-tests test -Dfrontend.skip=true`
 - [ ] Playwright 核心流程冒烟
+- [ ] C25/C50 分级压力和 C50 五分钟 soak 达到本次发布阈值
 - [ ] `git diff --check`
 - [ ] JAR、Git 构建信息和 SBOM 已生成
 
@@ -42,3 +43,13 @@
 - [ ] 日志包含请求关联 ID 和构建版本。
 - [ ] 日备份任务成功，独立存储存在副本。
 - [ ] 记录发布日期、Git 提交、镜像摘要和备份位置。
+
+## 0.2.0-rc.1 本地门禁记录
+
+- [x] 前端检查、Vitest 7/7。
+- [x] Java 单元测试 140/140，JaCoCo 四项覆盖率不低于基线。
+- [x] MySQL Testcontainers 51/51，V1→V45 与 V36→V45 通过。
+- [x] Playwright 7/7。
+- [x] C50 五分钟 92,666 请求、零错误、整体 p95 425.9 ms。
+- [x] 本地隔离备份恢复通过，数据库、应用和附件链路均可访问。
+- [ ] 真实 Synology 镜像导入、部署、恢复和真机压力测试。
