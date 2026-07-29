@@ -162,6 +162,7 @@ class CollaborationIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("name", name);
         payload.put("specificationModel", "CPD25");
         payload.put("machineType", "TEST");
+        payload.put("warehouseId", defaultWarehouseId());
         payload.put("inventoryCount", 1);
         return payload;
     }
