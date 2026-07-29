@@ -13,6 +13,8 @@ import com.example.forklift_erp.repository.RepairPartUsageRepository;
 import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.repository.ResourceAttachmentRepository;
 import com.example.forklift_erp.repository.StockLotRepository;
+import com.example.forklift_erp.repository.StockMovementLineRepository;
+import com.example.forklift_erp.repository.StockOperationLogRepository;
 import com.example.forklift_erp.repository.StocktakingRecordRepository;
 import com.example.forklift_erp.service.StockLedgerService;
 import org.springframework.stereotype.Component;
@@ -31,6 +33,8 @@ public class InventoryMasterDeletionGuard {
     private final StocktakingRecordRepository stocktakingRecordRepository;
     private final ResourceAttachmentRepository resourceAttachmentRepository;
     private final StockLotRepository stockLotRepository;
+    private final StockMovementLineRepository stockMovementLineRepository;
+    private final StockOperationLogRepository stockOperationLogRepository;
 
     public InventoryMasterDeletionGuard(
             PurchaseOrderRepository purchaseOrderRepository,
@@ -44,7 +48,9 @@ public class InventoryMasterDeletionGuard {
             PartInventoryRepository partInventoryRepository,
             StocktakingRecordRepository stocktakingRecordRepository,
             ResourceAttachmentRepository resourceAttachmentRepository,
-            StockLotRepository stockLotRepository
+            StockLotRepository stockLotRepository,
+            StockMovementLineRepository stockMovementLineRepository,
+            StockOperationLogRepository stockOperationLogRepository
     ) {
         this.purchaseOrderRepository = purchaseOrderRepository;
         this.outboundOrderRepository = outboundOrderRepository;
@@ -58,6 +64,8 @@ public class InventoryMasterDeletionGuard {
         this.stocktakingRecordRepository = stocktakingRecordRepository;
         this.resourceAttachmentRepository = resourceAttachmentRepository;
         this.stockLotRepository = stockLotRepository;
+        this.stockMovementLineRepository = stockMovementLineRepository;
+        this.stockOperationLogRepository = stockOperationLogRepository;
     }
 
     void ensureMachineDeletable(Long id) {
@@ -81,9 +89,15 @@ public class InventoryMasterDeletionGuard {
         conflict(resourceAttachmentRepository.existsByResourceTypeAndResourceIdAndDeletedFalse(
                         StockLedgerService.RESOURCE_MACHINE, id),
                 "Vehicle has active attachments and cannot be deleted");
-        conflict(stockLotRepository.existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
-                        StockLedgerService.RESOURCE_MACHINE, id, 0),
-                "Vehicle has remaining FIFO inventory and cannot be deleted");
+        conflict(stockLotRepository.existsByResourceTypeAndResourceId(
+                        StockLedgerService.RESOURCE_MACHINE, id),
+                "Vehicle has FIFO history and cannot be deleted");
+        conflict(stockMovementLineRepository.existsByResourceTypeAndResourceId(
+                        StockLedgerService.RESOURCE_MACHINE, id),
+                "Vehicle has stock movement history and cannot be deleted");
+        conflict(stockOperationLogRepository.existsByResourceTypeAndResourceId(
+                        StockLedgerService.RESOURCE_MACHINE, id),
+                "Vehicle has stock operation history and cannot be deleted");
     }
 
     void ensurePartDeletable(Long id) {
@@ -103,9 +117,15 @@ public class InventoryMasterDeletionGuard {
         conflict(resourceAttachmentRepository.existsByResourceTypeAndResourceIdAndDeletedFalse(
                         StockLedgerService.RESOURCE_PART, id),
                 "Part has active attachments and cannot be deleted");
-        conflict(stockLotRepository.existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
-                        StockLedgerService.RESOURCE_PART, id, 0),
-                "Part has remaining FIFO inventory and cannot be deleted");
+        conflict(stockLotRepository.existsByResourceTypeAndResourceId(
+                        StockLedgerService.RESOURCE_PART, id),
+                "Part has FIFO history and cannot be deleted");
+        conflict(stockMovementLineRepository.existsByResourceTypeAndResourceId(
+                        StockLedgerService.RESOURCE_PART, id),
+                "Part has stock movement history and cannot be deleted");
+        conflict(stockOperationLogRepository.existsByResourceTypeAndResourceId(
+                        StockLedgerService.RESOURCE_PART, id),
+                "Part has stock operation history and cannot be deleted");
     }
 
     private void conflict(boolean condition, String message) {

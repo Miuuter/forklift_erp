@@ -35,6 +35,7 @@ class DataImportTemplateBuilderTests {
         try (Workbook workbook = WorkbookFactory.create(new ByteArrayInputStream(template.content()))) {
             assertThat(workbook.getNumberOfSheets()).isEqualTo(1);
             assertThat(workbook.getSheetAt(0).getSheetName()).isEqualTo("Parts");
+            assertThat(workbook.getSheet("Parts").getRow(0).getCell(1).getStringCellValue()).isEqualTo("Part Code");
             assertThat(workbook.getSheet("Parts").getRow(0).getCell(4).getStringCellValue()).isEqualTo("Part Name");
             assertThat(workbook.getSheet("Parts").getRow(0).getCell(12).getStringCellValue()).isEqualTo("Source");
         }

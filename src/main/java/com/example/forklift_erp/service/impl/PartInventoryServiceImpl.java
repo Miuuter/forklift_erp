@@ -13,6 +13,7 @@ import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.ConfigReplaceLogRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
+import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.OutboundOrderRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.PurchaseOrderRepository;
@@ -53,6 +54,9 @@ public class PartInventoryServiceImpl implements PartInventoryService {
 
     @Autowired
     private PartInventoryRepository partRepository;
+
+    @Autowired
+    private MachineInventoryRepository machineRepository;
 
     @Autowired
     private CollaborationService collaborationService;
@@ -212,6 +216,12 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         }
         InventoryQuantities.requireNonNegative(part.getQuantity(), "Part quantity cannot be negative");
         InventoryQuantities.requireNonNegative(part.getReorderPoint(), "Part reorder point cannot be negative");
+        if (part.getSourceMachineId() != null) {
+            machineRepository.findByIdForUpdate(part.getSourceMachineId())
+                    .orElseThrow(() -> new BusinessException(
+                            ResultCode.VEHICLE_NOT_FOUND,
+                            "Source machine not found"));
+        }
         if (part.getWarehouseId() == null) {
             part.setWarehouseId(stockLedgerService.resolveWarehouseId(null));
         }
@@ -256,6 +266,7 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         collaborationService.validateWrite(part, dto.getVersion());
         int beforeQuantity = part.getQuantity() == null ? 0 : part.getQuantity();
         Long beforeWarehouseId = part.getWarehouseId();
+        Long beforeSourceMachineId = part.getSourceMachineId();
         BigDecimal beforePurchasePrice = part.getPurchasePrice();
         BigDecimal beforeLandedUnitCost = part.getLandedUnitCost();
         dto.updateEntity(part);
@@ -266,6 +277,10 @@ public class PartInventoryServiceImpl implements PartInventoryService {
         if (!Objects.equals(beforeWarehouseId, part.getWarehouseId())) {
             throw new BusinessException(ResultCode.CONFLICT,
                     "Part warehouse must be changed through a warehouse transfer");
+        }
+        if (!Objects.equals(beforeSourceMachineId, part.getSourceMachineId())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Part source machine is immutable after creation");
         }
         if (stockLotRepository.existsByResourceTypeAndResourceId(StockLedgerService.RESOURCE_PART, part.getId())
                 && (!sameMoney(beforePurchasePrice, part.getPurchasePrice())

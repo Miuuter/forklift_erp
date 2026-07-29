@@ -318,17 +318,17 @@ public class ResourceAttachmentServiceImpl implements ResourceAttachmentService 
 
     private ResourceAttachment persistExistingFile(ResourceContext context, String category, String label, String note,
                                                    StoredOutboundFile storedFile, String storageScope) {
-        ResourceAttachment existing = attachmentRepository
-                .findFirstByResourceTypeAndResourceIdAndAttachmentCategoryAndDeletedFalseOrderByUploadedAtDesc(
-                        "OUTBOUND_ORDER",
-                        context.resourceId(),
-                        category
-                )
+        List<ResourceAttachment> activeAttachments = attachmentRepository
+                .findByResourceTypeAndResourceIdAndAttachmentCategoryAndDeletedFalseOrderByUploadedAtDesc(
+                        "OUTBOUND_ORDER", context.resourceId(), category);
+        ResourceAttachment matching = activeAttachments.stream()
+                .filter(existing -> Objects.equals(existing.getStoredFileName(), storedFile.storedFileName())
+                        && Objects.equals(existing.getOriginalName(), storedFile.originalName()))
+                .findFirst()
                 .orElse(null);
-        if (existing != null
-                && Objects.equals(existing.getStoredFileName(), storedFile.storedFileName())
-                && Objects.equals(existing.getOriginalName(), storedFile.originalName())) {
-            return existing;
+        retireReplacedOrderAttachments(activeAttachments, matching, storedFile);
+        if (matching != null) {
+            return matching;
         }
         ResourceAttachment attachment = new ResourceAttachment();
         attachment.setResourceType("OUTBOUND_ORDER");
@@ -349,6 +349,33 @@ public class ResourceAttachmentServiceImpl implements ResourceAttachmentService 
         attachment.setUploadedAt(storedFile.uploadedAt());
         attachment.setDeleted(false);
         return attachmentRepository.save(attachment);
+    }
+
+    private void retireReplacedOrderAttachments(
+            List<ResourceAttachment> activeAttachments,
+            ResourceAttachment retained,
+            StoredOutboundFile replacement
+    ) {
+        List<ResourceAttachment> retired = activeAttachments.stream()
+                .filter(existing -> existing != retained)
+                .peek(existing -> {
+                    existing.setDeleted(true);
+                    existing.setDeletedAt(LocalDateTime.now());
+                    existing.setDeletedBy(SecurityUtils.currentUsername());
+                    existing.setDeleteReason("Replaced by " + replacement.originalName());
+                })
+                .toList();
+        if (retired.isEmpty()) {
+            return;
+        }
+        attachmentRepository.saveAll(retired);
+        for (ResourceAttachment attachment : retired) {
+            Path oldFile = attachmentStorage.resolveAttachmentPath(attachment);
+            attachmentStorage.registerAfterCommit(() -> attachmentStorage.deleteQuietly(
+                    oldFile,
+                    "Failed to delete replaced outbound attachment"
+            ));
+        }
     }
 
     private boolean persistLegacyRow(OutboundOrder order, String category, String storedFileName, String originalName,

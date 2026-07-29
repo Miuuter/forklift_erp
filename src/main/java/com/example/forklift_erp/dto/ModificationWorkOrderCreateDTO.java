@@ -3,6 +3,7 @@ package com.example.forklift_erp.dto;
 import com.example.forklift_erp.constant.PartChangeAction;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -46,14 +47,18 @@ public class ModificationWorkOrderCreateDTO {
         private Integer quantity = 1;
 
         private String oldPartAction = PartChangeAction.STOCK_IN.code();
+        @Digits(integer = 10, fraction = 2, message = "Price difference must fit DECIMAL(12,2)")
         private BigDecimal priceDifference = BigDecimal.ZERO;
         private Long warehouseId;
+        @Digits(integer = 10, fraction = 2, message = "Charge unit price must fit DECIMAL(12,2)")
         private BigDecimal chargeUnitPrice;
+        @Digits(integer = 10, fraction = 2, message = "Discount amount must fit DECIMAL(12,2)")
         private BigDecimal discountAmount = BigDecimal.ZERO;
         private String oldPartDisposition;
         private Long oldPartWarehouseId;
         private String oldPartCondition;
         private String oldPartValuationSource;
+        @Digits(integer = 10, fraction = 2, message = "Old-part unit cost must fit DECIMAL(12,2)")
         private BigDecimal oldPartUnitCost;
         private String remark;
     }

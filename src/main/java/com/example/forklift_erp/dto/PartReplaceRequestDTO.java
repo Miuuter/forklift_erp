@@ -3,6 +3,7 @@ package com.example.forklift_erp.dto;
 import com.example.forklift_erp.constant.PartChangeAction;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Digits;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -31,6 +32,7 @@ public class PartReplaceRequestDTO {
     private Long oldPartWarehouseId;
     private String oldPartCondition;
     private String oldPartValuationSource;
+    @Digits(integer = 10, fraction = 2, message = "Old-part unit cost must fit DECIMAL(12,2)")
     private BigDecimal oldPartUnitCost;
     private Long warehouseId;
     private LocalDate businessDate;

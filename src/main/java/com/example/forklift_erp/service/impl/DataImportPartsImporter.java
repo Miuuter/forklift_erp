@@ -4,6 +4,8 @@ import com.example.forklift_erp.dto.PartInventoryCreateDTO;
 import com.example.forklift_erp.dto.PartInventoryVO;
 import com.example.forklift_erp.dto.PartStockAdjustRequestDTO;
 import com.example.forklift_erp.entity.PartInventory;
+import com.example.forklift_erp.common.ResultCode;
+import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.service.PartInventoryService;
 import org.springframework.stereotype.Service;
 
@@ -75,7 +77,7 @@ public class DataImportPartsImporter {
                 continue;
             }
             PartInventoryCreateDTO dto = buildPartDto(group, latestRow);
-            int openingQuantity = group.stream().mapToInt(row -> intValue(row, 7, 0)).sum();
+            int openingQuantity = sumQuantities(group);
             Optional<PartInventory> existing = partInventoryService.findByPartCode(code);
             if (existing.isEmpty()) {
                 if (context.masterData() || context.openingMigration()) {
@@ -141,7 +143,7 @@ public class DataImportPartsImporter {
     }
 
     PartInventoryCreateDTO buildPartDto(List<WorkbookRow> group, WorkbookRow latestRow) {
-        int totalQuantity = group.stream().mapToInt(row -> intValue(row, 7, 0)).sum();
+        int totalQuantity = sumQuantities(group);
         BigDecimal totalAmount = BigDecimal.ZERO;
         BigDecimal weightedQuantity = BigDecimal.ZERO;
         for (WorkbookRow row : group) {
@@ -244,7 +246,7 @@ public class DataImportPartsImporter {
                 try {
                     return LocalDate.parse(value, DateTimeFormatter.ofPattern("yyyy-M-d"));
                 } catch (DateTimeParseException ignoredThird) {
-                    return null;
+                    throw invalidCell(row, index, "date");
                 }
             }
         }
@@ -270,8 +272,8 @@ public class DataImportPartsImporter {
         }
         try {
             return new BigDecimal(value.replace(",", "").replace("\u5143", "")).setScale(2, RoundingMode.HALF_UP);
-        } catch (NumberFormatException ex) {
-            return null;
+        } catch (NumberFormatException | ArithmeticException ex) {
+            throw invalidCell(row, index, "amount");
         }
     }
 
@@ -281,10 +283,29 @@ public class DataImportPartsImporter {
             return fallback;
         }
         try {
-            return new BigDecimal(value.replace(",", "")).intValue();
-        } catch (NumberFormatException ex) {
-            return fallback;
+            return new BigDecimal(value.replace(",", "")).intValueExact();
+        } catch (NumberFormatException | ArithmeticException ex) {
+            throw invalidCell(row, index, "whole number");
         }
+    }
+
+    private int sumQuantities(List<WorkbookRow> rows) {
+        int total = 0;
+        try {
+            for (WorkbookRow row : rows) {
+                total = Math.addExact(total, intValue(row, 7, 0));
+            }
+            return total;
+        } catch (ArithmeticException ex) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Imported part quantity total exceeds the supported range");
+        }
+    }
+
+    private BusinessException invalidCell(WorkbookRow row, int index, String expectedType) {
+        return new BusinessException(ResultCode.PARAM_ERROR,
+                "Invalid " + expectedType + " at workbook row "
+                        + (row == null ? "unknown" : row.rowNumber()) + ", column " + (index + 1));
     }
 
     private String joinNotes(String... values) {

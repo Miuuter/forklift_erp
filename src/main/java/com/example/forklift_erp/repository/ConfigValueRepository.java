@@ -16,6 +16,9 @@ import java.util.Optional;
 @Repository
 public interface ConfigValueRepository extends JpaRepository<ConfigValue, Long> {
 
+    @Query("select c.configItemId from ConfigValue c where c.id = :id")
+    Optional<Long> findConfigItemIdById(@Param("id") Long id);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from ConfigValue c where c.id = :id")
     Optional<ConfigValue> findByIdForUpdate(@Param("id") Long id);
@@ -25,6 +28,10 @@ public interface ConfigValueRepository extends JpaRepository<ConfigValue, Long> 
      * 按排序号升序排列
      */
     List<ConfigValue> findByConfigItemIdOrderBySortOrderAsc(Long configItemId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from ConfigValue c where c.configItemId = :configItemId order by c.sortOrder asc, c.id asc")
+    List<ConfigValue> findByConfigItemIdForUpdate(@Param("configItemId") Long configItemId);
 
     List<ConfigValue> findByConfigItemIdInOrderByConfigItemIdAscSortOrderAsc(List<Long> configItemIds);
 

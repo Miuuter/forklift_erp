@@ -80,7 +80,10 @@ public class DataImportVehicleImporter {
             MachineInventory machine = inboundRow != null
                     ? upsertMachineFromInboundRow(inboundRow, vehicleNumber, machinesByNumber)
                     : upsertMachineFromSalesRow(salesRow, vehicleNumber, machinesByNumber);
-            CustomerVO customer = upsertCustomer(customerName, salesRow, customersByName);
+            CustomerVO customer = upsertCustomer(
+                    rowMapper.buildCustomerFromSalesRow(customerName, salesRow),
+                    customersByName
+            );
             if (!orderVehicleNumbers.contains(vehicleNumber) && machine.getInventoryCount() != null && machine.getInventoryCount() > 0) {
                 outboundOrderService.createVehicleOutbound(rowMapper.buildVehicleOutboundPayload(machine, customer, salesRow));
                 orderVehicleNumbers.add(vehicleNumber);
@@ -121,7 +124,14 @@ public class DataImportVehicleImporter {
                 continue;
             }
             MachineInventory machine = upsertMachineFromOtherBrandRow(otherBrandRow, vehicleNumber, machinesByNumber);
-            CustomerVO customer = upsertCustomer(rowMapper.firstNonBlank(rowMapper.text(otherBrandRow, 13), "Other-brand customer"), otherBrandRow, customersByName);
+            String customerName = rowMapper.firstNonBlank(
+                    rowMapper.text(otherBrandRow, 13),
+                    "Other-brand customer"
+            );
+            CustomerVO customer = upsertCustomer(
+                    rowMapper.buildCustomerFromOtherBrandRow(customerName, otherBrandRow),
+                    customersByName
+            );
             if (!orderVehicleNumbers.contains(vehicleNumber)) {
                 outboundOrderService.createVehicleOutbound(rowMapper.buildOtherBrandOutboundPayload(machine, customer, otherBrandRow));
                 orderVehicleNumbers.add(vehicleNumber);
@@ -147,7 +157,14 @@ public class DataImportVehicleImporter {
             MachineInventory machine = oldInboundRow != null
                     ? upsertMachineFromOldInboundRow(oldInboundRow, vehicleNumber, machinesByNumber)
                     : upsertMachineFromOldSalesRow(oldSalesRow, vehicleNumber, machinesByNumber);
-            CustomerVO customer = upsertCustomer(rowMapper.firstNonBlank(rowMapper.text(oldSalesRow, 13), "Used vehicle customer"), oldSalesRow, customersByName);
+            String customerName = rowMapper.firstNonBlank(
+                    rowMapper.text(oldSalesRow, 13),
+                    "Used vehicle customer"
+            );
+            CustomerVO customer = upsertCustomer(
+                    rowMapper.buildCustomerFromOldSalesRow(customerName, oldSalesRow),
+                    customersByName
+            );
             if (!orderVehicleNumbers.contains(vehicleNumber)) {
                 outboundOrderService.createVehicleOutbound(rowMapper.buildOldSalesOutboundPayload(machine, customer, oldSalesRow));
                 orderVehicleNumbers.add(vehicleNumber);
@@ -254,13 +271,13 @@ public class DataImportVehicleImporter {
         return existing;
     }
 
-    private CustomerVO upsertCustomer(String companyName, WorkbookRow row, Map<String, CustomerVO> customersByName) {
-        String name = rowMapper.trimToNull(companyName);
+    private CustomerVO upsertCustomer(CustomerDTO dto, Map<String, CustomerVO> customersByName) {
+        String name = rowMapper.trimToNull(dto == null ? null : dto.getCompanyName());
         if (name == null) {
             name = "Workbook customer";
         }
         CustomerVO existing = customersByName.get(name);
-        CustomerDTO dto = rowMapper.buildCustomerFromRow(name, row);
+        dto.setCompanyName(name);
         if (existing == null) {
             CustomerVO created = customerService.create(dto);
             customersByName.put(name, created);

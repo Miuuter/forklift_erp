@@ -37,6 +37,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 @Service
 public class RentalRecordServiceImpl implements RentalRecordService {
@@ -225,8 +226,16 @@ public class RentalRecordServiceImpl implements RentalRecordService {
             validateRentalReactivation(record, request.getWarehouseId());
         }
 
-        copyCustomer(record, request.getCustomerId(), request.getDestination());
         BigDecimal monthlyPrice = resolveMonthlyPrice(request.getMonthlyRentalPrice(), request.getRentalPrice());
+        boolean hasBillingHistory = ensureBilledContractTermsUnchanged(record, request, monthlyPrice);
+        if (hasBillingHistory) {
+            String requestedDestination = blankToNull(request.getDestination());
+            if (requestedDestination != null) {
+                record.setDestination(requestedDestination);
+            }
+        } else {
+            copyCustomer(record, request.getCustomerId(), request.getDestination());
+        }
         record.setMonthlyRentalPrice(monthlyPrice);
         record.setRentalPrice(monthlyPrice);
         record.setStartDate(request.getStartDate());
@@ -314,6 +323,32 @@ public class RentalRecordServiceImpl implements RentalRecordService {
             throw new BusinessException(ResultCode.CONFLICT,
                     "Vehicle status does not allow rental: " + machine.getStockStatus());
         }
+    }
+
+    private boolean ensureBilledContractTermsUnchanged(
+            RentalRecord record,
+            RentalRecordUpdateDTO request,
+            BigDecimal requestedMonthlyPrice
+    ) {
+        boolean hasBillingHistory = Boolean.TRUE.equals(record.getFinancialPosted())
+                || !rentalBillRepository.findByRentalIdOrderByBillPeriodAsc(record.getId()).isEmpty();
+        if (!hasBillingHistory) {
+            return false;
+        }
+        BigDecimal currentMonthlyPrice = record.getMonthlyRentalPrice() == null
+                ? record.getRentalPrice()
+                : record.getMonthlyRentalPrice();
+        if (!Objects.equals(record.getCustomerId(), request.getCustomerId())
+                || !Objects.equals(record.getStartDate(), request.getStartDate())
+                || !sameAmount(currentMonthlyPrice, requestedMonthlyPrice)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "A billed rental cannot change its customer, start date, or monthly price; reverse and reissue the billing first");
+        }
+        return true;
+    }
+
+    private boolean sameAmount(BigDecimal left, BigDecimal right) {
+        return left == null ? right == null : right != null && left.compareTo(right) == 0;
     }
 
     private void freezeRentalVehicle(RentalRecord record) {

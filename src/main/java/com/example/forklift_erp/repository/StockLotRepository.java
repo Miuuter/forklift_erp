@@ -14,6 +14,14 @@ import java.util.Comparator;
 public interface StockLotRepository extends JpaRepository<StockLot, Long> {
     Optional<StockLot> findByIdempotencyKey(String idempotencyKey);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select l from StockLot l where l.idempotencyKey = :idempotencyKey")
+    Optional<StockLot> findByIdempotencyKeyForUpdate(@Param("idempotencyKey") String idempotencyKey);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select l from StockLot l where l.id = :id")
+    Optional<StockLot> findByIdForUpdate(@Param("id") Long id);
+
     boolean existsByResourceTypeAndResourceId(String resourceType, Long resourceId);
 
     boolean existsByWarehouseId(Long warehouseId);

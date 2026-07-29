@@ -47,6 +47,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 @Service
 public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderService {
@@ -137,6 +139,19 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
     @Override
     @Transactional
     public ModificationWorkOrderVO create(ModificationWorkOrderCreateDTO request) {
+        if (request.getLines() == null || request.getLines().isEmpty()
+                || request.getLines().stream().anyMatch(Objects::isNull)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Modification work order requires non-null lines");
+        }
+        Set<Long> requestedMachineConfigs = request.getLines().stream()
+                .map(ModificationWorkOrderCreateDTO.Line::getMachineConfigId)
+                .collect(java.util.stream.Collectors.toSet());
+        if (requestedMachineConfigs.contains(null)
+                || requestedMachineConfigs.size() != request.getLines().size()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Each machine configuration can appear only once in a modification work order");
+        }
         MachineInventory machine = machineRepository.findByIdForUpdate(request.getMachineId())
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Vehicle not found"));
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot create modification work order");
@@ -373,6 +388,9 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         if (!config.getMachineId().equals(machine.getId())) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Machine config does not belong to this vehicle");
         }
+        Long oldPartWarehouseId = lineRequest.getOldPartWarehouseId() == null
+                ? null
+                : stockLedgerService.resolveWarehouseId(lineRequest.getOldPartWarehouseId());
         String oldPartAction = blankToDefault(lineRequest.getOldPartAction(), PartChangeAction.STOCK_IN.code());
         if (PartChangeAction.DISCOUNT.code().equals(oldPartAction)) {
             int discountQuantity = lineRequest.getQuantity() == null ? 1 : lineRequest.getQuantity();
@@ -388,6 +406,7 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             ensureSameConfigItem(config, value);
 
             ModificationWorkOrderLine line = new ModificationWorkOrderLine();
+            line.setMachineId(machine.getId());
             line.setMachineConfigId(config.getId());
             line.setConfigItemId(config.getConfigItemId());
             line.setItemName(config.getItemName());
@@ -405,7 +424,7 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
             line.setChargeAmount(chargeAmount(
                     line.getChargeUnitPrice(), discountQuantity, line.getDiscountAmount()));
             line.setOldPartDisposition(blankToNull(lineRequest.getOldPartDisposition()));
-            line.setOldPartWarehouseId(lineRequest.getOldPartWarehouseId());
+            line.setOldPartWarehouseId(oldPartWarehouseId);
             line.setOldPartCondition(blankToNull(lineRequest.getOldPartCondition()));
             line.setOldPartValuationSource(blankToNull(lineRequest.getOldPartValuationSource()));
             line.setOldPartUnitCost(amountOrNull(lineRequest.getOldPartUnitCost()));
@@ -431,6 +450,7 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         parts.put(part.getId(), part);
 
         ModificationWorkOrderLine line = new ModificationWorkOrderLine();
+        line.setMachineId(machine.getId());
         line.setMachineConfigId(config.getId());
         line.setConfigItemId(config.getConfigItemId());
         line.setItemName(config.getItemName());
@@ -447,7 +467,7 @@ public class ModificationWorkOrderServiceImpl implements ModificationWorkOrderSe
         line.setDiscountAmount(amountOrZero(lineRequest.getDiscountAmount()));
         line.setChargeAmount(chargeAmount(line.getChargeUnitPrice(), quantity, line.getDiscountAmount()));
         line.setOldPartDisposition(blankToNull(lineRequest.getOldPartDisposition()));
-        line.setOldPartWarehouseId(lineRequest.getOldPartWarehouseId());
+        line.setOldPartWarehouseId(oldPartWarehouseId);
         line.setOldPartCondition(blankToNull(lineRequest.getOldPartCondition()));
         line.setOldPartValuationSource(blankToNull(lineRequest.getOldPartValuationSource()));
         line.setOldPartUnitCost(amountOrNull(lineRequest.getOldPartUnitCost()));

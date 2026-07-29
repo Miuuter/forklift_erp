@@ -8,6 +8,8 @@ import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.ConfigItemRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
 import com.example.forklift_erp.repository.MachineConfigRepository;
+import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
+import com.example.forklift_erp.repository.PurchaseOrderRepository;
 import com.example.forklift_erp.repository.VehicleConfigValueRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.ConfigItemService;
@@ -30,19 +32,25 @@ public class ConfigItemServiceImpl implements ConfigItemService {
     private final CollaborationService collaborationService;
     private final MachineConfigRepository machineConfigRepository;
     private final VehicleConfigValueRepository vehicleConfigValueRepository;
+    private final PurchaseOrderRepository purchaseOrderRepository;
+    private final ModificationWorkOrderLineRepository modificationWorkOrderLineRepository;
 
     public ConfigItemServiceImpl(
             ConfigItemRepository configItemRepository,
             ConfigValueRepository configValueRepository,
             CollaborationService collaborationService,
             MachineConfigRepository machineConfigRepository,
-            VehicleConfigValueRepository vehicleConfigValueRepository
+            VehicleConfigValueRepository vehicleConfigValueRepository,
+            PurchaseOrderRepository purchaseOrderRepository,
+            ModificationWorkOrderLineRepository modificationWorkOrderLineRepository
     ) {
         this.configItemRepository = configItemRepository;
         this.configValueRepository = configValueRepository;
         this.collaborationService = collaborationService;
         this.machineConfigRepository = machineConfigRepository;
         this.vehicleConfigValueRepository = vehicleConfigValueRepository;
+        this.purchaseOrderRepository = purchaseOrderRepository;
+        this.modificationWorkOrderLineRepository = modificationWorkOrderLineRepository;
     }
 
     @Override
@@ -163,6 +171,17 @@ public class ConfigItemServiceImpl implements ConfigItemService {
                     "配置项【" + configItem.getItemName() + "】正在被车辆使用，无法删除");
         }
 
+        List<ConfigValue> values = configValueRepository.findByConfigItemIdOrderBySortOrderAsc(id);
+        boolean referencedByBusinessDocument = purchaseOrderRepository.existsByConfigItemId(id)
+                || modificationWorkOrderLineRepository.existsByConfigItemId(id)
+                || values.stream().anyMatch(value ->
+                        purchaseOrderRepository.existsByConfigValueId(value.getId())
+                                || modificationWorkOrderLineRepository.existsByNewConfigValueId(value.getId()));
+        if (referencedByBusinessDocument) {
+            throw new BusinessException(ResultCode.CONFIG_IN_USE,
+                    "Config item is referenced by purchase or modification history and cannot be deleted");
+        }
+
         // 3. 安全删除：先删该配置项下的所有可选值，再删配置项本身
         configValueRepository.deleteByConfigItemId(id);
         configItemRepository.deleteById(id);
@@ -202,9 +221,84 @@ public class ConfigItemServiceImpl implements ConfigItemService {
     }
 
     @Override
-    public ConfigValue saveValue(ConfigValue configValue) {
-        collaborationService.stampWrite(configValue);
-        return configValueRepository.saveAndFlush(configValue);
+    @Transactional
+    public ConfigValue saveValue(ConfigValue requested) {
+        if (requested == null || requested.getConfigItemId() == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Config item is required");
+        }
+
+        Long configItemId = requested.getConfigItemId();
+        if (requested.getId() != null) {
+            Long currentOwnerId = configValueRepository.findConfigItemIdById(requested.getId())
+                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config value not found"));
+            if (!Objects.equals(currentOwnerId, configItemId)) {
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        "A config value cannot be moved to another config item");
+            }
+        }
+
+        // The parent row is the serialization point for every value mutation of
+        // one config item. This makes competing default switches deterministic.
+        configItemRepository.findByIdForUpdate(configItemId)
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config item not found"));
+
+        List<ConfigValue> siblings = configValueRepository.findByConfigItemIdForUpdate(configItemId);
+        ConfigValue current = null;
+        if (requested.getId() != null) {
+            current = siblings.stream()
+                    .filter(value -> Objects.equals(value.getId(), requested.getId()))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config value not found"));
+            if (!Objects.equals(current.getConfigItemId(), configItemId)) {
+                throw new BusinessException(ResultCode.CONFLICT,
+                        "Config value ownership changed; reload and retry");
+            }
+            collaborationService.validateWrite(current, requested.getVersion());
+        }
+
+        List<ConfigValue> defaults = siblings.stream()
+                .filter(value -> Boolean.TRUE.equals(value.getIsDefault()))
+                .toList();
+        if (defaults.size() > 1) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Config item has multiple default values; repair the data before editing");
+        }
+        ConfigValue previousDefault = defaults.isEmpty() ? null : defaults.get(0);
+        boolean requestedDefault = Boolean.TRUE.equals(requested.getIsDefault());
+
+        if (current != null
+                && Boolean.TRUE.equals(current.getIsDefault())
+                && !requestedDefault) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "The current default cannot be cleared without assigning another default");
+        }
+
+        // A non-empty value set always keeps one default. The first value also
+        // becomes the default when old data did not have one.
+        boolean makeDefault = requestedDefault || previousDefault == null;
+        if (makeDefault
+                && previousDefault != null
+                && !Objects.equals(previousDefault.getId(), requested.getId())) {
+            previousDefault.setIsDefault(false);
+            collaborationService.stampWrite(previousDefault);
+            // V49's unique generated guard sees statement order. Flush the old
+            // default demotion before inserting/promoting the replacement.
+            configValueRepository.saveAndFlush(previousDefault);
+        }
+
+        ConfigValue target;
+        if (current == null) {
+            target = requested;
+        } else {
+            target = current;
+            target.setValueLabel(requested.getValueLabel());
+            target.setValueCode(requested.getValueCode());
+            target.setSortOrder(requested.getSortOrder());
+            target.setRemark(requested.getRemark());
+        }
+        target.setIsDefault(makeDefault);
+        collaborationService.stampWrite(target);
+        return configValueRepository.saveAndFlush(target);
     }
 
     /**
@@ -214,21 +308,38 @@ public class ConfigItemServiceImpl implements ConfigItemService {
     @Override
     @Transactional
     public void deleteValueById(Long valueId, Long expectedVersion) {
-        // 1. 检查配置值是否存在
-        ConfigValue configValue = configValueRepository.findByIdForUpdate(valueId)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "配置值不存在，id=" + valueId));
-
-        // 2. 引用检查：是否有车辆使用了这个配置值
+        Long configItemId = configValueRepository.findConfigItemIdById(valueId)
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config value not found"));
+        configItemRepository.findByIdForUpdate(configItemId)
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config item not found"));
+        List<ConfigValue> siblings = configValueRepository.findByConfigItemIdForUpdate(configItemId);
+        ConfigValue configValue = siblings.stream()
+                .filter(value -> Objects.equals(value.getId(), valueId))
+                .findFirst()
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config value not found"));
+        if (!Objects.equals(configValue.getConfigItemId(), configItemId)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Config value ownership changed; reload and retry");
+        }
         collaborationService.validateWrite(configValue, expectedVersion);
+
         List<MachineConfig> configs = machineConfigRepository.findByConfigValueId(valueId);
         if (!configs.isEmpty() || vehicleConfigValueRepository.existsByConfigValueId(valueId)) {
             log.warn("删除配置值被阻止：id={}, 值={}, 被 {} 辆车使用", valueId, configValue.getValueLabel(), configs.size());
             throw new BusinessException(ResultCode.CONFIG_IN_USE,
                     "配置值【" + configValue.getValueLabel() + "】正在被车辆使用，无法删除");
         }
+        if (purchaseOrderRepository.existsByConfigValueId(valueId)
+                || modificationWorkOrderLineRepository.existsByNewConfigValueId(valueId)) {
+            throw new BusinessException(ResultCode.CONFIG_IN_USE,
+                    "Config value is referenced by purchase or modification history and cannot be deleted");
+        }
+        if (Boolean.TRUE.equals(configValue.getIsDefault()) && siblings.size() > 1) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Assign another default before deleting the current default");
+        }
 
-        // 3. 安全删除
-        configValueRepository.deleteById(valueId);
+        configValueRepository.delete(configValue);
         log.info("配置值删除成功: id={}, 值={}", valueId, configValue.getValueLabel());
     }
 }

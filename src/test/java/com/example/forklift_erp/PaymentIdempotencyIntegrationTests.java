@@ -17,6 +17,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Callable;
@@ -25,6 +26,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
+import java.util.function.IntFunction;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -45,6 +47,7 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
     private Long orderId;
     private String paymentRequestId;
     private String reversalRequestId;
+    private final List<String> additionalRequestIds = new ArrayList<>();
 
     @BeforeEach
     void createPaymentSource() {
@@ -55,7 +58,7 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
         order.setResourceName("Payment idempotency test part");
         order.setQuantity(1);
         order.setCustomerName("Payment idempotency test customer");
-        order.setReceivableAmount(new BigDecimal("100.00"));
+        order.setReceivableAmount(new BigDecimal("200.00"));
         orderId = outboundOrderRepository.saveAndFlush(order).getId();
         paymentRequestId = "payment-" + UUID.randomUUID();
         reversalRequestId = "reversal-" + UUID.randomUUID();
@@ -79,7 +82,18 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
                 orderId
         );
         jdbcTemplate.update(
-                "DELETE FROM financial_event WHERE source_type = 'OUTBOUND_ORDER' AND source_id = ?",
+                """
+                DELETE FROM financial_event
+                WHERE source_type = 'OUTBOUND_ORDER' AND source_id = ?
+                  AND reversal_of_event_id IS NOT NULL
+                """,
+                orderId
+        );
+        jdbcTemplate.update(
+                """
+                DELETE FROM financial_event
+                WHERE source_type = 'OUTBOUND_ORDER' AND source_id = ?
+                """,
                 orderId
         );
         jdbcTemplate.update(
@@ -87,6 +101,13 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
                 paymentRequestId,
                 reversalRequestId
         );
+        for (String requestId : additionalRequestIds) {
+            jdbcTemplate.update(
+                    "DELETE FROM request_idempotency WHERE scope = 'PAYMENT_CREATE' AND request_id = ?",
+                    requestId
+            );
+        }
+        additionalRequestIds.clear();
         outboundOrderRepository.deleteById(orderId);
     }
 
@@ -98,6 +119,12 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
         Set<Long> paymentIds = payments.stream().map(PaymentRecordVO::getId).collect(java.util.stream.Collectors.toSet());
         assertThat(paymentIds).hasSize(1);
         Long paymentId = paymentIds.iterator().next();
+        Long originalFinancialEventId = jdbcTemplate.queryForObject(
+                "SELECT financial_event_id FROM payment_record WHERE id = ?",
+                Long.class,
+                paymentId
+        );
+        assertThat(originalFinancialEventId).isNotNull();
         assertThat(countPaymentRows("PAYMENT-REQUEST:" + paymentRequestId)).isEqualTo(1);
         assertThat(countFinancialRows("PAYMENT-REQUEST:" + paymentRequestId + ":EVENT")).isEqualTo(1);
         assertThat(countClaims("PAYMENT_CREATE", paymentRequestId)).isEqualTo(1);
@@ -110,11 +137,65 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
         assertThat(countPaymentRows("PAYMENT-REVERSAL-REQUEST:" + reversalRequestId)).isEqualTo(1);
         assertThat(countFinancialRows("PAYMENT-REVERSAL-REQUEST:" + reversalRequestId + ":EVENT")).isEqualTo(1);
         assertThat(countClaims("PAYMENT_REVERSE", reversalRequestId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reversal_of_financial_event_id FROM payment_record WHERE id = ?",
+                Long.class,
+                reversals.getFirst().getId()
+        )).isEqualTo(originalFinancialEventId);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT reversal_of_event_id FROM financial_event WHERE id = "
+                        + "(SELECT financial_event_id FROM payment_record WHERE id = ?)",
+                Long.class,
+                reversals.getFirst().getId()
+        )).isEqualTo(originalFinancialEventId);
+    }
+
+    @Test
+    @Timeout(30)
+    void concurrentDistinctPaymentsKeepLedgerEventsAndOrderProjectionEqual() throws Exception {
+        for (int index = 0; index < CONCURRENCY; index++) {
+            additionalRequestIds.add("distinct-payment-" + UUID.randomUUID());
+        }
+
+        List<PaymentRecordVO> payments = invokeConcurrently(index ->
+                paymentRecordService.create(paymentRequest(additionalRequestIds.get(index))));
+
+        assertThat(payments).hasSize(CONCURRENCY);
+        assertThat(payments.stream().map(PaymentRecordVO::getId).collect(java.util.stream.Collectors.toSet()))
+                .hasSize(CONCURRENCY);
+        BigDecimal paymentTotal = jdbcTemplate.queryForObject(
+                """
+                SELECT COALESCE(SUM(amount), 0)
+                FROM payment_record
+                WHERE source_type = 'OUTBOUND_ORDER' AND source_id = ? AND direction = 'RECEIPT'
+                """,
+                BigDecimal.class,
+                orderId
+        );
+        BigDecimal eventTotal = jdbcTemplate.queryForObject(
+                """
+                SELECT COALESCE(SUM(amount), 0)
+                FROM financial_event
+                WHERE source_type = 'OUTBOUND_ORDER' AND source_id = ? AND event_type = 'CASH_RECEIPT'
+                """,
+                BigDecimal.class,
+                orderId
+        );
+        OutboundOrder refreshed = outboundOrderRepository.findById(orderId).orElseThrow();
+
+        assertThat(paymentTotal).isEqualByComparingTo("200.00");
+        assertThat(eventTotal).isEqualByComparingTo("200.00");
+        assertThat(refreshed.getReceivedAmount()).isEqualByComparingTo("200.00");
+        assertThat(refreshed.getPaymentSettled()).isTrue();
     }
 
     private PaymentRecordCreateDTO paymentRequest() {
+        return paymentRequest(paymentRequestId);
+    }
+
+    private PaymentRecordCreateDTO paymentRequest(String requestId) {
         PaymentRecordCreateDTO request = new PaymentRecordCreateDTO();
-        request.setRequestId(paymentRequestId);
+        request.setRequestId(requestId);
         request.setDirection(PaymentRecord.DIRECTION_RECEIPT);
         request.setAmount(new BigDecimal("10.00"));
         request.setSourceType(FinancialEventService.SOURCE_OUTBOUND_ORDER);
@@ -149,6 +230,10 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
     }
 
     private List<PaymentRecordVO> invokeConcurrently(Supplier<PaymentRecordVO> operation) throws Exception {
+        return invokeConcurrently(index -> operation.get());
+    }
+
+    private List<PaymentRecordVO> invokeConcurrently(IntFunction<PaymentRecordVO> operation) throws Exception {
         ExecutorService executor = Executors.newFixedThreadPool(CONCURRENCY);
         CountDownLatch ready = new CountDownLatch(CONCURRENCY);
         CountDownLatch start = new CountDownLatch(1);
@@ -157,7 +242,7 @@ class PaymentIdempotencyIntegrationTests extends TestcontainersDatabaseSupport {
                     .mapToObj(index -> (Callable<PaymentRecordVO>) () -> {
                         ready.countDown();
                         start.await();
-                        return operation.get();
+                        return operation.apply(index);
                     })
                     .toList();
             List<Future<PaymentRecordVO>> futures = tasks.stream().map(executor::submit).toList();

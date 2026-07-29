@@ -4,12 +4,16 @@ import com.example.forklift_erp.entity.ConfigItem;
 import com.example.forklift_erp.entity.ConfigValue;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.PartInventory;
+import com.example.forklift_erp.entity.StockBalance;
 import com.example.forklift_erp.repository.ConfigItemRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.PurchaseOrderRepository;
 import com.example.forklift_erp.repository.SupplierRepository;
+import com.example.forklift_erp.repository.StockBalanceRepository;
+import com.example.forklift_erp.repository.StockMovementLineRepository;
+import com.example.forklift_erp.repository.StockMovementRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,12 +55,22 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
     @Autowired
     private MachineInventoryRepository machineInventoryRepository;
 
+    @Autowired
+    private StockBalanceRepository stockBalanceRepository;
+
+    @Autowired
+    private StockMovementRepository stockMovementRepository;
+
+    @Autowired
+    private StockMovementLineRepository stockMovementLineRepository;
+
     private final List<Long> purchaseOrderIdsToCleanup = new ArrayList<>();
     private final List<Long> supplierIdsToCleanup = new ArrayList<>();
     private final List<Long> configValueIdsToCleanup = new ArrayList<>();
     private final List<Long> configItemIdsToCleanup = new ArrayList<>();
     private final List<Long> partResourceIdsToCleanup = new ArrayList<>();
     private final List<Long> machineResourceIdsToCleanup = new ArrayList<>();
+    private final List<Long> stockBalanceIdsToCleanup = new ArrayList<>();
 
     private String superToken;
 
@@ -93,6 +107,11 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
             partInventoryRepository.findById(partId).ifPresent(partInventoryRepository::delete);
         }
         partResourceIdsToCleanup.clear();
+
+        for (Long balanceId : stockBalanceIdsToCleanup.reversed()) {
+            stockBalanceRepository.findById(balanceId).ifPresent(stockBalanceRepository::delete);
+        }
+        stockBalanceIdsToCleanup.clear();
 
         for (Long machineId : machineResourceIdsToCleanup.reversed()) {
             machineInventoryRepository.findById(machineId).ifPresent(machineInventoryRepository::delete);
@@ -193,6 +212,20 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 .getContentAsString();
         JsonNode restoredOrder = objectMapper.readTree(restoredResponse).path("data");
         assertThat(restoredOrder.path("statusBeforeReceived").isNull()).isTrue();
+        Long originalMovementId = receivedOrder.path("receivedStockMovementId").asLong();
+        var reversalMovement = stockMovementRepository
+                .findByIdempotencyKey("PURCHASE-REVERSAL:" + partialOrder.path("id").asLong())
+                .orElseThrow();
+        assertThat(reversalMovement.getReversalOfMovementId()).isEqualTo(originalMovementId);
+        var originalLine = stockMovementLineRepository
+                .findByMovementIdOrderByIdAsc(originalMovementId).getFirst();
+        var reversalLine = stockMovementLineRepository
+                .findByMovementIdOrderByIdAsc(reversalMovement.getId()).getFirst();
+        assertThat(reversalLine.getReversalOfMovementId()).isEqualTo(originalMovementId);
+        assertThat(reversalLine.getReversalOfMovementLineId()).isEqualTo(originalLine.getId());
+        assertThat(reversalLine.getQuantityDelta()).isEqualTo(-originalLine.getQuantityDelta());
+        assertThat(reversalLine.getBeforeQuantity()).isEqualTo(originalLine.getAfterQuantity());
+        assertThat(reversalLine.getAfterQuantity()).isEqualTo(originalLine.getBeforeQuantity());
 
         Map<String, Object> canceledPayload = machineOrderPayload(
                 marker + "-canceled", "CANCELED", supplierId, machineResourceId);
@@ -233,6 +266,46 @@ class PurchaseOrderIntegrationTests extends TestcontainersDatabaseSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ORDERED"))
                 .andExpect(jsonPath("$.data.statusBeforeReceived").isEmpty());
+    }
+
+    @Test
+    void machineReceiptRejectsLockedRentalQuantityWithoutChangingInventory() throws Exception {
+        String marker = unique("rented-receipt");
+        Long supplierId = createSupplier("Machine supplier " + marker);
+        Long machineId = createMachineResource(marker);
+        MachineInventory machine = machineInventoryRepository.findById(machineId).orElseThrow();
+        machine.setStockStatus("RENTED");
+        machineInventoryRepository.saveAndFlush(machine);
+
+        StockBalance balance = new StockBalance();
+        balance.setResourceType("MACHINE");
+        balance.setResourceId(machineId);
+        balance.setWarehouseId(defaultWarehouseId());
+        balance.setAvailableQuantity(0);
+        balance.setReservedQuantity(0);
+        balance.setLockedQuantity(1);
+        balance = stockBalanceRepository.saveAndFlush(balance);
+        stockBalanceIdsToCleanup.add(balance.getId());
+
+        JsonNode order = createPurchaseOrder(
+                machineOrderPayload(marker, "ORDERED", supplierId, machineId));
+
+        mockMvc.perform(put("/api/purchase-orders/{id}/received", order.path("id").asLong())
+                        .header("Authorization", bearer(superToken))
+                        .param("received", "true")
+                        .param("version", order.path("version").asText()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value(409));
+
+        StockBalance persistedBalance = stockBalanceRepository.findById(balance.getId()).orElseThrow();
+        assertThat(persistedBalance.getAvailableQuantity()).isZero();
+        assertThat(persistedBalance.getLockedQuantity()).isEqualTo(1);
+        MachineInventory persistedMachine = machineInventoryRepository.findById(machineId).orElseThrow();
+        assertThat(persistedMachine.getStockStatus()).isEqualTo("RENTED");
+        assertThat(persistedMachine.getInventoryCount()).isZero();
+        var persistedOrder = purchaseOrderRepository.findById(order.path("id").asLong()).orElseThrow();
+        assertThat(persistedOrder.getStatus()).isEqualTo("ORDERED");
+        assertThat(persistedOrder.getReceivedStockMovementId()).isNull();
     }
 
     private Map<String, Object> machineOrderPayload(String marker, String status, Long supplierId, Long machineResourceId) {

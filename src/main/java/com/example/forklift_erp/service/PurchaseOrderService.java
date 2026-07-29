@@ -21,7 +21,9 @@ import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.PartInventoryRepository;
 import com.example.forklift_erp.repository.PaymentRecordRepository;
 import com.example.forklift_erp.repository.PurchaseOrderRepository;
+import com.example.forklift_erp.repository.RentalRecordRepository;
 import com.example.forklift_erp.repository.SupplierRepository;
+import com.example.forklift_erp.repository.WarehouseRepository;
 import com.example.forklift_erp.util.BusinessNumberGenerator;
 import com.example.forklift_erp.util.ListPageSupport;
 import com.example.forklift_erp.util.MoneyValues;
@@ -80,6 +82,12 @@ public class PurchaseOrderService {
 
     @Autowired
     private PaymentRecordRepository paymentRecordRepository;
+
+    @Autowired
+    private RentalRecordRepository rentalRecordRepository;
+
+    @Autowired
+    private WarehouseRepository warehouseRepository;
 
     @Transactional(readOnly = true)
     public List<PurchaseOrderVO> findAll() {
@@ -230,7 +238,7 @@ public class PurchaseOrderService {
             if (resourceId == null) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "Part purchase order must select an actual part SKU");
             }
-            selectedPart = partInventoryRepository.findById(resourceId)
+            selectedPart = partInventoryRepository.findByIdForUpdate(resourceId)
                     .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "Purchase part SKU not found"));
         }
         if (PurchaseOrder.RESOURCE_MACHINE.equals(resourceType)) {
@@ -238,7 +246,7 @@ public class PurchaseOrderService {
             if (resourceId == null) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "Machine purchase order must select a concrete vehicle resource");
             }
-            selectedMachine = machineInventoryRepository.findById(resourceId)
+            selectedMachine = machineInventoryRepository.findByIdForUpdate(resourceId)
                     .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND, "Purchase vehicle not found"));
             if (Boolean.TRUE.equals(selectedMachine.getModelOnly())) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "Vehicle model template cannot be used as a purchase receipt resource");
@@ -250,7 +258,12 @@ public class PurchaseOrderService {
         order.setConfigItemId(PurchaseOrder.RESOURCE_PART.equals(resourceType) && configItem != null ? configItem.getId() : null);
         order.setConfigValueId(PurchaseOrder.RESOURCE_PART.equals(resourceType) && configValue != null ? configValue.getId() : null);
         order.setResourceType(resourceType);
-        order.setWarehouseId(request.getWarehouseId());
+        Long warehouseId = request.getWarehouseId() == null ? order.getWarehouseId() : request.getWarehouseId();
+        if (warehouseId != null) {
+            warehouseRepository.findByIdForUpdate(warehouseId)
+                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Purchase warehouse not found"));
+        }
+        order.setWarehouseId(warehouseId);
         order.setResourceId(PurchaseOrder.RESOURCE_PART.equals(resourceType) ? selectedPart.getId() : selectedMachine.getId());
         order.setResourceCode(PurchaseOrder.RESOURCE_PART.equals(resourceType)
                 ? selectedPart.getPartCode()
@@ -371,17 +384,19 @@ public class PurchaseOrderService {
             PartInventory part = partInventoryRepository.findByIdForUpdate(order.getResourceId())
                     .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "Purchase part SKU not found"));
             int before = stockLedgerService.availableQuantity(StockLedgerService.RESOURCE_PART, part.getId(), warehouseId);
-            StockLot lot = stockLotService.createReceiptLot(
+            StockLot lot = stockLotService.createReceiptLotWithTotalCost(
                     StockLedgerService.RESOURCE_PART, part.getId(), warehouseId, quantity, landedCost,
-                    MoneyValues.zeroIfNullOrNegative(order.getFreightAmount()), "PURCHASE_ORDER", order.getId(), null,
+                    payable, MoneyValues.zeroIfNullOrNegative(order.getFreightAmount()),
+                    "PURCHASE_ORDER", order.getId(), null,
                     receivedDate, "PURCHASE-LOT:" + order.getId()
             );
             StockMovement movement = stockLedgerService.recordMovement(
                     "INBOUND", StockLedgerService.RESOURCE_PART, part.getId(), part.getPartCode(), part.getPartName(),
                     warehouseId, before, before + quantity, landedCost, order.getOperator(), order.getRemark(),
                     "PURCHASE_ORDER", order.getId(), null, receivedDate, StockBusinessType.PURCHASE_RECEIPT,
-                    BigDecimal.ZERO, "PURCHASE-MOVEMENT:" + order.getId(), lot.getId()
+                    BigDecimal.ZERO, "PURCHASE-MOVEMENT:" + order.getId(), lot.getId(), null
             );
+            captureResourceCostSnapshot(order, part.getPurchasePrice(), part.getLandedUnitCost());
             part.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, part.getId()));
             part.setPurchasePrice(landedCost);
             part.setLandedUnitCost(landedCost);
@@ -397,22 +412,31 @@ public class PurchaseOrderService {
             if (Boolean.TRUE.equals(machine.getModelOnly())) {
                 throw new BusinessException(ResultCode.PARAM_ERROR, "Vehicle model template cannot be received as physical inventory");
             }
-            int totalBefore = stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId());
-            if (totalBefore > 0) {
+            if (com.example.forklift_erp.constant.MachineStockStatus.RENTED.code()
+                    .equals(machine.getStockStatus())
+                    || rentalRecordRepository.existsByMachineIdAndStatus(
+                    machine.getId(), com.example.forklift_erp.entity.RentalRecord.STATUS_ACTIVE)) {
+                throw new BusinessException(ResultCode.CONFLICT,
+                        "A rented vehicle cannot be received through procurement; return it first");
+            }
+            if (stockLedgerService.hasAnyPhysicalQuantityForUpdate(
+                    StockLedgerService.RESOURCE_MACHINE, machine.getId())) {
                 throw new BusinessException(ResultCode.CONFLICT, "A concrete vehicle cannot be received more than once");
             }
             int before = stockLedgerService.availableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId(), warehouseId);
-            StockLot lot = stockLotService.createReceiptLot(
+            StockLot lot = stockLotService.createReceiptLotWithTotalCost(
                     StockLedgerService.RESOURCE_MACHINE, machine.getId(), warehouseId, 1, landedCost,
-                    MoneyValues.zeroIfNullOrNegative(order.getFreightAmount()), "PURCHASE_ORDER", order.getId(), null,
+                    payable, MoneyValues.zeroIfNullOrNegative(order.getFreightAmount()),
+                    "PURCHASE_ORDER", order.getId(), null,
                     receivedDate, "PURCHASE-LOT:" + order.getId()
             );
             StockMovement movement = stockLedgerService.recordMovement(
                     "INBOUND", StockLedgerService.RESOURCE_MACHINE, machine.getId(), machine.getVehicleProductNumber(), machine.getName(),
                     warehouseId, before, before + 1, landedCost, order.getOperator(), order.getRemark(),
                     "PURCHASE_ORDER", order.getId(), null, receivedDate, StockBusinessType.PURCHASE_RECEIPT,
-                    BigDecimal.ZERO, "PURCHASE-MOVEMENT:" + order.getId(), lot.getId()
+                    BigDecimal.ZERO, "PURCHASE-MOVEMENT:" + order.getId(), lot.getId(), null
             );
+            captureResourceCostSnapshot(order, machine.getPurchasePrice(), machine.getLandedUnitCost());
             machine.setWarehouseId(warehouseId);
             machine.setInventoryCount(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId()));
             machine.setPurchasePrice(landedCost);
@@ -434,7 +458,7 @@ public class PurchaseOrderService {
         if (order.getReceivedStockMovementId() == null) {
             return;
         }
-        if (order.getStockLotId() == null || !stockLotService.canReverseReceipt(order.getStockLotId())) {
+        if (order.getStockLotId() == null) {
             throw new BusinessException(ResultCode.CONFLICT,
                     "Received inventory has been consumed and cannot be directly unreceived");
         }
@@ -449,13 +473,20 @@ public class PurchaseOrderService {
             if (before < quantity) {
                 throw new BusinessException(ResultCode.CONFLICT, "Warehouse stock no longer covers the received quantity");
             }
+            ensureLatestActiveReceipt(order);
+            // Lock and reverse the value layer only after locking the resource,
+            // matching outbound's resource -> FIFO lock order. The method also
+            // revalidates both remaining quantity and remaining value.
+            stockLotService.reverseReceiptLot(order.getStockLotId());
             stockLedgerService.recordMovement(
                     "OUTBOUND", StockLedgerService.RESOURCE_PART, part.getId(), part.getPartCode(), part.getPartName(),
                     warehouseId, before, before - quantity, unitCost, order.getOperator(), "Reverse purchase receipt: " + order.getRemark(),
                     "PURCHASE_ORDER", order.getId(), null, date, StockBusinessType.PURCHASE_RECEIPT_REVERSAL,
-                    BigDecimal.ZERO, "PURCHASE-REVERSAL:" + order.getId(), order.getStockLotId()
+                    BigDecimal.ZERO, "PURCHASE-REVERSAL:" + order.getId(), order.getStockLotId(),
+                    order.getReceivedStockMovementId()
             );
             part.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, part.getId()));
+            restoreResourceCostSnapshot(order, part);
             partInventoryRepository.save(part);
         } else if (PurchaseOrder.RESOURCE_MACHINE.equals(order.getResourceType())) {
             MachineInventory machine = machineInventoryRepository.findByIdForUpdate(order.getResourceId())
@@ -464,17 +495,23 @@ public class PurchaseOrderService {
             if (before != 1) {
                 throw new BusinessException(ResultCode.CONFLICT, "Serialized vehicle receipt is no longer reversible");
             }
+            ensureLatestActiveReceipt(order);
+            stockLotService.reverseReceiptLot(order.getStockLotId());
             stockLedgerService.recordMovement(
                     "OUTBOUND", StockLedgerService.RESOURCE_MACHINE, machine.getId(), machine.getVehicleProductNumber(), machine.getName(),
                     warehouseId, before, 0, unitCost, order.getOperator(), "Reverse purchase receipt: " + order.getRemark(),
                     "PURCHASE_ORDER", order.getId(), null, date, StockBusinessType.PURCHASE_RECEIPT_REVERSAL,
-                    BigDecimal.ZERO, "PURCHASE-REVERSAL:" + order.getId(), order.getStockLotId()
+                    BigDecimal.ZERO, "PURCHASE-REVERSAL:" + order.getId(), order.getStockLotId(),
+                    order.getReceivedStockMovementId()
             );
             machine.setInventoryCount(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_MACHINE, machine.getId()));
             machine.setStockStatus(com.example.forklift_erp.constant.MachineStockStatus.PENDING_INBOUND.code());
+            restoreResourceCostSnapshot(order, machine);
             machineInventoryRepository.save(machine);
+        } else {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Unsupported purchase resource type: " + order.getResourceType());
         }
-        stockLotService.reverseReceiptLot(order.getStockLotId());
         financialEventService.reverseSourceEvents(
                 FinancialEventService.SOURCE_PURCHASE_ORDER,
                 order.getId(),
@@ -488,6 +525,52 @@ public class PurchaseOrderService {
         order.setFinancialPosted(false);
     }
 
+    private void ensureLatestActiveReceipt(PurchaseOrder order) {
+        if (order.getReceivedStockMovementId() != null
+                && purchaseOrderRepository
+                .existsByResourceTypeAndResourceIdAndReceivedStockMovementIdGreaterThan(
+                        order.getResourceType(),
+                        order.getResourceId(),
+                        order.getReceivedStockMovementId())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "A newer receipt for this resource must be reversed first");
+        }
+    }
+
+    private void captureResourceCostSnapshot(
+            PurchaseOrder order,
+            BigDecimal purchasePrice,
+            BigDecimal landedUnitCost
+    ) {
+        order.setPreviousResourcePurchasePrice(purchasePrice);
+        order.setPreviousResourceLandedUnitCost(landedUnitCost);
+        order.setResourceCostSnapshotCaptured(true);
+    }
+
+    private void restoreResourceCostSnapshot(PurchaseOrder order, PartInventory part) {
+        if (!Boolean.TRUE.equals(order.getResourceCostSnapshotCaptured())) {
+            return;
+        }
+        part.setPurchasePrice(order.getPreviousResourcePurchasePrice());
+        part.setLandedUnitCost(order.getPreviousResourceLandedUnitCost());
+        clearResourceCostSnapshot(order);
+    }
+
+    private void restoreResourceCostSnapshot(PurchaseOrder order, MachineInventory machine) {
+        if (!Boolean.TRUE.equals(order.getResourceCostSnapshotCaptured())) {
+            return;
+        }
+        machine.setPurchasePrice(order.getPreviousResourcePurchasePrice());
+        machine.setLandedUnitCost(order.getPreviousResourceLandedUnitCost());
+        clearResourceCostSnapshot(order);
+    }
+
+    private void clearResourceCostSnapshot(PurchaseOrder order) {
+        order.setPreviousResourcePurchasePrice(null);
+        order.setPreviousResourceLandedUnitCost(null);
+        order.setResourceCostSnapshotCaptured(false);
+    }
+
     private BigDecimal purchasePayable(PurchaseOrder order) {
         return MoneyValues.zeroIfNullOrNegative(order.getTotalAmount())
                 .add(MoneyValues.zeroIfNullOrNegative(order.getFreightAmount()));
@@ -495,7 +578,7 @@ public class PurchaseOrderService {
 
     private BigDecimal landedUnitCost(PurchaseOrder order) {
         int quantity = order.getQuantity() == null || order.getQuantity() < 1 ? 1 : order.getQuantity();
-        return purchasePayable(order).divide(BigDecimal.valueOf(quantity), 2, RoundingMode.HALF_UP);
+        return purchasePayable(order).divide(BigDecimal.valueOf(quantity), 6, RoundingMode.HALF_UP);
     }
 
     private BigDecimal totalAmount(Integer quantity, BigDecimal unitPrice, BigDecimal requestTotal) {

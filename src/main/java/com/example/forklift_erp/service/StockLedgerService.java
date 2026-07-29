@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class StockLedgerService {
@@ -39,6 +40,9 @@ public class StockLedgerService {
 
     @Autowired
     private StockMovementLineRepository stockMovementLineRepository;
+
+    @Autowired
+    private RequestIdempotencyGuard requestIdempotencyGuard;
 
     @Transactional
     public Long resolveWarehouseId(Long warehouseId) {
@@ -135,6 +139,17 @@ public class StockLedgerService {
         return stockBalanceRepository.findByResourceTypeAndResourceId(resourceType, resourceId).stream()
                 .mapToInt(balance -> quantity(balance.getAvailableQuantity()))
                 .sum();
+    }
+
+    @Transactional
+    public boolean hasAnyPhysicalQuantityForUpdate(String resourceType, Long resourceId) {
+        List<StockBalance> balances = stockBalanceRepository.findAllForUpdate(resourceType, resourceId);
+        validateBalances(balances);
+        return balances.stream().anyMatch(balance ->
+                quantity(balance.getAvailableQuantity()) > 0
+                        || quantity(balance.getReservedQuantity()) > 0
+                        || quantity(balance.getLockedQuantity()) > 0
+        );
     }
 
     @Transactional
@@ -335,6 +350,53 @@ public class StockLedgerService {
         return saved;
     }
 
+    /** Backward-compatible entry point for ordinary (non-reversal) movements. */
+    @Transactional
+    public StockMovement recordMovement(
+            String movementType,
+            String resourceType,
+            Long resourceId,
+            String resourceCode,
+            String resourceName,
+            Long warehouseId,
+            Integer beforeQuantity,
+            Integer afterQuantity,
+            BigDecimal unitCost,
+            String operator,
+            String remark,
+            String sourceType,
+            Long sourceId,
+            Long sourceLineId,
+            LocalDate businessDate,
+            String businessType,
+            BigDecimal unitRevenue,
+            String idempotencyKey,
+            Long stockLotId
+    ) {
+        return recordMovement(
+                movementType,
+                resourceType,
+                resourceId,
+                resourceCode,
+                resourceName,
+                warehouseId,
+                beforeQuantity,
+                afterQuantity,
+                unitCost,
+                operator,
+                remark,
+                sourceType,
+                sourceId,
+                sourceLineId,
+                businessDate,
+                businessType,
+                unitRevenue,
+                idempotencyKey,
+                stockLotId,
+                null
+        );
+    }
+
     @Transactional
     public StockMovement recordMovement(
             String movementType,
@@ -367,6 +429,7 @@ public class StockLedgerService {
                 null,
                 LocalDate.now(),
                 movementType,
+                null,
                 null,
                 null,
                 null
@@ -408,6 +471,7 @@ public class StockLedgerService {
                 movementType,
                 null,
                 null,
+                null,
                 null
         );
     }
@@ -432,18 +496,75 @@ public class StockLedgerService {
             String businessType,
             BigDecimal unitRevenue,
             String idempotencyKey,
-            Long stockLotId
+            Long stockLotId,
+            Long reversalOfMovementId
     ) {
-        if (idempotencyKey != null) {
-            StockMovement existing = stockMovementRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
-            if (existing != null) {
-                return existing;
-            }
-        }
-        Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
+        boolean claimWon = idempotencyKey == null
+                || requestIdempotencyGuard == null
+                || requestIdempotencyGuard.claimTechnicalKey("STOCK_MOVEMENT", idempotencyKey);
         int before = beforeQuantity == null ? 0 : beforeQuantity;
         int after = afterQuantity == null ? 0 : afterQuantity;
         int delta = after - before;
+        LocalDate effectiveBusinessDate = businessDate == null ? LocalDate.now() : businessDate;
+        String effectiveBusinessType = businessType == null || businessType.isBlank()
+                ? movementType
+                : businessType;
+        Long resolvedWarehouseId = resolveWarehouseId(warehouseId);
+        if (idempotencyKey != null) {
+            StockMovement existing = findIdempotentMovement(idempotencyKey, claimWon).orElse(null);
+            if (existing != null) {
+                StockMovementIdempotencyValidator.validate(
+                        existing,
+                        stockMovementLineRepository.findByMovementIdForUpdate(existing.getId()),
+                        movementType,
+                        resourceType,
+                        resourceId,
+                        resourceCode,
+                        resourceName,
+                        resolvedWarehouseId,
+                        before,
+                        after,
+                        unitCost,
+                        unitRevenue,
+                        operator,
+                        remark,
+                        sourceType,
+                        sourceId,
+                        sourceLineId,
+                        businessDate,
+                        effectiveBusinessDate,
+                        effectiveBusinessType,
+                        stockLotId,
+                        reversalOfMovementId
+                );
+                return existing;
+            }
+            if (!claimWon) {
+                throw new BusinessException(ResultCode.CONFLICT,
+                        "Stock movement idempotency key is already being processed; retry with the same key");
+            }
+        }
+        StockMovementLine originalReversalLine = null;
+        if (reversalOfMovementId != null) {
+            StockMovement originalMovement = stockMovementRepository.findById(reversalOfMovementId)
+                    .orElseThrow(() -> new BusinessException(ResultCode.CONFLICT,
+                            "Original stock movement does not exist"));
+            originalReversalLine = StockMovementReversalValidator.requireExactSingleLineReversal(
+                    originalMovement,
+                    stockMovementLineRepository.findByMovementIdOrderByIdAsc(reversalOfMovementId),
+                    resourceType,
+                    resourceId,
+                    resolvedWarehouseId,
+                    before,
+                    after,
+                    unitCost,
+                    unitRevenue,
+                    stockLotId,
+                    sourceType,
+                    sourceId,
+                    sourceLineId
+            );
+        }
         StockBalance balance = findOrCreateBalanceForUpdate(resourceType, resourceId, resolvedWarehouseId);
         int actualBefore = quantity(balance.getAvailableQuantity());
         if (actualBefore == before) {
@@ -464,11 +585,12 @@ public class StockLedgerService {
         movement.setSourceType(sourceType);
         movement.setSourceId(sourceId);
         movement.setSourceLineId(sourceLineId);
-        movement.setBusinessDate(businessDate == null ? LocalDate.now() : businessDate);
-        movement.setBusinessType(businessType == null || businessType.isBlank() ? movementType : businessType);
+        movement.setBusinessDate(effectiveBusinessDate);
+        movement.setBusinessType(effectiveBusinessType);
         movement.setOperator(operator);
         movement.setRemark(remark);
         movement.setIdempotencyKey(idempotencyKey);
+        movement.setReversalOfMovementId(reversalOfMovementId);
         StockMovement savedMovement = stockMovementRepository.save(movement);
 
         StockMovementLine line = new StockMovementLine();
@@ -485,11 +607,29 @@ public class StockLedgerService {
         line.setUnitRevenue(unitRevenue);
         line.setStockLotId(stockLotId);
         line.setSourceLineId(sourceLineId);
+        line.setReversalOfMovementId(reversalOfMovementId);
+        line.setReversalOfMovementLineId(
+                originalReversalLine == null ? null : originalReversalLine.getId());
         line.setCostAmount(MoneyValues.zeroIfNullOrNegative(unitCost).multiply(BigDecimal.valueOf(Math.abs(delta))));
         line.setLineAmount(MoneyValues.zeroIfNullOrNegative(unitRevenue).multiply(BigDecimal.valueOf(Math.abs(delta))));
         stockMovementLineRepository.save(line);
 
         return savedMovement;
+    }
+
+    /**
+     * A successful technical claim proves that no other transaction can be
+     * publishing the same fact. A locking lookup for that missing key would
+     * acquire a next-key gap lock on the unique idempotency index and can
+     * deadlock unrelated concurrent inserts. Only claim losers need a current
+     * locking read, because their claim insert has already waited for the
+     * winner to commit the authoritative fact.
+     */
+    private Optional<StockMovement> findIdempotentMovement(String key, boolean claimWon) {
+        if (requestIdempotencyGuard != null && claimWon) {
+            return stockMovementRepository.findByIdempotencyKey(key);
+        }
+        return stockMovementRepository.findByIdempotencyKeyForUpdate(key);
     }
 
     private StockBalance findOrCreateBalanceForUpdate(String resourceType, Long resourceId, Long warehouseId) {

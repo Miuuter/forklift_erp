@@ -22,7 +22,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -173,6 +175,50 @@ class ResourceAttachmentServiceImplTests {
         service.backfillLegacyOutboundAttachments();
 
         verify(attachmentRepository).save(any(ResourceAttachment.class));
+    }
+
+    @Test
+    void replacingManagedInvoiceRetiresMetadataAndDeletesOldFileOnlyAfterCommit() throws IOException {
+        Path invoiceDir = tempDir.resolve("invoices");
+        Files.createDirectories(invoiceDir);
+        Path oldFile = invoiceDir.resolve("old.pdf");
+        Files.writeString(oldFile, "old invoice");
+
+        ResourceAttachment oldAttachment = new ResourceAttachment();
+        oldAttachment.setId(91L);
+        oldAttachment.setResourceType("OUTBOUND_ORDER");
+        oldAttachment.setResourceId(11L);
+        oldAttachment.setAttachmentCategory("INVOICE");
+        oldAttachment.setStorageScope("LEGACY_ORDER_INVOICE");
+        oldAttachment.setStoredFileName("old.pdf");
+        oldAttachment.setOriginalName("old-invoice.pdf");
+        oldAttachment.setDeleted(false);
+        when(attachmentRepository
+                .findByResourceTypeAndResourceIdAndAttachmentCategoryAndDeletedFalseOrderByUploadedAtDesc(
+                        "OUTBOUND_ORDER", 11L, "INVOICE"))
+                .thenReturn(List.of(oldAttachment));
+        when(attachmentRepository.save(any(ResourceAttachment.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        OutboundOrder order = legacyInvoiceOrder("new.pdf");
+        StoredOutboundFile replacement = new StoredOutboundFile(
+                "new.pdf", "new-invoice.pdf", "application/pdf", 12L, LocalDateTime.now());
+
+        TransactionSynchronizationManager.initSynchronization();
+        service.recordLegacyOrderAttachment(order, "INVOICE", replacement);
+
+        assertThat(oldAttachment.getDeleted()).isTrue();
+        assertThat(oldAttachment.getDeleteReason()).isEqualTo("Replaced by new-invoice.pdf");
+        assertThat(oldFile).exists();
+
+        var synchronizations = new ArrayList<>(TransactionSynchronizationManager.getSynchronizations());
+        TransactionSynchronizationManager.clearSynchronization();
+        synchronizations.forEach(TransactionSynchronization::afterCommit);
+        synchronizations.forEach(synchronization ->
+                synchronization.afterCompletion(TransactionSynchronization.STATUS_COMMITTED));
+
+        assertThat(oldFile).doesNotExist();
+        verify(attachmentRepository).saveAll(List.of(oldAttachment));
     }
 
     private OutboundOrder legacyInvoiceOrder(String storedFileName) {

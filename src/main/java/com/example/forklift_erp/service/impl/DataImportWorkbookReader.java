@@ -102,6 +102,17 @@ record WorkbookSnapshot(Map<String, List<WorkbookRow>> sheets) {
         return sheets.values().stream().mapToInt(List::size).sum();
     }
 
+    int totalRows(String... sheetNames) {
+        if (sheetNames == null) {
+            return 0;
+        }
+        int total = 0;
+        for (String sheetName : sheetNames) {
+            total += sheetRows(sheetName).size();
+        }
+        return total;
+    }
+
     Map<String, Integer> sheetSizes() {
         Map<String, Integer> sizes = new LinkedHashMap<>();
         for (Map.Entry<String, List<WorkbookRow>> entry : sheets.entrySet()) {

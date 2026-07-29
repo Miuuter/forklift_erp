@@ -28,7 +28,9 @@ java scripts/CheckCoverageBaseline.java
 
 JaCoCo 报告位于 `target/site/jacoco`。基线记录在 `scripts/jacoco-baseline.properties`，CI 禁止仓库级指令、分支、行或方法覆盖率下降。
 
-0.2.0-rc.1 当前默认 Java 单元测试为 140 项。
+当前工作树默认 Java 测试为 222 项；2026-07-19 的 `clean verify` 结果为
+`222/222`，无失败、错误或跳过。JaCoCo 指令/分支/行/方法覆盖率分别为
+34.6898% / 29.5546% / 36.6567% / 36.2437%，均高于仓库基线。
 
 ## MySQL Testcontainers
 
@@ -46,7 +48,17 @@ JaCoCo 报告位于 `target/site/jacoco`。基线记录在 `scripts/jacoco-basel
 - 统计 MySQL 聚合 SQL；
 - Flyway 新建库与升级路径。
 
-0.2.0-rc.1 当前 MySQL Testcontainers 套件为 51 项；新建库从 V1 迁移到 V45，升级回归从 V36 夹具迁移到 V45。
+历史 0.2.0-rc.1 的 MySQL Testcontainers 证据为 51 项、V1/V36→V45；当前 V51 变更必须使用下方新增门禁重新取证，不得沿用旧计数。
+
+2026-07-19 当前工作树在 Docker 29.1.3 / MySQL 8.0.43 上发现 64 项、20 个测试类：
+63 项执行并通过，0 failures、0 errors；另 1 项仅在设置
+`FORKLIFT_ERP_TEST_MYSQL_URL` 时运行的外部 MySQL 升级用例按设计跳过。
+套件包含空库 V1→V51、V18/V36/V40→V51、付款并发幂等、租赁车采购
+收货拒绝、导入乐观锁、FIFO 尾差、历史主档删除保护和复合配置身份验证。
+其中数据导入恢复、采购和租赁三类业务流程分别为 2/2、4/4 和 4/4，
+均在真实 MySQL 8.0.43 上执行到服务/API 与持久化边界。
+库存流水、收货批次和 FIFO 消耗的幂等键会校验资源、仓库、来源、
+数量与成本等不可变 payload；同键异 payload 必须返回冲突，不能复用旧事实。
 
 ## Playwright
 
@@ -115,6 +127,7 @@ docker compose --env-file deploy/synology/.env -f deploy/synology/compose.yaml c
 sh -n deploy/synology/backup.sh
 sh -n deploy/synology/restore-drill.sh
 sh -n deploy/synology/update.sh
+sh scripts/test-synology-backup.sh
 git diff --check
 ```
 
@@ -133,4 +146,42 @@ git diff --check
 sh deploy/synology/restore-drill.sh [backup-directory]
 ```
 
-恢复演练不仅导入 SQL：它还要启动恢复后的应用镜像，并验证 V45、健康状态、构建版本、登录、库存 API、关键表和样例附件下载。
+恢复演练不仅导入 SQL：它还要启动恢复后的应用镜像，并验证当前 Flyway 版本（本轮为 V51）、健康状态、构建版本、登录、库存 API、关键表和样例附件下载。
+## V46-V51 reliability verification
+
+The current migration regression starts at V18, inserts a five-unit legacy sale
+whose line total is 500, advances through V36/V40 fixtures, and then migrates to
+V51 on MySQL 8.0.43. It must prove a 100 unit price, exactly 500 in receipt
+facts, non-null optimistic versions, binary request keys, ledger arithmetic,
+single-default guards and direct foreign keys. The ledger fixture must also
+assert financial-event/payment reversal amount, direction, source and
+counterparty identity, self-reference, chain and duplicate guards; reject
+unknown event types, unlinked negative financial facts and cash events with a
+source-line identity; FIFO reversal lot/resource/source
+identity, opposite quantity/total cost, and rejection of an unlinked negative
+consumption. Exercise the FIFO precision envelope at a normal one-cent drift
+and at quantity boundaries (including 9,999, 10,000 and 20,001); the allowed
+error is `ABS(qty) * 0.0000005 + 0.005` because `total_cost` is authoritative
+and `unit_cost` is a six-decimal average. The focused V51 fixture must also
+reject incomplete historical movement reversals before persistent DDL, backfill
+complete out-of-order line pairs, and reject unlinked, quantity/lot/cost-drifted
+or duplicate reversal lines.
+
+Required commands for this change set are:
+
+```powershell
+.\mvnw.cmd test
+.\mvnw.cmd -Pdocker-integration-tests test "-Dfrontend.skip=true"
+npm.cmd run check
+npm.cmd run test:unit
+git diff --check
+```
+
+Do not reuse the historical V45/51-test count as evidence for V51. Record the
+new counts only after the commands above complete against the current tree.
+
+The 2026-07-19 rerun used the current sources and migrations after the latest
+financial event sign/type/source-line/counterparty constraints. Frontend checks
+passed; Vitest passed 7/7 with 100% statements/functions/lines and 87.5%
+branches; default Java tests passed 222/222; the Docker suite reported 64 tests
+across 20 classes, with 0 failures, 0 errors and one explicitly environment-gated skip.

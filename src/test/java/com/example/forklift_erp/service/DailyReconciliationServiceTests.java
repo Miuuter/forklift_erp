@@ -74,4 +74,37 @@ class DailyReconciliationServiceTests {
                 });
         assertThat(result.getSummary().getOverpaidSalesCount()).isEqualTo(1);
     }
+
+    @Test
+    void reportsLedgerRowsWhoseMasterRecordIsMissing() {
+        DailyReconciliationProjectionRepository repository =
+                mock(DailyReconciliationProjectionRepository.class);
+        LocalDate activityDate = LocalDate.now();
+        when(repository.resourceProfiles()).thenReturn(List.of());
+        when(repository.balances()).thenReturn(List.of(
+                new DailyReconciliationProjectionRepository.BalanceRow(
+                        "PART", 404L, 10L, 1, 0, 0)
+        ));
+        when(repository.fifoTotals()).thenReturn(List.of(
+                new DailyReconciliationProjectionRepository.FifoRow(
+                        "PART", 404L, 10L, 1)
+        ));
+        when(repository.movementStates(activityDate)).thenReturn(List.of(
+                new DailyReconciliationProjectionRepository.MovementStateRow(
+                        "PART", 404L, 10L, 1, 0)
+        ));
+        when(repository.sales(activityDate)).thenReturn(List.of());
+        when(repository.activeRentals()).thenReturn(List.of());
+        when(repository.unmatchedRentalLocks()).thenReturn(List.of());
+
+        var result = new DailyReconciliationService(repository).reconcile(activityDate);
+
+        assertThat(result.getStockIssues())
+                .anySatisfy(issue -> {
+                    assertThat(issue.getCode()).isEqualTo("ORPHAN_LEDGER_RESOURCE");
+                    assertThat(issue.getResourceType()).isEqualTo("PART");
+                    assertThat(issue.getResourceId()).isEqualTo(404L);
+                });
+        assertThat(result.getSummary().getErrorCount()).isGreaterThanOrEqualTo(1);
+    }
 }

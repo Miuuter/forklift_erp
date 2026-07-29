@@ -51,10 +51,10 @@ public class PaymentRecord {
     @Column(name = "source_type", nullable = false, length = 40)
     private String sourceType;
 
-    @Column(name = "source_id")
+    @Column(name = "source_id", nullable = false)
     private Long sourceId;
 
-    @Column(name = "financial_event_id")
+    @Column(name = "financial_event_id", nullable = false)
     private Long financialEventId;
 
     @Column(length = 500)
@@ -65,6 +65,10 @@ public class PaymentRecord {
 
     @Column(name = "reversal_of_payment_id")
     private Long reversalOfPaymentId;
+
+    /** Exact financial-event identity paired with a payment reversal. */
+    @Column(name = "reversal_of_financial_event_id")
+    private Long reversalOfFinancialEventId;
 
     @Column(name = "created_by", length = 50)
     private String createdBy;

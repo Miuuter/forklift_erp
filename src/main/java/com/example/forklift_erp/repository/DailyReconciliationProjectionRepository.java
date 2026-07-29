@@ -210,6 +210,7 @@ public class DailyReconciliationProjectionRepository {
                       FROM rental_record rental
                       WHERE rental.status = 'ACTIVE'
                         AND rental.machine_id = balance.resource_id
+                        AND rental.warehouse_id = balance.warehouse_id
                   )
                 """, (resultSet, rowNumber) -> new UnmatchedRentalLockRow(
                 resultSet.getLong("machine_id"),

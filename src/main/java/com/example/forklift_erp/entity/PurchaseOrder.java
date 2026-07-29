@@ -85,8 +85,17 @@ public class PurchaseOrder implements CollaborativeResource {
     @Column(name = "stock_lot_id")
     private Long stockLotId;
 
-    @Column(name = "landed_unit_cost", precision = 12, scale = 2)
+    @Column(name = "landed_unit_cost", precision = 18, scale = 6)
     private BigDecimal landedUnitCost;
+
+    @Column(name = "previous_resource_purchase_price", precision = 12, scale = 2)
+    private BigDecimal previousResourcePurchasePrice;
+
+    @Column(name = "previous_resource_landed_unit_cost", precision = 18, scale = 6)
+    private BigDecimal previousResourceLandedUnitCost;
+
+    @Column(name = "resource_cost_snapshot_captured", nullable = false)
+    private Boolean resourceCostSnapshotCaptured = false;
 
     @Column(name = "financial_posted")
     private Boolean financialPosted = false;

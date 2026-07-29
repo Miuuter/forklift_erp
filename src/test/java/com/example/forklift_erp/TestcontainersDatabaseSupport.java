@@ -285,9 +285,9 @@ abstract class TestcontainersDatabaseSupport {
         String normalized = jdbcUrl == null ? "" : jdbcUrl.trim().toLowerCase();
         int queryStart = normalized.indexOf('?');
         String withoutQuery = queryStart < 0 ? normalized : normalized.substring(0, queryStart);
-        if (!withoutQuery.endsWith("/forklift_erp_test")) {
+        if (!withoutQuery.matches(".+/forklift_erp_test(?:_[0-9a-f]{12,32})?")) {
             throw new IllegalStateException(
-                    "Integration tests may only use the isolated database forklift_erp_test; refusing URL: "
+                    "Integration tests may only use forklift_erp_test or a UUID-suffixed isolated database; refusing URL: "
                             + sanitizedDatabaseUrl(jdbcUrl)
             );
         }

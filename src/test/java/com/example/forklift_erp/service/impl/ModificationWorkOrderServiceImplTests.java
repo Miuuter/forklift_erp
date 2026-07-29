@@ -62,6 +62,24 @@ class ModificationWorkOrderServiceImplTests {
     }
 
     @Test
+    void createRejectsDuplicateMachineConfigLinesBeforeDatabaseWork() {
+        ModificationWorkOrderCreateDTO.Line first = new ModificationWorkOrderCreateDTO.Line();
+        first.setMachineConfigId(10L);
+        ModificationWorkOrderCreateDTO.Line duplicate = new ModificationWorkOrderCreateDTO.Line();
+        duplicate.setMachineConfigId(10L);
+        ModificationWorkOrderCreateDTO request = new ModificationWorkOrderCreateDTO();
+        request.setLines(List.of(first, duplicate));
+
+        ModificationWorkOrderServiceImpl service = new ModificationWorkOrderServiceImpl();
+
+        assertThatThrownBy(() -> service.create(request))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode())
+                        .isEqualTo(ResultCode.PARAM_ERROR.getCode()))
+                .hasMessage("Each machine configuration can appear only once in a modification work order");
+    }
+
+    @Test
     void createRejectsLockedMachine() {
         MachineInventoryRepository machineRepository = mock(MachineInventoryRepository.class);
         ModificationWorkOrderRepository workOrderRepository = mock(ModificationWorkOrderRepository.class);

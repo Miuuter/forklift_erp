@@ -59,4 +59,29 @@ sh restore-drill.sh /volume2/forklift-erp-backup/daily/20260715-023000
 
 ## 0.2.0-rc.1 本地演练记录
 
-2026-07-15 至 2026-07-16 的隔离恢复已验证 41 张表、1,450 台车辆、445 个客户、1,290 张出库订单、25 项配件、1 个活动附件和 2 个 uploads 文件。恢复后的应用通过 V45、健康、版本、登录、库存和附件访问检查。真实 Synology 演练仍需在目标 NAS 上重复执行并记录镜像摘要、备份路径和耗时。
+2026-07-15 至 2026-07-16 的隔离恢复已验证 41 张表、1,450 台车辆、445 个客户、1,290 张出库订单、25 项配件、1 个活动附件和 2 个 uploads 文件。该记录对应当时的 V45 历史演练；当前 V51 的 JSON v2 与 Flyway 自动化证据见下文。真实 Synology 演练仍需在目标 NAS 上重复执行并记录镜像摘要、备份路径和耗时。
+## JSON backup v2 safety contract
+
+Application-level JSON restore accepts only `forklift-erp-json-backup-v2`.
+Version 1 files are intentionally rejected because they do not prove a complete
+table/column set or row integrity. V2 requires the exact current Flyway version,
+every restorable table and column, per-table row counts and SHA-256 manifests.
+Generated invariant columns are excluded because MySQL derives them.
+
+Before the first DELETE, restore validates all foreign keys represented in the
+backup against live `information_schema` metadata. After insertion it rechecks
+every table count and every foreign key; any mismatch throws and rolls the DML
+transaction back. Formal restore still requires all application/import writers
+to be stopped and an isolated restore drill first. `FOREIGN_KEY_CHECKS=0` is
+used only inside the restore transaction and is not evidence of referential
+validity by itself.
+
+Do not use JSON restore as a cross-version migration mechanism. Keep the v1
+reader unavailable rather than guessing how missing tables or columns should be
+filled. Retain the matching application image, SQL backup, uploads archive and
+Flyway history for every formal recovery point.
+
+The 2026-07-19 MySQL 8.0.43 regression exercised the JSON v2 round trip at V51
+and verified restored row counts and foreign keys. This is local automated
+evidence only; the release still requires an isolated restore drill with the
+actual SQL backup, uploads archive and target application image.

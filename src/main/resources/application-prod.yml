@@ -1,11 +1,21 @@
+server:
+  shutdown: graceful
+
 spring:
   datasource:
     password: ${FORKLIFT_ERP_DB_PASSWORD}
+  lifecycle:
+    timeout-per-shutdown-phase: ${FORKLIFT_ERP_SHUTDOWN_TIMEOUT:45s}
   jpa:
     show-sql: false
     properties:
       hibernate:
         format_sql: false
+  flyway:
+    # Production databases must already have an explicit Flyway history.  An
+    # accidental baseline can otherwise bless an unknown non-empty schema and
+    # silently skip the migrations that establish data invariants.
+    baseline-on-migrate: false
 
 logging:
   level:

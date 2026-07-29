@@ -7,6 +7,7 @@ import com.example.forklift_erp.dto.RepairRecordCreateDTO;
 import com.example.forklift_erp.entity.PartInventory;
 import com.example.forklift_erp.entity.RepairPartUsage;
 import com.example.forklift_erp.entity.RepairRecord;
+import com.example.forklift_erp.entity.StockLotConsumption;
 import com.example.forklift_erp.entity.StockMovement;
 import com.example.forklift_erp.entity.StockMovementLine;
 import com.example.forklift_erp.exception.BusinessException;
@@ -374,16 +375,8 @@ public class RepairPartUsageService {
     }
 
     private boolean hasTrustedStockTrace(RepairRecord record, RepairPartUsage usage) {
-        if (usage.getStockMovementId() != null || usage.getStockLotConsumptionId() != null) {
-            return true;
-        }
-        return usage.getId() != null && !consumptionRepository
-                .findBySourceTypeAndSourceIdAndSourceLineIdOrderByIdAsc(
-                        SOURCE_TYPE,
-                        record.getId(),
-                        usage.getId()
-                )
-                .isEmpty();
+        return RepairUsageTraceValidator.hasExactFifoTrace(
+                consumptionRepository, record, usage, SOURCE_TYPE);
     }
 
     private UsagePricing usagePricing(RepairPartUsageDTO request, PartInventory part) {
@@ -474,7 +467,8 @@ public class RepairPartUsageService {
                 StockBusinessType.REPAIR_USE,
                 usage.getChargeUnitPrice(),
                 revision + ":MOVEMENT",
-                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId()
+                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId(),
+                null
         );
         usage.setUnitCost(fifo.unitCost());
         usage.setCostAmount(fifo.totalCost());
@@ -497,13 +491,23 @@ public class RepairPartUsageService {
                 warehouseId
         );
         String revision = revisionKey(repair, usage, "RESTORE");
-        stockLotService.restoreSourceLineConsumption(
+        StockLotService.ConsumptionResult restored = stockLotService.restoreSourceLineConsumption(
                 SOURCE_TYPE,
                 repair.getId(),
                 usage.getId(),
                 businessDate,
                 revision + ":FIFO"
         );
+        int restoredQuantity = restored.consumptions().stream()
+                .map(StockLotConsumption::getQuantity)
+                .mapToInt(quantity -> Math.abs(quantity == null ? 0 : quantity))
+                .sum();
+        if (restoredQuantity != usage.getQuantity()) {
+            throw new BusinessException(
+                    ResultCode.CONFLICT,
+                    "Repair material FIFO consumption is missing or already reversed; stock was not restored"
+            );
+        }
         StockMovement movement = stockLedgerService.recordMovement(
                 "INBOUND",
                 StockLedgerService.RESOURCE_PART,
@@ -523,6 +527,7 @@ public class RepairPartUsageService {
                 StockBusinessType.REPAIR_RESTORE,
                 BigDecimal.ZERO,
                 revision + ":MOVEMENT",
+                null,
                 null
         );
         for (StockMovementLine line : movementLineRepository.findByMovementIdOrderByIdAsc(movement.getId())) {

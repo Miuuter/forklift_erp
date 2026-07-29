@@ -19,10 +19,13 @@ public class ModificationWorkOrderLine {
     @Column(name = "work_order_id", nullable = false)
     private Long workOrderId;
 
+    @Column(name = "machine_id", nullable = false)
+    private Long machineId;
+
     @Column(name = "machine_config_id", nullable = false)
     private Long machineConfigId;
 
-    @Column(name = "config_item_id")
+    @Column(name = "config_item_id", nullable = false)
     private Long configItemId;
 
     @Column(name = "item_name", length = 100)

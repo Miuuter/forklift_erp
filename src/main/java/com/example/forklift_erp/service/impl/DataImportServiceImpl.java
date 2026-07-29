@@ -147,34 +147,41 @@ public class DataImportServiceImpl implements DataImportService {
         jobStatusService.markImporting(job.getId());
 
         try {
+            verifyStagedFileFingerprint(job, stagedFile);
             ImportContext context = new ImportContext(
                     job.getId(),
                     job.getImportType(),
                     normalizeImportMode(job.getImportMode(), profile),
                     job.getFileFingerprint()
             );
-            ImportResult result = importTransactionTemplate.execute(status -> profile.importFile(stagedFile, context));
-            DataImportJob completedJob = jobStatusService.markCompleted(
-                    job.getId(),
-                    result == null ? 0 : result.importedRows(),
-                    result == null ? 0 : result.skippedRows(),
-                    result == null ? "Import completed" : result.summary(),
-                    SecurityUtils.currentUsername()
-            );
-            operationAuditService.record(
-                    "Data import",
-                    "CONFIRM",
-                    "DATA_IMPORT_JOB",
-                    completedJob.getId(),
-                    String.valueOf(completedJob.getId()),
-                    completedJob.getOriginalFileName(),
-                    "Import confirmed: imported=" + completedJob.getImportedRows()
-                            + ", skipped=" + completedJob.getSkippedRows(),
-                    SecurityUtils.currentUsername(),
-                    completedJob.getSummary(),
-                    "DATA_IMPORT_JOB",
-                    completedJob.getId()
-            );
+            DataImportJob completedJob = importTransactionTemplate.execute(status -> {
+                ImportResult imported = profile.importFile(stagedFile, context);
+                // Detect a concurrent or out-of-band file mutation before the
+                // business transaction is allowed to commit.
+                verifyStagedFileFingerprint(job, stagedFile);
+                DataImportJob completed = jobStatusService.markCompleted(
+                        job.getId(),
+                        imported == null ? 0 : imported.importedRows(),
+                        imported == null ? 0 : imported.skippedRows(),
+                        imported == null ? "Import completed" : imported.summary(),
+                        SecurityUtils.currentUsername()
+                );
+                operationAuditService.record(
+                        "Data import",
+                        "CONFIRM",
+                        "DATA_IMPORT_JOB",
+                        completed.getId(),
+                        String.valueOf(completed.getId()),
+                        completed.getOriginalFileName(),
+                        "Import confirmed: imported=" + completed.getImportedRows()
+                                + ", skipped=" + completed.getSkippedRows(),
+                        SecurityUtils.currentUsername(),
+                        completed.getSummary(),
+                        "DATA_IMPORT_JOB",
+                        completed.getId()
+                );
+                return completed;
+            });
             return toValidationVO(completedJob, List.of(), true);
         } catch (RuntimeException ex) {
             jobStatusService.markFailed(job.getId(), firstNonBlank(ex.getMessage(), "Import failed"), SecurityUtils.currentUsername());
@@ -221,7 +228,16 @@ public class DataImportServiceImpl implements DataImportService {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException e) {
-            return null;
+            throw new BusinessException(ResultCode.SYSTEM_ERROR, "Unable to persist import validation details");
+        }
+    }
+
+    private void verifyStagedFileFingerprint(DataImportJob job, Path stagedFile) {
+        String expected = trimToNull(job == null ? null : job.getFileFingerprint());
+        String actual = importFileStorage.fingerprint(stagedFile);
+        if (expected == null || !expected.equals(actual)) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Import file changed after validation; upload and validate it again");
         }
     }
 
@@ -289,8 +305,8 @@ public class DataImportServiceImpl implements DataImportService {
         public ValidationResult validate(Path file) {
             WorkbookSnapshot snapshot = workbookReader.readVehicleWorkbook(file);
             List<DataImportErrorVO> errors = workbookValidator.validateVehicleRows(snapshot);
-            int totalRows = snapshot.totalRows();
-            int errorRows = distinctErrorRows(errors);
+            int totalRows = snapshot.totalRows("Inbound", "Sales", "OtherBrandSales", "OldInbound", "OldSales");
+            int errorRows = Math.min(totalRows, distinctErrorRows(errors));
             int validRows = Math.max(0, totalRows - errorRows);
             return new ValidationResult(totalRows, validRows, errorRows, errors, errors.isEmpty(),
                     errors.isEmpty() ? "Workbook validated successfully" : "Workbook validation found " + errors.size() + " row issues",
@@ -325,7 +341,7 @@ public class DataImportServiceImpl implements DataImportService {
             WorkbookSnapshot snapshot = workbookReader.readPartsWorkbook(file);
             List<DataImportErrorVO> errors = workbookValidator.validatePartRows(snapshot);
             int totalRows = snapshot.sheetRows("Parts").size();
-            int errorRows = distinctErrorRows(errors);
+            int errorRows = Math.min(totalRows, distinctErrorRows(errors));
             int validRows = Math.max(0, totalRows - errorRows);
             return new ValidationResult(totalRows, validRows, errorRows, errors, errors.isEmpty(),
                     errors.isEmpty() ? "Workbook validated successfully" : "Workbook validation found " + errors.size() + " row issues",

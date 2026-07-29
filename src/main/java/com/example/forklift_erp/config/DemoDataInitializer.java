@@ -213,7 +213,13 @@ public class DemoDataInitializer implements CommandLineRunner {
             ConfigItem savedItem = configItemRepository.saveAndFlush(item);
             result.put(spec.code(), savedItem);
 
-            List<ConfigValue> existingValues = configValueRepository.findByConfigItemIdOrderBySortOrderAsc(savedItem.getId());
+            List<String> desiredDefaults = spec.values().stream()
+                    .filter(ConfigValueSpec::defaultValue)
+                    .map(ConfigValueSpec::code)
+                    .toList();
+            List<ConfigValue> existingValues = DemoDefaultIntegrity.lockConfigValues(
+                    configItemRepository, configValueRepository, savedItem,
+                    spec.code(), desiredDefaults);
             for (ConfigValueSpec valueSpec : spec.values()) {
                 ConfigValue value = existingValues.stream()
                         .filter(row -> valueSpec.code().equals(row.getValueCode()))
@@ -243,9 +249,10 @@ public class DemoDataInitializer implements CommandLineRunner {
                 new WarehouseSpec("WH-WH", "Wuhan transit warehouse", "TRANSIT", "Wuhan Yangluo transfer hub", false),
                 new WarehouseSpec("WH-XA", "Xian project warehouse", "PROJECT", "Xian bonded project yard", false)
         );
+        Map<String, Warehouse> existingByCode = DemoDefaultIntegrity.lockWarehouses(
+                warehouseRepository, "DEFAULT");
         for (WarehouseSpec spec : specs) {
-            Warehouse warehouse = warehouseRepository.findByWarehouseCode(spec.code())
-                    .orElseGet(Warehouse::new);
+            Warehouse warehouse = existingByCode.getOrDefault(spec.code(), new Warehouse());
             warehouse.setWarehouseCode(spec.code());
             warehouse.setWarehouseName(spec.name());
             warehouse.setWarehouseType(spec.type());
@@ -868,6 +875,7 @@ public class DemoDataInitializer implements CommandLineRunner {
 
         ModificationWorkOrderLine line = new ModificationWorkOrderLine();
         line.setWorkOrderId(savedOrder.getId());
+        line.setMachineId(savedOrder.getMachineId());
         line.setMachineConfigId(sourceConfig.getId());
         line.setConfigItemId(sourceConfig.getConfigItemId());
         line.setItemName(sourceConfig.getItemName());

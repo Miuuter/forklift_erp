@@ -117,7 +117,27 @@ public class DailyReconciliationService {
         for (ResourceKey resource : resources) {
             Integer profileQuantity = profileQuantities.get(resource);
             int availableTotal = availableTotals.getOrDefault(resource, 0);
-            if (profileQuantity == null || profileQuantity == availableTotal) {
+            if (profileQuantity == null) {
+                addStockIssue(result, issue(
+                        SEVERITY_ERROR,
+                        "ORPHAN_LEDGER_RESOURCE",
+                        resource,
+                        null,
+                        labels.get(resource),
+                        null,
+                        availableTotal,
+                        0,
+                        0,
+                        fifoByKey.entrySet().stream()
+                                .filter(entry -> entry.getKey().resourceKey().equals(resource))
+                                .mapToInt(Map.Entry::getValue)
+                                .sum(),
+                        null,
+                        "Inventory ledger references a missing vehicle or part master record"
+                ));
+                continue;
+            }
+            if (profileQuantity == availableTotal) {
                 continue;
             }
             addStockIssue(result, issue(

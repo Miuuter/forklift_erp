@@ -207,11 +207,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     public Result<Void> handleDataIntegrityViolationException(DataIntegrityViolationException e) {
-        log.error("数据完整性异常: {}", e.getMessage(), e);
+        log.warn("Database constraint rejected a write");
         if (e.getMessage() != null && e.getMessage().contains("Duplicate entry")) {
             return Result.error(ResultCode.DATA_DUPLICATE, "数据已存在，请勿重复添加");
         }
-        return Result.error(ResultCode.ERROR, "数据操作异常");
+        return Result.error(ResultCode.CONFLICT,
+                "Data conflicts with existing references or database constraints");
     }
 
     /**

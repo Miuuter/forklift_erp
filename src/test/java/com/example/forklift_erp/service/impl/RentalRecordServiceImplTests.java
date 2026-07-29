@@ -8,6 +8,7 @@ import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.RentalBill;
 import com.example.forklift_erp.entity.RentalRecord;
 import com.example.forklift_erp.exception.BusinessException;
+import com.example.forklift_erp.repository.CustomerRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RentalRecordRepository;
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,6 +39,7 @@ class RentalRecordServiceImplTests {
     private RentalRecordRepository rentalRecordRepository;
     private RentalBillRepository rentalBillRepository;
     private MachineInventoryRepository machineRepository;
+    private CustomerRepository customerRepository;
     private CollaborationService collaborationService;
     private OperationAuditService operationAuditService;
     private StockLedgerService stockLedgerService;
@@ -46,6 +50,7 @@ class RentalRecordServiceImplTests {
         rentalRecordRepository = mock(RentalRecordRepository.class);
         rentalBillRepository = mock(RentalBillRepository.class);
         machineRepository = mock(MachineInventoryRepository.class);
+        customerRepository = mock(CustomerRepository.class);
         collaborationService = mock(CollaborationService.class);
         operationAuditService = mock(OperationAuditService.class);
         stockLedgerService = mock(StockLedgerService.class);
@@ -53,6 +58,7 @@ class RentalRecordServiceImplTests {
         ReflectionTestUtils.setField(service, "rentalRecordRepository", rentalRecordRepository);
         ReflectionTestUtils.setField(service, "rentalBillRepository", rentalBillRepository);
         ReflectionTestUtils.setField(service, "machineRepository", machineRepository);
+        ReflectionTestUtils.setField(service, "customerRepository", customerRepository);
         ReflectionTestUtils.setField(service, "collaborationService", collaborationService);
         ReflectionTestUtils.setField(service, "operationAuditService", operationAuditService);
         ReflectionTestUtils.setField(service, "stockLedgerService", stockLedgerService);
@@ -168,6 +174,56 @@ class RentalRecordServiceImplTests {
     }
 
     @Test
+    void updateRejectsChangingCustomerAfterBilling() {
+        RentalRecord record = billedRental(18L, 9L);
+        RentalRecordUpdateDTO request = billedUpdateRequest(9L);
+        request.setCustomerId(901L);
+        stubBilledRental(record);
+
+        assertBilledContractChangeRejected(record, request);
+    }
+
+    @Test
+    void updateRejectsChangingStartDateAfterBilling() {
+        RentalRecord record = billedRental(19L, 10L);
+        RentalRecordUpdateDTO request = billedUpdateRequest(10L);
+        request.setStartDate(LocalDate.of(2026, 2, 1));
+        stubBilledRental(record);
+
+        assertBilledContractChangeRejected(record, request);
+    }
+
+    @Test
+    void updateRejectsChangingMonthlyPriceAfterBilling() {
+        RentalRecord record = billedRental(20L, 11L);
+        RentalRecordUpdateDTO request = billedUpdateRequest(11L);
+        request.setMonthlyRentalPrice(new BigDecimal("3300.00"));
+        stubBilledRental(record);
+
+        assertBilledContractChangeRejected(record, request);
+    }
+
+    @Test
+    void updateKeepsBilledCustomerSnapshotWhenOnlyDestinationChanges() {
+        RentalRecord record = billedRental(21L, 12L);
+        record.setCustomerName("Original billed customer");
+        record.setCustomerAddress("Original billed address");
+        record.setDestination("Original destination");
+        RentalRecordUpdateDTO request = billedUpdateRequest(12L);
+        request.setDestination("Updated delivery destination");
+        request.setReturnDate(LocalDate.of(2026, 1, 31));
+        stubBilledRental(record);
+        when(rentalRecordRepository.saveAndFlush(record)).thenReturn(record);
+
+        service.update(record.getId(), request);
+
+        assertThat(record.getCustomerName()).isEqualTo("Original billed customer");
+        assertThat(record.getCustomerAddress()).isEqualTo("Original billed address");
+        assertThat(record.getDestination()).isEqualTo("Updated delivery destination");
+        verifyNoInteractions(customerRepository);
+    }
+
+    @Test
     void createRejectsActiveModificationEvenWhenWarehouseHasAvailableQuantity() {
         MachineInventory machine = machine(53L, false);
         machine.setWarehouseId(8L);
@@ -198,6 +254,43 @@ class RentalRecordServiceImplTests {
         request.setVersion(version);
         request.setStatus(RentalRecord.STATUS_ACTIVE);
         return request;
+    }
+
+    private RentalRecord billedRental(Long id, Long version) {
+        RentalRecord record = rental(id, version, RentalRecord.STATUS_RETURNED);
+        record.setCustomerId(900L);
+        record.setStartDate(LocalDate.of(2026, 1, 1));
+        record.setMonthlyRentalPrice(new BigDecimal("3200.00"));
+        record.setRentalPrice(new BigDecimal("3200.00"));
+        return record;
+    }
+
+    private RentalRecordUpdateDTO billedUpdateRequest(Long version) {
+        RentalRecordUpdateDTO request = new RentalRecordUpdateDTO();
+        request.setVersion(version);
+        request.setCustomerId(900L);
+        request.setStartDate(LocalDate.of(2026, 1, 1));
+        request.setMonthlyRentalPrice(new BigDecimal("3200.0"));
+        request.setStatus(RentalRecord.STATUS_RETURNED);
+        return request;
+    }
+
+    private void stubBilledRental(RentalRecord record) {
+        RentalBill bill = new RentalBill();
+        bill.setId(1000L + record.getId());
+        when(rentalRecordRepository.findByIdForUpdate(record.getId())).thenReturn(Optional.of(record));
+        when(rentalBillRepository.findByRentalIdOrderByBillPeriodAsc(record.getId())).thenReturn(List.of(bill));
+    }
+
+    private void assertBilledContractChangeRejected(RentalRecord record, RentalRecordUpdateDTO request) {
+        assertThatThrownBy(() -> service.update(record.getId(), request))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(error -> assertThat(((BusinessException) error).getCode())
+                        .isEqualTo(ResultCode.CONFLICT.getCode()))
+                .hasMessage("A billed rental cannot change its customer, start date, or monthly price; reverse and reissue the billing first");
+
+        verify(rentalRecordRepository, never()).saveAndFlush(any(RentalRecord.class));
+        verifyNoInteractions(operationAuditService);
     }
 
     private MachineInventory machine(Long id, boolean locked) {

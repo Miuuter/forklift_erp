@@ -20,6 +20,17 @@ public interface MachineConfigRepository extends JpaRepository<MachineConfig, Lo
     @Query("select m from MachineConfig m where m.id = :id")
     Optional<MachineConfig> findByIdForUpdate(@Param("id") Long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from MachineConfig m where m.machineId = :machineId and m.configItemId = :configItemId")
+    Optional<MachineConfig> findByMachineIdAndConfigItemIdForUpdate(
+            @Param("machineId") Long machineId,
+            @Param("configItemId") Long configItemId
+    );
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select m from MachineConfig m where m.machineId = :machineId order by m.id")
+    List<MachineConfig> findByMachineIdForUpdate(@Param("machineId") Long machineId);
+
     /**
      * 根据车辆ID查询该车的所有配置
      * 自动生成SQL：SELECT * FROM machine_config WHERE machine_id = ?

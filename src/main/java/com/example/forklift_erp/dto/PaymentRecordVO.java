@@ -22,6 +22,7 @@ public class PaymentRecordVO {
     private Long financialEventId;
     private String remark;
     private Long reversalOfPaymentId;
+    private Long reversalOfFinancialEventId;
     private String createdBy;
     private LocalDateTime createdAt;
 
@@ -40,6 +41,7 @@ public class PaymentRecordVO {
         vo.setFinancialEventId(entity.getFinancialEventId());
         vo.setRemark(entity.getRemark());
         vo.setReversalOfPaymentId(entity.getReversalOfPaymentId());
+        vo.setReversalOfFinancialEventId(entity.getReversalOfFinancialEventId());
         vo.setCreatedBy(entity.getCreatedBy());
         vo.setCreatedAt(entity.getCreatedAt());
         return vo;

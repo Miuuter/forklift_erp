@@ -44,7 +44,7 @@ public class RepairPartUsage {
     @Column(name = "warehouse_id")
     private Long warehouseId;
 
-    @Column(name = "unit_cost", precision = 12, scale = 2)
+    @Column(name = "unit_cost", precision = 18, scale = 6)
     private BigDecimal unitCost;
 
     @Column(name = "charge_unit_price", precision = 12, scale = 2)

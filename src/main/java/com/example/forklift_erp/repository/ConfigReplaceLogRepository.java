@@ -12,6 +12,8 @@ import java.util.List;
 public interface ConfigReplaceLogRepository extends JpaRepository<ConfigReplaceLog, Long> {
     boolean existsByMachineId(Long machineId);
 
+    boolean existsByMachineConfigId(Long machineConfigId);
+
     boolean existsByNewPartId(Long newPartId);
 
 

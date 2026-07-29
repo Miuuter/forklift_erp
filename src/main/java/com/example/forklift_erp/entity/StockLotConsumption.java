@@ -45,7 +45,7 @@ public class StockLotConsumption {
     @Column(nullable = false)
     private Integer quantity;
 
-    @Column(name = "unit_cost", nullable = false, precision = 12, scale = 2)
+    @Column(name = "unit_cost", nullable = false, precision = 18, scale = 6)
     private BigDecimal unitCost;
 
     @Column(name = "total_cost", nullable = false, precision = 14, scale = 2)

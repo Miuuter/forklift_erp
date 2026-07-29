@@ -10,7 +10,7 @@ import com.example.forklift_erp.repository.StockBalanceRepository;
 import com.example.forklift_erp.service.PartInventoryService;
 import com.example.forklift_erp.service.StockLedgerService;
 import com.example.forklift_erp.service.WarehouseService;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.RepeatedTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
@@ -43,7 +43,7 @@ class StockLotGapLockIntegrationTests extends TestcontainersDatabaseSupport {
     @Autowired
     private StockBalanceRepository stockBalanceRepository;
 
-    @Test
+    @RepeatedTest(3)
     void concurrentTransfersForAdjacentPartsDoNotDeadlockOnFifoGapLocks() throws Exception {
         Long sourceWarehouseId = defaultWarehouseId();
         WarehouseDTO warehouseRequest = new WarehouseDTO();

@@ -31,7 +31,7 @@ public class DataImportJob {
     private Long id;
 
     @Version
-    @Column(name = "version")
+    @Column(name = "version", nullable = false)
     private Long version;
 
     @Column(name = "import_type", nullable = false, length = 60)

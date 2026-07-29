@@ -33,6 +33,7 @@ jobs:
           sh -n deploy/synology/backup.sh
           sh -n deploy/synology/restore-drill.sh
           sh -n deploy/synology/update.sh
+          sh scripts/test-synology-backup.sh
           (
             set -a
             . deploy/synology/.env.example

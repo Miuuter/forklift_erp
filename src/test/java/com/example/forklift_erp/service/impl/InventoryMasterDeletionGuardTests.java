@@ -18,6 +18,8 @@ import com.example.forklift_erp.repository.RepairPartUsageRepository;
 import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.repository.ResourceAttachmentRepository;
 import com.example.forklift_erp.repository.StockLotRepository;
+import com.example.forklift_erp.repository.StockMovementLineRepository;
+import com.example.forklift_erp.repository.StockOperationLogRepository;
 import com.example.forklift_erp.repository.StocktakingRecordRepository;
 import com.example.forklift_erp.service.CollaborationService;
 import com.example.forklift_erp.service.MachineConfigService;
@@ -77,11 +79,18 @@ class InventoryMasterDeletionGuardTests {
                                 .existsByResourceTypeAndResourceIdAndDeletedFalse(
                                         StockLedgerService.RESOURCE_MACHINE, RESOURCE_ID)).thenReturn(true),
                         "Vehicle has active attachments and cannot be deleted"),
-                new GuardCase<>("remaining FIFO inventory",
-                        fixture -> when(fixture.stockLotRepository
-                                .existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
-                                        StockLedgerService.RESOURCE_MACHINE, RESOURCE_ID, 0)).thenReturn(true),
-                        "Vehicle has remaining FIFO inventory and cannot be deleted")
+                new GuardCase<>("FIFO history",
+                        fixture -> when(fixture.stockLotRepository.existsByResourceTypeAndResourceId(
+                                StockLedgerService.RESOURCE_MACHINE, RESOURCE_ID)).thenReturn(true),
+                        "Vehicle has FIFO history and cannot be deleted"),
+                new GuardCase<>("stock movement history",
+                        fixture -> when(fixture.stockMovementLineRepository.existsByResourceTypeAndResourceId(
+                                StockLedgerService.RESOURCE_MACHINE, RESOURCE_ID)).thenReturn(true),
+                        "Vehicle has stock movement history and cannot be deleted"),
+                new GuardCase<>("stock operation history",
+                        fixture -> when(fixture.stockOperationLogRepository.existsByResourceTypeAndResourceId(
+                                StockLedgerService.RESOURCE_MACHINE, RESOURCE_ID)).thenReturn(true),
+                        "Vehicle has stock operation history and cannot be deleted")
         );
 
         for (GuardCase<MachineFixture> guardCase : cases) {
@@ -123,11 +132,18 @@ class InventoryMasterDeletionGuardTests {
                                 .existsByResourceTypeAndResourceIdAndDeletedFalse(
                                         StockLedgerService.RESOURCE_PART, RESOURCE_ID)).thenReturn(true),
                         "Part has active attachments and cannot be deleted"),
-                new GuardCase<>("remaining FIFO inventory",
-                        fixture -> when(fixture.stockLotRepository
-                                .existsByResourceTypeAndResourceIdAndRemainingQuantityGreaterThan(
-                                        StockLedgerService.RESOURCE_PART, RESOURCE_ID, 0)).thenReturn(true),
-                        "Part has remaining FIFO inventory and cannot be deleted")
+                new GuardCase<>("FIFO history",
+                        fixture -> when(fixture.stockLotRepository.existsByResourceTypeAndResourceId(
+                                StockLedgerService.RESOURCE_PART, RESOURCE_ID)).thenReturn(true),
+                        "Part has FIFO history and cannot be deleted"),
+                new GuardCase<>("stock movement history",
+                        fixture -> when(fixture.stockMovementLineRepository.existsByResourceTypeAndResourceId(
+                                StockLedgerService.RESOURCE_PART, RESOURCE_ID)).thenReturn(true),
+                        "Part has stock movement history and cannot be deleted"),
+                new GuardCase<>("stock operation history",
+                        fixture -> when(fixture.stockOperationLogRepository.existsByResourceTypeAndResourceId(
+                                StockLedgerService.RESOURCE_PART, RESOURCE_ID)).thenReturn(true),
+                        "Part has stock operation history and cannot be deleted")
         );
 
         for (GuardCase<PartFixture> guardCase : cases) {
@@ -190,6 +206,8 @@ class InventoryMasterDeletionGuardTests {
         ConfigReplaceLogRepository configReplaceLogRepository = mock(ConfigReplaceLogRepository.class);
         PartInventoryRepository partInventoryRepository = mock(PartInventoryRepository.class);
         StockLotRepository stockLotRepository = mock(StockLotRepository.class);
+        StockMovementLineRepository stockMovementLineRepository = mock(StockMovementLineRepository.class);
+        StockOperationLogRepository stockOperationLogRepository = mock(StockOperationLogRepository.class);
         StocktakingRecordRepository stocktakingRecordRepository = mock(StocktakingRecordRepository.class);
         ResourceAttachmentRepository resourceAttachmentRepository = mock(ResourceAttachmentRepository.class);
         StockLedgerService stockLedgerService = mock(StockLedgerService.class);
@@ -228,7 +246,9 @@ class InventoryMasterDeletionGuardTests {
                 partInventoryRepository,
                 stocktakingRecordRepository,
                 resourceAttachmentRepository,
-                stockLotRepository
+                stockLotRepository,
+                stockMovementLineRepository,
+                stockOperationLogRepository
         ));
 
         return new MachineFixture(
@@ -242,6 +262,8 @@ class InventoryMasterDeletionGuardTests {
                 configReplaceLogRepository,
                 partInventoryRepository,
                 stockLotRepository,
+                stockMovementLineRepository,
+                stockOperationLogRepository,
                 stocktakingRecordRepository,
                 resourceAttachmentRepository,
                 stockLedgerService,
@@ -258,6 +280,8 @@ class InventoryMasterDeletionGuardTests {
         RepairPartUsageRepository repairPartUsageRepository = mock(RepairPartUsageRepository.class);
         ConfigReplaceLogRepository configReplaceLogRepository = mock(ConfigReplaceLogRepository.class);
         StockLotRepository stockLotRepository = mock(StockLotRepository.class);
+        StockMovementLineRepository stockMovementLineRepository = mock(StockMovementLineRepository.class);
+        StockOperationLogRepository stockOperationLogRepository = mock(StockOperationLogRepository.class);
         StocktakingRecordRepository stocktakingRecordRepository = mock(StocktakingRecordRepository.class);
         ResourceAttachmentRepository resourceAttachmentRepository = mock(ResourceAttachmentRepository.class);
         StockLedgerService stockLedgerService = mock(StockLedgerService.class);
@@ -292,7 +316,9 @@ class InventoryMasterDeletionGuardTests {
                 partInventoryRepository,
                 stocktakingRecordRepository,
                 resourceAttachmentRepository,
-                stockLotRepository
+                stockLotRepository,
+                stockMovementLineRepository,
+                stockOperationLogRepository
         ));
 
         return new PartFixture(
@@ -304,6 +330,8 @@ class InventoryMasterDeletionGuardTests {
                 repairPartUsageRepository,
                 configReplaceLogRepository,
                 stockLotRepository,
+                stockMovementLineRepository,
+                stockOperationLogRepository,
                 stocktakingRecordRepository,
                 resourceAttachmentRepository,
                 stockLedgerService
@@ -363,6 +391,8 @@ class InventoryMasterDeletionGuardTests {
             ConfigReplaceLogRepository configReplaceLogRepository,
             PartInventoryRepository partInventoryRepository,
             StockLotRepository stockLotRepository,
+            StockMovementLineRepository stockMovementLineRepository,
+            StockOperationLogRepository stockOperationLogRepository,
             StocktakingRecordRepository stocktakingRecordRepository,
             ResourceAttachmentRepository resourceAttachmentRepository,
             StockLedgerService stockLedgerService,
@@ -379,6 +409,8 @@ class InventoryMasterDeletionGuardTests {
             RepairPartUsageRepository repairPartUsageRepository,
             ConfigReplaceLogRepository configReplaceLogRepository,
             StockLotRepository stockLotRepository,
+            StockMovementLineRepository stockMovementLineRepository,
+            StockOperationLogRepository stockOperationLogRepository,
             StocktakingRecordRepository stocktakingRecordRepository,
             ResourceAttachmentRepository resourceAttachmentRepository,
             StockLedgerService stockLedgerService

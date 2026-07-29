@@ -44,8 +44,9 @@ git diff --check
 ## 数据库迁移
 
 - V37–V40 是已发布且不可修改的迁移。
-- 本轮新增迁移为 V41–V45，后续数据库变更从 V46 开始。
-- 升级旧库前必须完成备份和历史修复 dry-run；阻塞异常应先处理，再应用直接外键与数量约束。
+- V41–V45 保持不可修改；本轮新增 V46–V51，后续数据库变更从 V52 开始。
+- 升级旧库前必须停止写入、完成数据库/uploads 备份，并运行
+  `scripts/mysql-upgrade-preflight-v40.sql`；阻塞异常应先处理，再应用直接外键与数量约束。
 
 详见 [迁移说明](docs/MIGRATIONS.md)。
 
@@ -60,6 +61,24 @@ git diff --check
 发布清单见 [RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)，恢复手册见 [RESTORE_RUNBOOK.md](docs/RESTORE_RUNBOOK.md)。
 
 本地等价环境的容量、并发和恢复结果见 [0.2.0-rc.1 稳定性报告](docs/STABILITY_REPORT_0.2.0-rc.1.md)。真实 Synology 的 CPU 架构、磁盘和网络性能仍须在目标 NAS 上执行发布清单。
+
+### V46-V51 data reliability hardening
+
+The latest schema is V51. Production upgrades must stop writers, take a
+database/uploads backup, run `scripts/mysql-upgrade-preflight-v40.sql`, and
+resolve every ambiguous historical fact. See `docs/MIGRATIONS.md`; prior V45
+verification is historical evidence and does not substitute for the V51 gate.
+
+Interrupted imports are recovered from stale `IMPORTING` to `FAILED` after a
+24-hour default timeout. Operators may tune this with
+`FORKLIFT_ERP_IMPORT_RECOVERY_TIMEOUT_MINUTES`; recovery never replays a
+workbook automatically. Billed rentals also freeze customer, start date and
+monthly price so posted receivables cannot silently diverge from the contract.
+
+Current local evidence (2026-07-19): 222/222 default Java tests, 64 MySQL
+integration tests across 20 classes with no failures/errors and one
+environment-gated skip,
+frontend quality checks, and Vitest 7/7.
 
 ## 架构说明
 

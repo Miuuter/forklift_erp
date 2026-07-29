@@ -21,7 +21,17 @@ public interface PurchaseOrderRepository extends JpaRepository<PurchaseOrder, Lo
 
     boolean existsBySupplierId(Long supplierId);
 
+    boolean existsByConfigItemId(Long configItemId);
+
+    boolean existsByConfigValueId(Long configValueId);
+
     boolean existsByPurchaseNo(String purchaseNo);
+
+    boolean existsByResourceTypeAndResourceIdAndReceivedStockMovementIdGreaterThan(
+            String resourceType,
+            Long resourceId,
+            Long receivedStockMovementId
+    );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select p from PurchaseOrder p where p.id = :id")

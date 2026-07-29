@@ -139,7 +139,8 @@ public class StockOperationRecorder {
                         : command.businessType(),
                 command.unitRevenue(),
                 command.idempotencyKey(),
-                command.stockLotId()
+                command.stockLotId(),
+                null
         );
         operationAuditService.record(command.auditModule(), command.operationType(), command.resourceType(), command.resourceId(),
                 command.resourceCode(), command.resourceName(), command.auditSummary(), operator, command.remark(),

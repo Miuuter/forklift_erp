@@ -53,8 +53,14 @@ public class StockLot {
     @Column(name = "remaining_quantity", nullable = false)
     private Integer remainingQuantity;
 
-    @Column(name = "unit_cost", nullable = false, precision = 12, scale = 2)
+    @Column(name = "unit_cost", nullable = false, precision = 18, scale = 6)
     private BigDecimal unitCost;
+
+    @Column(name = "original_cost_amount", nullable = false, precision = 18, scale = 2)
+    private BigDecimal originalCostAmount;
+
+    @Column(name = "remaining_cost_amount", nullable = false, precision = 18, scale = 2)
+    private BigDecimal remainingCostAmount;
 
     @Column(name = "freight_allocated", nullable = false, precision = 14, scale = 2)
     private BigDecimal freightAllocated = BigDecimal.ZERO;
@@ -88,6 +94,7 @@ public class StockLot {
         if (unitCost == null) {
             unitCost = BigDecimal.ZERO;
         }
+        normalizeCostAmounts();
         if (freightAllocated == null) {
             freightAllocated = BigDecimal.ZERO;
         }
@@ -97,7 +104,19 @@ public class StockLot {
     @PreUpdate
     public void preUpdate() {
         updatedAt = LocalDateTime.now();
+        normalizeCostAmounts();
         refreshStatus();
+    }
+
+    private void normalizeCostAmounts() {
+        if (originalCostAmount == null) {
+            originalCostAmount = unitCost.multiply(BigDecimal.valueOf(originalQuantity))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+        }
+        if (remainingCostAmount == null) {
+            remainingCostAmount = unitCost.multiply(BigDecimal.valueOf(remainingQuantity))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+        }
     }
 
     public void refreshStatus() {

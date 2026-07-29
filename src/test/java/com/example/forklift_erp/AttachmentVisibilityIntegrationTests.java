@@ -266,6 +266,7 @@ class AttachmentVisibilityIntegrationTests extends TestcontainersDatabaseSupport
         part.setPartCode("ATT-PART-" + unique("part"));
         part.setPartName("Attachment visibility part");
         part.setQuantity(1);
+        part.setWarehouseId(defaultWarehouseId());
         PartInventory saved = partRepository.saveAndFlush(part);
         partsToCleanup.add(saved.getId());
         return saved.getId();

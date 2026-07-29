@@ -19,6 +19,8 @@ public interface RepairRecordRepository extends JpaRepository<RepairRecord, Long
 
     boolean existsByCustomerId(Long customerId);
 
+    boolean existsByRepairPersonUserId(Long repairPersonUserId);
+
 
     List<RepairRecord> findByMachineIdOrderByRepairDateDesc(Long machineId);
     List<RepairRecord> findByMachineIdAndIsLockedFalseOrderByRepairDateDesc(Long machineId);

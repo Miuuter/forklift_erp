@@ -2,6 +2,44 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/) 和 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 规范。
 
+## [Unreleased] - data reliability hardening
+
+- Split V46-V51 into deterministic legacy reconciliation, binary idempotency
+  and non-null versions, ledger arithmetic/single reversal constraints,
+  configuration/default guards, and direct-reference foreign keys.
+- Added a read-only V40 upgrade preflight that reports exact offending rows.
+- Rebuilt missing legacy receipt facts and corrected part line-total/unit-price
+  migration errors without inventing unverifiable historical costs.
+- Hardened JSON backup v2 with exact structure, manifests, foreign-key checks
+  before deletion and row/FK verification after restore.
+- Made managed invoice/contract replacement retire old metadata in the same
+  transaction and remove the old file only after commit.
+- Added explicit monetary precision validation and service-level payment
+  precision rejection.
+- Preserved exact purchase receipt cost through FIFO partial consumption and
+  final-unit rounding, including the 100/3 tail-allocation case.
+- Bound payments, cash events, configuration changes, work-order lines and
+  repair consumption to database-enforced composite identities.
+- Bound stock-movement reversal lines one-to-one to exact original
+  resource/warehouse/lot/quantity/balance and monetary identities, with a
+  read-only historical completeness preflight before V51 DDL.
+- Rejected procurement receipt of rented/locked serialized vehicles and kept
+  any inventory master with FIFO, movement or operation history immutable.
+- Froze billed rental customer/start-date/monthly-price facts and added
+  automatic recovery for stale `IMPORTING` jobs after a configurable timeout.
+- Rejected reuse of stock-movement, receipt-lot and FIFO-consumption
+  idempotency keys when the immutable resource, warehouse, source, quantity or
+  cost payload differs from the original fact.
+- Applied the same payload check to serialized-asset FIFO cost adjustments,
+  including the target lot identity and modification source line.
+- Executed the real MySQL business flows for data-import recovery (2/2),
+  procurement (4/4), and rental records (4/4) in a single clean run.
+- Verified the current tree with 222 default Java tests and 64 MySQL integration
+  tests across 20 classes (0 failures/errors, one external-environment skip),
+  frontend checks and 7/7 Vitest tests on 2026-07-19. The data-import recovery,
+  procurement and rental business flows were explicitly rerun as 2/2, 4/4 and
+  4/4 against MySQL 8.0.43.
+
 ## [0.2.0-rc.1] - 2026-07-15 - Codex
 
 ### 稳定化

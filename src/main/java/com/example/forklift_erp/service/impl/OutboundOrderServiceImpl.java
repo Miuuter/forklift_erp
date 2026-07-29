@@ -656,13 +656,14 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         }
         return stockOperationLogRepository.findById(order.getStockOperationLogId())
                 .map(log -> MoneyValues.zeroIfNullOrNegative(log.getUnitCost())
-                        .multiply(BigDecimal.valueOf(order.getQuantity() == null ? 1 : order.getQuantity())))
+                        .multiply(BigDecimal.valueOf(order.getQuantity() == null ? 1 : order.getQuantity()))
+                        .setScale(2, java.math.RoundingMode.HALF_UP))
                 .orElse(BigDecimal.ZERO);
     }
 
     private BigDecimal unitCostForOrder(OutboundOrder order) {
         int quantity = order.getQuantity() == null || order.getQuantity() < 1 ? 1 : order.getQuantity();
-        return outboundCost(order).divide(BigDecimal.valueOf(quantity), 2, java.math.RoundingMode.HALF_UP);
+        return outboundCost(order).divide(BigDecimal.valueOf(quantity), 6, java.math.RoundingMode.HALF_UP);
     }
 
     private String nextOrderNo() {

@@ -30,7 +30,7 @@ public class ResourceAttachment {
     private Long id;
 
     @Version
-    @Column(name = "version")
+    @Column(name = "version", nullable = false)
     private Long version;
 
     @Column(name = "resource_type", nullable = false, length = 40)

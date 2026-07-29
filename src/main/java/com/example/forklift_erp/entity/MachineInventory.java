@@ -96,7 +96,7 @@ public class MachineInventory implements CollaborativeResource {
     @Column(name = "warehouse_name", length = 100)
     private String warehouseName; // 所在仓库 (龙工或二级经销商等)
 
-    @Column(name = "warehouse_id")
+    @Column(name = "warehouse_id", nullable = false)
     private Long warehouseId;
 
     @Column(name = "stock_status", length = 30)
@@ -105,7 +105,7 @@ public class MachineInventory implements CollaborativeResource {
     @Column(name = "purchase_price", precision = 12, scale = 2) // 价格类型使用BigDecimal，精度更高
     private BigDecimal purchasePrice;// 采购单价
 
-    @Column(name = "landed_unit_cost", precision = 12, scale = 2)
+    @Column(name = "landed_unit_cost", precision = 18, scale = 6)
     private BigDecimal landedUnitCost;
 
     @Column(name = "sale_price", precision = 12, scale = 2)

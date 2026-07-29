@@ -7,7 +7,10 @@ import com.example.forklift_erp.constant.PartChangeAction;
 import com.example.forklift_erp.constant.RentalStatus;
 import com.example.forklift_erp.constant.RepairStatus;
 import com.example.forklift_erp.dto.StatisticsDashboardVO;
+import com.example.forklift_erp.entity.ConfigItem;
+import com.example.forklift_erp.entity.ConfigValue;
 import com.example.forklift_erp.entity.FinancialEvent;
+import com.example.forklift_erp.entity.MachineConfig;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.ModificationWorkOrder;
 import com.example.forklift_erp.entity.ModificationWorkOrderLine;
@@ -16,7 +19,10 @@ import com.example.forklift_erp.entity.RentalRecord;
 import com.example.forklift_erp.entity.RepairRecord;
 import com.example.forklift_erp.entity.StockMovement;
 import com.example.forklift_erp.entity.StockMovementLine;
+import com.example.forklift_erp.repository.ConfigItemRepository;
+import com.example.forklift_erp.repository.ConfigValueRepository;
 import com.example.forklift_erp.repository.FinancialEventRepository;
+import com.example.forklift_erp.repository.MachineConfigRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
 import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
@@ -65,6 +71,15 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
     private MachineInventoryRepository machineInventoryRepository;
 
     @Autowired
+    private MachineConfigRepository machineConfigRepository;
+
+    @Autowired
+    private ConfigItemRepository configItemRepository;
+
+    @Autowired
+    private ConfigValueRepository configValueRepository;
+
+    @Autowired
     private StockMovementRepository stockMovementRepository;
 
     @Autowired
@@ -80,6 +95,9 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
     private final List<Long> rentalIds = new ArrayList<>();
     private final List<Long> rentalBillIds = new ArrayList<>();
     private final List<Long> workOrderIds = new ArrayList<>();
+    private final List<Long> machineConfigIds = new ArrayList<>();
+    private final List<Long> configValueIds = new ArrayList<>();
+    private final List<Long> configItemIds = new ArrayList<>();
     private final List<Long> machineIds = new ArrayList<>();
     private final List<Long> stockMovementIds = new ArrayList<>();
     private final List<Long> financialEventIds = new ArrayList<>();
@@ -101,6 +119,15 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
             modificationWorkOrderRepository.findById(workOrderId).ifPresent(modificationWorkOrderRepository::delete);
         }
         workOrderIds.clear();
+
+        machineConfigRepository.deleteAllByIdInBatch(machineConfigIds.reversed());
+        machineConfigIds.clear();
+
+        configValueRepository.deleteAllByIdInBatch(configValueIds.reversed());
+        configValueIds.clear();
+
+        configItemRepository.deleteAllByIdInBatch(configItemIds.reversed());
+        configItemIds.clear();
 
         for (Long rentalId : rentalIds.reversed()) {
             rentalRecordRepository.findById(rentalId).ifPresent(rentalRecordRepository::delete);
@@ -230,6 +257,7 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         machine.setVehicleProductNumber("FIN-MACHINE-" + unique("machine"));
         machine.setName("finance machine");
         machine.setSpecificationModel("finance-spec");
+        machine.setWarehouseId(defaultWarehouseId());
         machine.setStockStatus(MachineStockStatus.IN_STOCK.code());
         machine.setInventoryCount(1);
         machine.setModelOnly(false);
@@ -272,6 +300,8 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
     }
 
     private void createCompletedModificationWorkOrder(Long machineId) {
+        MachineConfig machineConfig = createMachineConfig(machineId);
+
         ModificationWorkOrder order = new ModificationWorkOrder();
         order.setWorkOrderNo("FIN-MOD-" + unique("mod"));
         order.setMachineId(machineId);
@@ -280,19 +310,54 @@ class StatisticsFinanceIntegrationTests extends TestcontainersDatabaseSupport {
         ModificationWorkOrder savedOrder = modificationWorkOrderRepository.save(order);
         workOrderIds.add(savedOrder.getId());
 
-        saveModificationLine(savedOrder.getId(), PartChangeAction.DISCOUNT.code(), "-120.00");
-        saveModificationLine(savedOrder.getId(), PartChangeAction.DISCOUNT.code(), "45.00");
-        saveModificationLine(savedOrder.getId(), PartChangeAction.STOCK_IN.code(), "-999.00");
+        saveModificationLine(savedOrder.getId(), machineConfig, PartChangeAction.DISCOUNT.code(), "-120.00");
+        saveModificationLine(savedOrder.getId(), machineConfig, PartChangeAction.DISCOUNT.code(), "45.00");
+        saveModificationLine(savedOrder.getId(), machineConfig, PartChangeAction.STOCK_IN.code(), "-999.00");
         postFinancialEvent(FinancialEventType.REVENUE, "120.00",
                 "MODIFICATION_WORK_ORDER", savedOrder.getId());
         postFinancialEvent(FinancialEventType.OPERATING_COST, "45.00",
                 "MODIFICATION_WORK_ORDER", savedOrder.getId());
     }
 
-    private void saveModificationLine(Long workOrderId, String oldPartAction, String priceDifference) {
+    private MachineConfig createMachineConfig(Long machineId) {
+        ConfigItem item = new ConfigItem();
+        item.setCategory("FINANCE_TEST");
+        item.setItemName("finance modification config");
+        item.setItemCode("FIN-CFG-" + unique("config"));
+        item.setInputType("SELECT");
+        ConfigItem savedItem = configItemRepository.saveAndFlush(item);
+        configItemIds.add(savedItem.getId());
+
+        ConfigValue value = new ConfigValue();
+        value.setConfigItemId(savedItem.getId());
+        value.setValueLabel("finance modification value");
+        value.setValueCode("FINANCE_VALUE");
+        value.setIsDefault(false);
+        ConfigValue savedValue = configValueRepository.saveAndFlush(value);
+        configValueIds.add(savedValue.getId());
+
+        MachineConfig config = new MachineConfig();
+        config.setMachineId(machineId);
+        config.setConfigItemId(savedItem.getId());
+        config.setConfigValueId(savedValue.getId());
+        config.setItemName(savedItem.getItemName());
+        config.setSelectedValue(savedValue.getValueLabel());
+        MachineConfig savedConfig = machineConfigRepository.saveAndFlush(config);
+        machineConfigIds.add(savedConfig.getId());
+        return savedConfig;
+    }
+
+    private void saveModificationLine(
+            Long workOrderId,
+            MachineConfig machineConfig,
+            String oldPartAction,
+            String priceDifference
+    ) {
         ModificationWorkOrderLine line = new ModificationWorkOrderLine();
         line.setWorkOrderId(workOrderId);
-        line.setMachineConfigId(990003L);
+        line.setMachineId(machineConfig.getMachineId());
+        line.setMachineConfigId(machineConfig.getId());
+        line.setConfigItemId(machineConfig.getConfigItemId());
         line.setItemName("finance modification line");
         line.setOldPartAction(oldPartAction);
         line.setPriceDifference(new BigDecimal(priceDifference));

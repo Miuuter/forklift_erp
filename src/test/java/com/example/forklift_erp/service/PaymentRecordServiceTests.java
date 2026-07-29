@@ -69,8 +69,7 @@ class PaymentRecordServiceTests {
         RepairRecord repair = new RepairRecord();
         repair.setId(8L);
         repair.setStatus("PENDING");
-        when(fixture.repairRecordRepository.existsById(8L)).thenReturn(true);
-        when(fixture.repairRecordRepository.findById(8L)).thenReturn(java.util.Optional.of(repair));
+        when(fixture.repairRecordRepository.findByIdForUpdate(8L)).thenReturn(java.util.Optional.of(repair));
 
         assertThatThrownBy(() -> fixture.service.create(request(
                 PaymentRecord.DIRECTION_RECEIPT,
@@ -90,8 +89,7 @@ class PaymentRecordServiceTests {
         order.setId(9L);
         order.setStatus("COMPLETED");
         order.setWorkOrderType("PRE_SALE");
-        when(fixture.modificationWorkOrderRepository.existsById(9L)).thenReturn(true);
-        when(fixture.modificationWorkOrderRepository.findById(9L))
+        when(fixture.modificationWorkOrderRepository.findByIdForUpdate(9L))
                 .thenReturn(java.util.Optional.of(order));
 
         assertThatThrownBy(() -> fixture.service.create(request(
@@ -114,6 +112,8 @@ class PaymentRecordServiceTests {
         reversal.setReversalOfPaymentId(20L);
         when(fixture.paymentRecordRepository.findById(21L))
                 .thenReturn(java.util.Optional.of(reversal));
+        when(fixture.paymentRecordRepository.findByIdForUpdate(21L))
+                .thenReturn(java.util.Optional.of(reversal));
 
         assertThatThrownBy(() -> fixture.service.reverse(21L, "reverse-21", null))
                 .isInstanceOf(BusinessException.class)
@@ -134,9 +134,13 @@ class PaymentRecordServiceTests {
 
         PaymentRecord deposit = payment(41L, "200.00", LocalDate.of(2026, 7, 1));
         PaymentRecord balance = payment(42L, "340.00", LocalDate.of(2026, 7, 2));
+        balance.setFinancialEventId(142L);
         PaymentRecord reversal = payment(43L, "-340.00", LocalDate.of(2026, 7, 2));
+        reversal.setReversalOfPaymentId(42L);
+        reversal.setReversalOfFinancialEventId(142L);
 
         when(fixture.paymentRecordRepository.findById(42L)).thenReturn(Optional.of(balance));
+        when(fixture.paymentRecordRepository.findByIdForUpdate(42L)).thenReturn(Optional.of(balance));
         when(fixture.paymentRecordRepository.findByReversalOfPaymentId(42L)).thenReturn(Optional.empty());
         when(fixture.paymentRecordRepository.totalForSource(
                 FinancialEventService.SOURCE_OUTBOUND_ORDER,
@@ -152,7 +156,9 @@ class PaymentRecordServiceTests {
                 FinancialEventService.SOURCE_OUTBOUND_ORDER,
                 31L,
                 "reverse balance",
-                "PAYMENT-REVERSAL-REQUEST:reverse-42"
+                "PAYMENT-REVERSAL-REQUEST:reverse-42",
+                42L,
+                142L
         )).thenReturn(reversal);
         when(fixture.outboundOrderRepository.findByIdForUpdate(31L)).thenReturn(Optional.of(order));
         when(fixture.financialEventService.receiptTotal(
@@ -168,6 +174,7 @@ class PaymentRecordServiceTests {
         assertThat(order.getPaymentSettled()).isFalse();
         assertThat(order.getLastPaymentDate()).isEqualTo(LocalDate.of(2026, 7, 1));
         assertThat(reversal.getReversalOfPaymentId()).isEqualTo(42L);
+        assertThat(reversal.getReversalOfFinancialEventId()).isEqualTo(142L);
     }
 
     @Test
@@ -175,7 +182,6 @@ class PaymentRecordServiceTests {
         Fixture fixture = fixture();
         PaymentRecord existing = payment(51L, "10.00", LocalDate.of(2026, 7, 15));
         existing.setRequestId("PAYMENT-REQUEST:request-OUTBOUND_ORDER-31");
-        when(fixture.outboundOrderRepository.existsById(31L)).thenReturn(true);
         when(fixture.requestIdempotencyGuard.claim(anyString(), anyString())).thenReturn(false);
         when(fixture.paymentRecordRepository.findByRequestIdForUpdate(existing.getRequestId()))
                 .thenReturn(Optional.of(existing));
@@ -187,6 +193,62 @@ class PaymentRecordServiceTests {
         ));
 
         assertThat(result.getId()).isEqualTo(51L);
+        verifyNoInteractions(fixture.financialEventService);
+    }
+
+    @Test
+    void duplicateRequestIdWithDifferentPayloadIsRejected() {
+        Fixture fixture = fixture();
+        PaymentRecord existing = payment(52L, "10.00", LocalDate.of(2026, 7, 15));
+        existing.setRequestId("PAYMENT-REQUEST:request-OUTBOUND_ORDER-31");
+        when(fixture.requestIdempotencyGuard.claim(anyString(), anyString())).thenReturn(false);
+        when(fixture.paymentRecordRepository.findByRequestIdForUpdate(existing.getRequestId()))
+                .thenReturn(Optional.of(existing));
+        PaymentRecordCreateDTO changed = request(
+                PaymentRecord.DIRECTION_RECEIPT,
+                FinancialEventService.SOURCE_OUTBOUND_ORDER,
+                31L
+        );
+        changed.setAmount(new BigDecimal("11.00"));
+
+        assertThatThrownBy(() -> fixture.service.create(changed))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Request ID was already used for a different payment payload");
+
+        verifyNoInteractions(fixture.financialEventService);
+    }
+
+    @Test
+    void rejectsNonPositiveAmountEvenWhenCalledWithoutControllerValidation() {
+        Fixture fixture = fixture();
+        PaymentRecordCreateDTO request = request(
+                PaymentRecord.DIRECTION_RECEIPT,
+                FinancialEventService.SOURCE_OUTBOUND_ORDER,
+                31L
+        );
+        request.setAmount(BigDecimal.ZERO);
+
+        assertThatThrownBy(() -> fixture.service.create(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Payment amount must be greater than zero");
+
+        verifyNoInteractions(fixture.financialEventService);
+    }
+
+    @Test
+    void rejectsOverPreciseAmountEvenWhenCalledWithoutControllerValidation() {
+        Fixture fixture = fixture();
+        PaymentRecordCreateDTO request = request(
+                PaymentRecord.DIRECTION_RECEIPT,
+                FinancialEventService.SOURCE_OUTBOUND_ORDER,
+                31L
+        );
+        request.setAmount(new BigDecimal("10.001"));
+
+        assertThatThrownBy(() -> fixture.service.create(request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Payment amount must fit DECIMAL(14,2)");
+
         verifyNoInteractions(fixture.financialEventService);
     }
 

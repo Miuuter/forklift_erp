@@ -9,6 +9,7 @@ import com.example.forklift_erp.repository.StockLotCostAdjustmentRepository;
 import com.example.forklift_erp.repository.StockLotConsumptionRepository;
 import com.example.forklift_erp.repository.StockLotRepository;
 import com.example.forklift_erp.util.MoneyValues;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +18,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -25,6 +27,9 @@ import java.util.Set;
  */
 @Service
 public class StockLotService {
+    @Autowired
+    private RequestIdempotencyGuard requestIdempotencyGuard;
+
     private final StockLotRepository stockLotRepository;
     private final StockLotConsumptionRepository consumptionRepository;
     private final StockLotCostAdjustmentRepository costAdjustmentRepository;
@@ -53,14 +58,77 @@ public class StockLotService {
             LocalDate businessDate,
             String idempotencyKey
     ) {
-        if (idempotencyKey != null) {
-            StockLot existing = stockLotRepository.findByIdempotencyKey(idempotencyKey).orElse(null);
-            if (existing != null) {
-                return existing;
-            }
-        }
+        return createReceiptLotInternal(
+                resourceType, resourceId, warehouseId, quantity, unitCost, null,
+                freightAllocated, sourceType, sourceId, sourceLineId, businessDate, idempotencyKey);
+    }
+
+    @Transactional
+    public StockLot createReceiptLotWithTotalCost(
+            String resourceType,
+            Long resourceId,
+            Long warehouseId,
+            int quantity,
+            BigDecimal unitCost,
+            BigDecimal totalCost,
+            BigDecimal freightAllocated,
+            String sourceType,
+            Long sourceId,
+            Long sourceLineId,
+            LocalDate businessDate,
+            String idempotencyKey
+    ) {
+        return createReceiptLotInternal(
+                resourceType, resourceId, warehouseId, quantity, unitCost, totalCost,
+                freightAllocated, sourceType, sourceId, sourceLineId, businessDate, idempotencyKey);
+    }
+
+    private StockLot createReceiptLotInternal(
+            String resourceType,
+            Long resourceId,
+            Long warehouseId,
+            int quantity,
+            BigDecimal unitCost,
+            BigDecimal totalCost,
+            BigDecimal freightAllocated,
+            String sourceType,
+            Long sourceId,
+            Long sourceLineId,
+            LocalDate businessDate,
+            String idempotencyKey
+    ) {
         if (quantity <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "Stock lot quantity must be greater than 0");
+        }
+        BigDecimal normalizedUnitCost = MoneyValues.zeroIfNullOrNegative(unitCost);
+        BigDecimal normalizedTotalCost = totalCost == null
+                ? normalizedUnitCost.multiply(BigDecimal.valueOf(quantity))
+                        .setScale(2, java.math.RoundingMode.HALF_UP)
+                : MoneyValues.zeroIfNullOrNegative(totalCost).setScale(2, java.math.RoundingMode.HALF_UP);
+        BigDecimal normalizedFreight = MoneyValues.zeroIfNullOrNegative(freightAllocated);
+        boolean claimWon = claimTechnicalKey("STOCK_LOT_RECEIPT", idempotencyKey);
+        if (idempotencyKey != null) {
+            StockLot existing = findReceiptIdempotentLot(idempotencyKey, claimWon).orElse(null);
+            if (existing != null) {
+                StockLotIdempotencyValidator.validateReceiptLot(
+                        existing,
+                        resourceType,
+                        resourceId,
+                        warehouseId,
+                        quantity,
+                        normalizedUnitCost,
+                        normalizedTotalCost,
+                        normalizedFreight,
+                        sourceType,
+                        sourceId,
+                        sourceLineId,
+                        businessDate
+                );
+                return existing;
+            }
+            if (!claimWon) {
+                throw StockLotIdempotencyValidator.inProgress("Stock lot");
+            }
         }
         StockLot lot = new StockLot();
         lot.setResourceType(resourceType);
@@ -72,8 +140,10 @@ public class StockLotService {
         lot.setReceivedBusinessDate(businessDate == null ? LocalDate.now() : businessDate);
         lot.setOriginalQuantity(quantity);
         lot.setRemainingQuantity(quantity);
-        lot.setUnitCost(MoneyValues.zeroIfNullOrNegative(unitCost));
-        lot.setFreightAllocated(MoneyValues.zeroIfNullOrNegative(freightAllocated));
+        lot.setUnitCost(normalizedUnitCost);
+        lot.setOriginalCostAmount(normalizedTotalCost);
+        lot.setRemainingCostAmount(normalizedTotalCost);
+        lot.setFreightAllocated(normalizedFreight);
         lot.setIdempotencyKey(idempotencyKey);
         return stockLotRepository.save(lot);
     }
@@ -95,11 +165,27 @@ public class StockLotService {
         if (quantity <= 0) {
             throw new BusinessException(ResultCode.PARAM_ERROR, "FIFO consumption quantity must be greater than 0");
         }
+        boolean claimWon = claimTechnicalKey("STOCK_LOT_FIFO", idempotencyKey);
         if (idempotencyKey != null) {
-            List<StockLotConsumption> existing = consumptionRepository
-                    .findByIdempotencyKeyStartingWithOrderByIdAsc(idempotencyKey + ":");
+            List<StockLotConsumption> existing = findConsumptionIdempotencyFacts(
+                    idempotencyKey + ":", claimWon);
             if (!existing.isEmpty()) {
+                StockLotIdempotencyValidator.validateConsumption(
+                        existing,
+                        resourceType,
+                        resourceId,
+                        warehouseId,
+                        quantity,
+                        sourceType,
+                        sourceId,
+                        sourceLineId,
+                        businessDate,
+                        idempotencyKey
+                );
                 return result(existing);
+            }
+            if (!claimWon) {
+                throw StockLotIdempotencyValidator.inProgress("FIFO consumption");
             }
         }
 
@@ -140,7 +226,9 @@ public class StockLotService {
                 continue;
             }
             int used = Math.min(lotQuantity, remaining);
+            BigDecimal allocatedCost = StockLotCostAllocator.allocate(lot, lotQuantity, used);
             lot.setRemainingQuantity(lotQuantity - used);
+            lot.setRemainingCostAmount(StockLotCostAllocator.remainingCost(lot).subtract(allocatedCost));
             lot.refreshStatus();
             stockLotRepository.save(lot);
 
@@ -153,8 +241,9 @@ public class StockLotService {
             consumption.setSourceId(sourceId);
             consumption.setSourceLineId(sourceLineId);
             consumption.setQuantity(used);
-            consumption.setUnitCost(MoneyValues.zeroIfNullOrNegative(lot.getUnitCost()));
-            consumption.setTotalCost(consumption.getUnitCost().multiply(BigDecimal.valueOf(used)));
+            consumption.setTotalCost(allocatedCost);
+            consumption.setUnitCost(allocatedCost.divide(
+                    BigDecimal.valueOf(used), 6, java.math.RoundingMode.HALF_UP));
             consumption.setBusinessDate(businessDate == null ? LocalDate.now() : businessDate);
             consumption.setIdempotencyKey(idempotencyKey == null ? null : idempotencyKey + ":lot:" + lot.getId());
             consumed.add(consumptionRepository.save(consumption));
@@ -187,9 +276,10 @@ public class StockLotService {
             if (original.getReversalOfConsumptionId() != null || alreadyReversed.contains(original.getId())) {
                 continue;
             }
-            StockLot lot = stockLotRepository.findById(original.getStockLotId())
+            StockLot lot = stockLotRepository.findByIdForUpdate(original.getStockLotId())
                     .orElseThrow(() -> new BusinessException(ResultCode.CONFLICT, "Stock lot no longer exists for restoration"));
             lot.setRemainingQuantity(value(lot.getRemainingQuantity()) + value(original.getQuantity()));
+            StockLotCostAllocator.restore(lot, original);
             lot.setStatus(StockLot.STATUS_OPEN);
             stockLotRepository.save(lot);
 
@@ -198,8 +288,8 @@ public class StockLotService {
             reversal.setResourceType(original.getResourceType());
             reversal.setResourceId(original.getResourceId());
             reversal.setWarehouseId(original.getWarehouseId());
-            reversal.setSourceType(sourceType + "_REVERSAL");
-            reversal.setSourceId(sourceId);
+            reversal.setSourceType(original.getSourceType());
+            reversal.setSourceId(original.getSourceId());
             reversal.setSourceLineId(original.getSourceLineId());
             reversal.setQuantity(-value(original.getQuantity()));
             reversal.setUnitCost(original.getUnitCost());
@@ -241,9 +331,10 @@ public class StockLotService {
             if (original.getReversalOfConsumptionId() != null || alreadyReversed.contains(original.getId())) {
                 continue;
             }
-            StockLot lot = stockLotRepository.findById(original.getStockLotId())
+            StockLot lot = stockLotRepository.findByIdForUpdate(original.getStockLotId())
                     .orElseThrow(() -> new BusinessException(ResultCode.CONFLICT, "Stock lot no longer exists for restoration"));
             lot.setRemainingQuantity(value(lot.getRemainingQuantity()) + value(original.getQuantity()));
+            StockLotCostAllocator.restore(lot, original);
             lot.setStatus(StockLot.STATUS_OPEN);
             stockLotRepository.save(lot);
 
@@ -252,9 +343,9 @@ public class StockLotService {
             reversal.setResourceType(original.getResourceType());
             reversal.setResourceId(original.getResourceId());
             reversal.setWarehouseId(original.getWarehouseId());
-            reversal.setSourceType(sourceType + "_REVERSAL");
-            reversal.setSourceId(sourceId);
-            reversal.setSourceLineId(sourceLineId);
+            reversal.setSourceType(original.getSourceType());
+            reversal.setSourceId(original.getSourceId());
+            reversal.setSourceLineId(original.getSourceLineId());
             reversal.setQuantity(-value(original.getQuantity()));
             reversal.setUnitCost(original.getUnitCost());
             reversal.setTotalCost(MoneyValues.zeroIfNullOrNegative(original.getTotalCost()).negate());
@@ -271,17 +362,23 @@ public class StockLotService {
         StockLot lot = stockLotRepository.findById(lotId)
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Stock lot not found"));
         return value(lot.getRemainingQuantity()) == value(lot.getOriginalQuantity())
+                && StockLotCostAllocator.remainingCost(lot)
+                        .compareTo(StockLotCostAllocator.originalCost(lot)) == 0
                 && !StockLot.STATUS_REVERSED.equals(lot.getStatus());
     }
 
     @Transactional
     public void reverseReceiptLot(Long lotId) {
-        StockLot lot = stockLotRepository.findById(lotId)
+        StockLot lot = stockLotRepository.findByIdForUpdate(lotId)
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Stock lot not found"));
-        if (value(lot.getRemainingQuantity()) != value(lot.getOriginalQuantity())) {
+        if (value(lot.getRemainingQuantity()) != value(lot.getOriginalQuantity())
+                || StockLotCostAllocator.remainingCost(lot)
+                        .compareTo(StockLotCostAllocator.originalCost(lot)) != 0
+                || StockLot.STATUS_REVERSED.equals(lot.getStatus())) {
             throw new BusinessException(ResultCode.CONFLICT, "A consumed FIFO lot cannot have its receipt directly reversed");
         }
         lot.setRemainingQuantity(0);
+        lot.setRemainingCostAmount(BigDecimal.ZERO.setScale(2));
         lot.setStatus(StockLot.STATUS_REVERSED);
         stockLotRepository.save(lot);
     }
@@ -305,10 +402,34 @@ public class StockLotService {
             String idempotencyKey
     ) {
         BigDecimal adjustment = amount == null ? BigDecimal.ZERO : amount;
-        if (adjustment.signum() == 0) {
-            return;
+        boolean claimWon = adjustment.signum() == 0
+                || claimTechnicalKey("STOCK_LOT_COST_ADJUSTMENT", idempotencyKey);
+        if (idempotencyKey != null) {
+            StockLotCostAdjustment existing = findCostAdjustmentIdempotentFact(
+                    idempotencyKey, claimWon).orElse(null);
+            if (existing != null) {
+                StockLot existingLot = stockLotRepository.findById(existing.getStockLotId())
+                        .orElseThrow(() -> new BusinessException(ResultCode.CONFLICT,
+                                "Cost adjustment idempotency key points to a missing stock lot"));
+                StockLotIdempotencyValidator.validateCostAdjustment(
+                        existing,
+                        existingLot,
+                        resourceType,
+                        resourceId,
+                        warehouseId,
+                        adjustment,
+                        sourceType,
+                        sourceId,
+                        sourceLineId,
+                        businessDate
+                );
+                return;
+            }
+            if (!claimWon) {
+                throw StockLotIdempotencyValidator.inProgress("Cost adjustment");
+            }
         }
-        if (idempotencyKey != null && costAdjustmentRepository.findByIdempotencyKey(idempotencyKey).isPresent()) {
+        if (adjustment.signum() == 0) {
             return;
         }
         List<StockLot> openLots = stockLotRepository.findOpenFifoForUpdate(resourceType, resourceId, warehouseId);
@@ -323,6 +444,9 @@ public class StockLotService {
                     "Serialized asset cost adjustment would make the FIFO unit cost negative");
         }
         targetLot.setUnitCost(updatedCost);
+        BigDecimal updatedTotalCost = updatedCost.setScale(2, java.math.RoundingMode.HALF_UP);
+        targetLot.setOriginalCostAmount(updatedTotalCost);
+        targetLot.setRemainingCostAmount(updatedTotalCost);
         stockLotRepository.save(targetLot);
 
         StockLotCostAdjustment row = new StockLotCostAdjustment();
@@ -374,6 +498,10 @@ public class StockLotService {
                         "Pending receipt valuation cannot reduce the existing FIFO cost");
             }
             lot.setUnitCost(normalizedCost);
+            BigDecimal revaluedTotal = normalizedCost.multiply(BigDecimal.valueOf(remaining))
+                    .setScale(2, java.math.RoundingMode.HALF_UP);
+            lot.setOriginalCostAmount(revaluedTotal);
+            lot.setRemainingCostAmount(revaluedTotal);
             stockLotRepository.save(lot);
             BigDecimal lotAdjustment = unitAdjustment.multiply(BigDecimal.valueOf(remaining));
             totalAdjustment = totalAdjustment.add(lotAdjustment);
@@ -466,15 +594,17 @@ public class StockLotService {
                 continue;
             }
             int movedQuantity = Math.min(sourceQuantity, remaining);
+            BigDecimal movedCost = StockLotCostAllocator.allocate(sourceLot, sourceQuantity, movedQuantity);
             String key = "TRANSFER-LOT:" + stockMovementId + ":" + sourceLot.getId();
             StockLot existingTarget = stockLotRepository.findByIdempotencyKey(key).orElse(null);
             if (existingTarget == null) {
-                createReceiptLot(
+                createReceiptLotWithTotalCost(
                         resourceType,
                         resourceId,
                         toWarehouseId,
                         movedQuantity,
                         sourceLot.getUnitCost(),
+                        movedCost,
                         BigDecimal.ZERO,
                         sourceType,
                         stockMovementId,
@@ -484,6 +614,8 @@ public class StockLotService {
                 );
             }
             sourceLot.setRemainingQuantity(sourceQuantity - movedQuantity);
+            sourceLot.setRemainingCostAmount(
+                    StockLotCostAllocator.remainingCost(sourceLot).subtract(movedCost));
             sourceLot.refreshStatus();
             stockLotRepository.save(sourceLot);
             remaining -= movedQuantity;
@@ -496,15 +628,49 @@ public class StockLotService {
     private ConsumptionResult result(List<StockLotConsumption> lines) {
         BigDecimal total = lines.stream()
                 .map(StockLotConsumption::getTotalCost)
-                .map(MoneyValues::zeroIfNullOrNegative)
+                .map(value -> value == null ? BigDecimal.ZERO : value)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         int quantity = lines.stream().mapToInt(line -> Math.abs(value(line.getQuantity()))).sum();
-        BigDecimal unit = quantity == 0 ? BigDecimal.ZERO : total.abs().divide(BigDecimal.valueOf(quantity), 2, java.math.RoundingMode.HALF_UP);
+        BigDecimal unit = quantity == 0
+                ? BigDecimal.ZERO
+                : total.abs().divide(BigDecimal.valueOf(quantity), 6, java.math.RoundingMode.HALF_UP);
         return new ConsumptionResult(total, unit, List.copyOf(lines));
     }
 
     private int value(Integer input) {
         return input == null ? 0 : input;
+    }
+
+    private boolean claimTechnicalKey(String scope, String key) {
+        return requestIdempotencyGuard == null
+                || requestIdempotencyGuard.claimTechnicalKey(scope, key);
+    }
+
+    private Optional<StockLot> findReceiptIdempotentLot(String key, boolean claimWon) {
+        if (requestIdempotencyGuard != null && claimWon) {
+            return stockLotRepository.findByIdempotencyKey(key);
+        }
+        return stockLotRepository.findByIdempotencyKeyForUpdate(key);
+    }
+
+    private List<StockLotConsumption> findConsumptionIdempotencyFacts(
+            String prefix,
+            boolean claimWon
+    ) {
+        if (requestIdempotencyGuard != null && claimWon) {
+            return consumptionRepository.findByIdempotencyKeyStartingWithOrderByIdAsc(prefix);
+        }
+        return consumptionRepository.findByIdempotencyKeyPrefixForUpdate(prefix);
+    }
+
+    private Optional<StockLotCostAdjustment> findCostAdjustmentIdempotentFact(
+            String key,
+            boolean claimWon
+    ) {
+        if (requestIdempotencyGuard != null && claimWon) {
+            return costAdjustmentRepository.findByIdempotencyKey(key);
+        }
+        return costAdjustmentRepository.findByIdempotencyKeyForUpdate(key);
     }
 
     public record ConsumptionResult(BigDecimal totalCost, BigDecimal unitCost, List<StockLotConsumption> consumptions) {

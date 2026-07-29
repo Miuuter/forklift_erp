@@ -8,6 +8,7 @@ import com.example.forklift_erp.entity.PartInventory;
 import com.example.forklift_erp.entity.Role;
 import com.example.forklift_erp.entity.User;
 import com.example.forklift_erp.repository.ConfigItemRepository;
+import com.example.forklift_erp.repository.ConfigReplaceLogRepository;
 import com.example.forklift_erp.repository.ConfigValueRepository;
 import com.example.forklift_erp.repository.MachineConfigRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
@@ -77,6 +78,9 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
     private ConfigValueRepository configValueRepository;
 
     @Autowired
+    private ConfigReplaceLogRepository configReplaceLogRepository;
+
+    @Autowired
     private PartInventoryRepository partRepository;
 
     @Autowired
@@ -114,6 +118,11 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
             workOrderRepository.findById(workOrderId).ifPresent(workOrderRepository::delete);
         }
         workOrdersToCleanup.clear();
+
+        for (Long machineId : machinesToCleanup.reversed()) {
+            configReplaceLogRepository.findByMachineIdOrderByCreatedAtDesc(machineId)
+                    .forEach(configReplaceLogRepository::delete);
+        }
 
         for (Long configId : configsToCleanup.reversed()) {
             machineConfigRepository.findById(configId).ifPresent(machineConfigRepository::delete);
@@ -644,10 +653,18 @@ class ModificationWorkOrderIntegrationTests extends TestcontainersDatabaseSuppor
         ConfigItem savedItem = configItemRepository.saveAndFlush(configItem);
         configItemsToCleanup.add(savedItem.getId());
 
+        ConfigValue configValue = new ConfigValue();
+        configValue.setConfigItemId(savedItem.getId());
+        configValue.setValueLabel("Pneumatic tire");
+        configValue.setValueCode("PNEUMATIC");
+        configValue.setIsDefault(true);
+        ConfigValue savedValue = configValueRepository.saveAndFlush(configValue);
+        configValuesToCleanup.add(savedValue.getId());
+
         MachineConfig config = new MachineConfig();
         config.setMachineId(machineId);
         config.setConfigItemId(savedItem.getId());
-        config.setConfigValueId(Math.abs(UUID.randomUUID().getLeastSignificantBits()));
+        config.setConfigValueId(savedValue.getId());
         config.setItemName(savedItem.getItemName());
         config.setSelectedValue("Pneumatic tire");
         config.setIsStandard(true);

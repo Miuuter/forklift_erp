@@ -70,7 +70,7 @@ public class PartInventory implements CollaborativeResource {
     @Column(name = "source_machine_id")
     private Long sourceMachineId; // 来源车辆编号
 
-    @Column(name = "warehouse_id")
+    @Column(name = "warehouse_id", nullable = false)
     private Long warehouseId;
 
     @NotNull(message = "数量不能为空")
@@ -88,7 +88,7 @@ public class PartInventory implements CollaborativeResource {
     @Column(name = "purchase_price", precision = 12, scale = 2)
     private BigDecimal purchasePrice; // 采购单价
 
-    @Column(name = "landed_unit_cost", precision = 12, scale = 2)
+    @Column(name = "landed_unit_cost", precision = 18, scale = 6)
     private BigDecimal landedUnitCost;
 
     @Column(name = "sale_price", precision = 12, scale = 2)

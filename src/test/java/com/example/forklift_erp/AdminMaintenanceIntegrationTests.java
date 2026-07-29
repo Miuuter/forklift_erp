@@ -20,6 +20,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -27,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -79,6 +81,19 @@ class AdminMaintenanceIntegrationTests extends TestcontainersDatabaseSupport {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private static final List<String> RESET_TABLES = List.of(
+            "request_idempotency", "data_import_row", "resource_attachment", "repair_part_usage",
+            "modification_work_order_line", "payment_record", "rental_bill", "stock_lot_cost_adjustment",
+            "stock_movement_line", "stock_lot_consumption", "financial_event", "config_replace_log",
+            "outbound_order", "purchase_order", "stocktaking_record", "modification_work_order",
+            "rental_record", "stock_lot", "stock_movement", "stock_balance", "stock_operation_log",
+            "machine_config", "repair_record", "part_inventory", "machine_inventory", "customer_profile",
+            "data_import_job", "migration_exception", "operation_audit_log"
+    );
+
     private String superUsername;
     private String superToken;
 
@@ -94,7 +109,12 @@ class AdminMaintenanceIntegrationTests extends TestcontainersDatabaseSupport {
         JsonNode customer = createCustomer();
         JsonNode machine = createMachine();
         createPart();
-        createOutboundOrder(customer.path("id").asLong(), machine.path("id").asLong(), machine.path("version").asLong());
+        JsonNode outbound = createOutboundOrder(
+                customer.path("id").asLong(),
+                machine.path("id").asLong(),
+                machine.path("version").asLong()
+        );
+        createPayment(outbound.path("id").asLong());
 
         assertThat(customerRepository.count()).isGreaterThan(0);
         assertThat(machineInventoryRepository.count()).isGreaterThan(0);
@@ -104,6 +124,9 @@ class AdminMaintenanceIntegrationTests extends TestcontainersDatabaseSupport {
         assertThat(stockBalanceRepository.count()).isGreaterThan(0);
         assertThat(stockOperationLogRepository.count()).isGreaterThan(0);
         assertThat(operationAuditLogRepository.count()).isGreaterThan(0);
+        assertThat(tableCount("payment_record")).isGreaterThan(0);
+        assertThat(tableCount("financial_event")).isGreaterThan(0);
+        assertThat(tableCount("request_idempotency")).isGreaterThan(0);
 
         mockMvc.perform(post("/api/admin/business-data/reset")
                         .header("Authorization", bearer(superToken))
@@ -124,6 +147,9 @@ class AdminMaintenanceIntegrationTests extends TestcontainersDatabaseSupport {
         assertThat(stockBalanceRepository.count()).isZero();
         assertThat(stockOperationLogRepository.count()).isZero();
         assertThat(operationAuditLogRepository.count()).isZero();
+        for (String table : RESET_TABLES) {
+            assertThat(tableCount(table)).as(table).isZero();
+        }
         assertThat(userRepository.existsByUsername(superUsername)).isTrue();
     }
 
@@ -223,7 +249,7 @@ class AdminMaintenanceIntegrationTests extends TestcontainersDatabaseSupport {
         return objectMapper.readTree(response).path("data");
     }
 
-    private void createOutboundOrder(Long customerId, Long machineId, Long machineVersion) throws Exception {
+    private JsonNode createOutboundOrder(Long customerId, Long machineId, Long machineVersion) throws Exception {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("machineId", machineId);
         payload.put("machineVersion", machineVersion);
@@ -234,12 +260,36 @@ class AdminMaintenanceIntegrationTests extends TestcontainersDatabaseSupport {
         payload.put("operator", "reset-test");
         payload.put("orderRemark", "reset flow");
 
-        mockMvc.perform(post("/api/outbound-orders/vehicle")
+        String response = mockMvc.perform(post("/api/outbound-orders/vehicle")
                         .header("Authorization", bearer(superToken))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(json(payload)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value(200))
+                .andReturn()
+                .getResponse()
+                .getContentAsString();
+        return objectMapper.readTree(response).path("data");
+    }
+
+    private void createPayment(Long outboundOrderId) throws Exception {
+        mockMvc.perform(post("/api/payments")
+                        .header("Authorization", bearer(superToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "requestId", "reset-payment-" + UUID.randomUUID(),
+                                "direction", "RECEIPT",
+                                "amount", "100.00",
+                                "sourceType", "OUTBOUND_ORDER",
+                                "sourceId", outboundOrderId
+                        ))))
+                .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.code").value(200));
+    }
+
+    private long tableCount(String tableName) {
+        Long count = jdbcTemplate.queryForObject("select count(*) from `" + tableName + "`", Long.class);
+        return count == null ? 0L : count;
     }
 
 }

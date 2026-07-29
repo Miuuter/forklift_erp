@@ -51,6 +51,7 @@ services:
       FORKLIFT_ERP_SEED_DEMO_DATA: "false"
       FORKLIFT_ERP_BUSINESS_DATA_RESET_ENABLED: "false"
       FORKLIFT_ERP_DATA_RESTORE_ENABLED: "false"
+      FORKLIFT_ERP_SHUTDOWN_TIMEOUT: ${ERP_SHUTDOWN_TIMEOUT:-45s}
       FORKLIFT_ERP_ATTACHMENT_STORAGE_DIR: /data/uploads/attachments
       FORKLIFT_ERP_INVOICE_STORAGE_DIR: /data/uploads/invoices
       FORKLIFT_ERP_CONTRACT_STORAGE_DIR: /data/uploads/contracts
@@ -70,4 +71,4 @@ services:
       - ./data/logs:/data/logs
     mem_limit: ${ERP_APP_MEMORY_LIMIT:-1536m}
     pids_limit: 256
-    stop_grace_period: 45s
+    stop_grace_period: 60s

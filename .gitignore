@@ -12,6 +12,7 @@ uploads/
 codex-test-logs/
 .codebuddy/
 .codex-docker-config/
+.tmp-jna/
 DockerDesktopInstaller.exe
 __pycache__/
 *.py[cod]

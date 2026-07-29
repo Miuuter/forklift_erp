@@ -1,10 +1,12 @@
 package com.example.forklift_erp.service.impl;
 
+import com.example.forklift_erp.common.ResultCode;
 import com.example.forklift_erp.dto.CustomerDTO;
 import com.example.forklift_erp.dto.CustomerVO;
 import com.example.forklift_erp.dto.MachineInventoryCreateDTO;
 import com.example.forklift_erp.dto.VehicleOutboundOrderCreateDTO;
 import com.example.forklift_erp.entity.MachineInventory;
+import com.example.forklift_erp.exception.BusinessException;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -25,14 +27,38 @@ import java.util.stream.Collectors;
 @Component
 public class DataImportVehicleRowMapper {
 
-    CustomerDTO buildCustomerFromRow(String companyName, WorkbookRow row) {
+    CustomerDTO buildCustomerFromSalesRow(String companyName, WorkbookRow row) {
+        return buildCustomer(companyName, row, 15, 16, 17, 18,
+                text(row, 10), text(row, 20), text(row, 26), text(row, 27));
+    }
+
+    CustomerDTO buildCustomerFromOtherBrandRow(String companyName, WorkbookRow row) {
+        return buildCustomer(companyName, row, 14, 15, 16, 17, text(row, 20));
+    }
+
+    CustomerDTO buildCustomerFromOldSalesRow(String companyName, WorkbookRow row) {
+        return buildCustomer(companyName, row, 14, 15, 16, 17, text(row, 20));
+    }
+
+    private CustomerDTO buildCustomer(
+            String companyName,
+            WorkbookRow row,
+            int addressColumn,
+            int contactNameColumn,
+            int contactPhoneColumn,
+            int taxIdColumn,
+            String... remarks
+    ) {
         CustomerDTO dto = new CustomerDTO();
         dto.setCompanyName(companyName);
-        dto.setAddress(firstNonBlank(text(row, 15), text(row, 16), text(row, 20), text(row, 26)));
-        dto.setContactName(firstNonBlank(text(row, 16), text(row, 17)));
-        dto.setContactPhone(firstNonBlank(text(row, 17), text(row, 18), text(row, 23)));
-        dto.setTaxOrIdNumber(text(row, 18));
-        dto.setRemarks(trimToLimit(joinNotes("Workbook import", text(row, 10), text(row, 20), text(row, 26), text(row, 27)), 255));
+        dto.setAddress(text(row, addressColumn));
+        dto.setContactName(text(row, contactNameColumn));
+        dto.setContactPhone(text(row, contactPhoneColumn));
+        dto.setTaxOrIdNumber(text(row, taxIdColumn));
+        String[] notes = new String[remarks.length + 1];
+        notes[0] = "Workbook import";
+        System.arraycopy(remarks, 0, notes, 1, remarks.length);
+        dto.setRemarks(trimToLimit(joinNotes(notes), 255));
         return dto;
     }
 
@@ -57,10 +83,10 @@ public class DataImportVehicleRowMapper {
         dto.setSalesReported(parseBool(text(row, 21)));
         dto.setSalesReportDate(date(row, 22));
         dto.setInvoiceApplied(parseBool(text(row, 24)));
-        dto.setInvoiceApplicationDate(date(row, 20));
+        dto.setInvoiceApplicationDate(date(row, 25));
         dto.setInvoiceStatus(text(row, 19));
         dto.setInvoiceIssuedDate(date(row, 20));
-        dto.setRegistrationStatus(text(row, 25));
+        dto.setRegistrationStatus(text(row, 23));
         dto.setContractType(text(row, 28));
         dto.setOperator("import-workbook");
         dto.setOrderRemark(joinNotes(text(row, 10), text(row, 26), text(row, 27)));
@@ -91,7 +117,8 @@ public class DataImportVehicleRowMapper {
         dto.setCustomerId(customer.getId());
         dto.setSalesDate(date(row, 1));
         dto.setSettlementPrice(decimal(row, 11));
-        dto.setSalePrice(decimal(row, 11));
+        dto.setSalePrice(decimal(row, 9));
+        dto.setPaymentRemark(text(row, 12));
         dto.setInvoiceStatus(text(row, 18));
         dto.setInvoiceIssuedDate(date(row, 19));
         dto.setOperator("import-workbook");
@@ -126,7 +153,7 @@ public class DataImportVehicleRowMapper {
         dto.setDestination5(text(row, 23));
         dto.setIsSalesReported(text(row, 15));
         dto.setSalesReportDate(date(row, 16));
-        dto.setIsInvoiceApplied(text(row, 25));
+        dto.setIsInvoiceApplied(firstNonBlank(text(row, 25), text(row, 17)));
         dto.setRemarks(joinNotes(text(row, 14), text(row, 26)));
         dto.setModelOnly(false);
         dto.setStockStatus("IN_STOCK");
@@ -140,7 +167,7 @@ public class DataImportVehicleRowMapper {
         dto.setSpecificationModel(firstNonBlank(text(row, 3), text(row, 4), "Workbook model"));
         dto.setConfiguration(text(row, 4));
         dto.setMachineType(firstNonBlank(text(row, 2), text(row, 3), text(row, 4), "Internal combustion forklift"));
-        dto.setSupplier(firstNonBlank(text(row, 27), source));
+        dto.setSupplier(firstNonBlank(text(row, 3), source));
         dto.setWarehouseName(source);
         dto.setEngineNumber(text(row, 6));
         dto.setFrameNumber(text(row, 7));
@@ -221,7 +248,7 @@ public class DataImportVehicleRowMapper {
         dto.setWarrantyCardNumber(text(row, 8));
         dto.setInboundDate(dateTime(row, 1));
         dto.setSettlementPrice(decimal(row, 11));
-        dto.setSalePrice(decimal(row, 11));
+        dto.setSalePrice(decimal(row, 9));
         dto.setInventoryCount(Math.max(1, intValue(row, 10, 1)));
         dto.setRemarks(joinNotes("Used vehicle sales", text(row, 20)));
         dto.setStockStatus("IN_STOCK");
@@ -348,7 +375,7 @@ public class DataImportVehicleRowMapper {
                 try {
                     return LocalDate.parse(value, DateTimeFormatter.ofPattern("yyyy-M-d"));
                 } catch (DateTimeParseException ignoredThird) {
-                    return null;
+                    throw invalidCell(row, index, "date");
                 }
             }
         }
@@ -374,8 +401,8 @@ public class DataImportVehicleRowMapper {
         }
         try {
             return new BigDecimal(value.replace(",", "").replace("\u5143", "")).setScale(2, RoundingMode.HALF_UP);
-        } catch (NumberFormatException ex) {
-            return null;
+        } catch (NumberFormatException | ArithmeticException ex) {
+            throw invalidCell(row, index, "amount");
         }
     }
 
@@ -385,10 +412,16 @@ public class DataImportVehicleRowMapper {
             return fallback;
         }
         try {
-            return new BigDecimal(value.replace(",", "")).intValue();
-        } catch (NumberFormatException ex) {
-            return fallback;
+            return new BigDecimal(value.replace(",", "")).intValueExact();
+        } catch (NumberFormatException | ArithmeticException ex) {
+            throw invalidCell(row, index, "whole number");
         }
+    }
+
+    private BusinessException invalidCell(WorkbookRow row, int index, String expectedType) {
+        return new BusinessException(ResultCode.PARAM_ERROR,
+                "Invalid " + expectedType + " at workbook row "
+                        + (row == null ? "unknown" : row.rowNumber()) + ", column " + (index + 1));
     }
 
     private BigDecimal scaleMoney(BigDecimal value) {

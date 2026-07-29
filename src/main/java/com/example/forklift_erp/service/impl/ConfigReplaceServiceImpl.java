@@ -1,4 +1,3 @@
-// src/main/java/com/example/forklift_erp/service/impl/ConfigReplaceServiceImpl.java
 package com.example.forklift_erp.service.impl;
 
 import com.example.forklift_erp.constant.PartChangeAction;
@@ -26,6 +25,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @Slf4j
@@ -80,15 +80,18 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be modified");
         collaborationService.validateWrite(machine, request.getMachineVersion());
 
-        ConfigValue newConfigValue = configValueRepository.findById(request.getNewConfigValueId())
+        ConfigItem configItem = configItemRepository.findByIdForUpdate(request.getConfigItemId())
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "配置项不存在"));
+        ConfigValue newConfigValue = configValueRepository.findByIdForUpdate(request.getNewConfigValueId())
                 .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "新配置值不存在"));
+        if (!Objects.equals(newConfigValue.getConfigItemId(), configItem.getId())) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Config value does not belong to selected config item");
+        }
 
         // 3. 找到旧的配置记录（同一车辆的同一配置项）
-        List<MachineConfig> oldConfigs = machineConfigRepository.findByMachineId(request.getMachineId());
-        MachineConfig oldConfig = oldConfigs.stream()
-                .filter(c -> c.getConfigItemId().equals(request.getConfigItemId()))
-                .map(c -> machineConfigRepository.findByIdForUpdate(c.getId()).orElse(c))
-                .findFirst()
+        MachineConfig oldConfig = machineConfigRepository
+                .findByMachineIdAndConfigItemIdForUpdate(request.getMachineId(), request.getConfigItemId())
                 .orElse(null);  // 可能没有旧配置，比如首次添加配置
         if (oldConfig != null) {
             collaborationService.validateWrite(oldConfig, request.getOldConfigVersion());
@@ -111,11 +114,6 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
             log.info("更新车辆配置: machineId={}, 配置项={}, 旧值={} -> 新值={}",
                     machine.getId(), oldConfig.getItemName(), oldValue, newConfigValue.getValueLabel());
         } else {
-            // 如果没有旧配置，则新增一条配置记录（可能需要从 ConfigItem 获取名称，这里简化，认为前端传递了 itemName，但DTO里没有，可以从数据库查）
-            // 更好的做法：DTO里包含 itemName 或从 ConfigItem 查
-            // 此处我们查一下
-            ConfigItem configItem = configItemRepository.findById(request.getConfigItemId())
-                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "配置项不存在"));
             MachineConfig newConfig = new MachineConfig();
             newConfig.setMachineId(machine.getId());
             newConfig.setConfigItemId(request.getConfigItemId());
@@ -168,10 +166,8 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         ConfigReplaceLog logEntry = new ConfigReplaceLog();
         logEntry.setMachineId(machine.getId());
         logEntry.setMachineConfigId(oldConfigId); // 可能为 null
-        logEntry.setItemName(newConfigValue.getValueLabel()); // 这里应该填配置项名称，但request里没有，可以从 configItem 查，稍后修正
-        // 修正：获取配置项名称
-        String itemName = oldConfig != null ? oldConfig.getItemName() :
-                configItemRepository.findById(request.getConfigItemId()).map(ConfigItem::getItemName).orElse("未知");
+        logEntry.setItemName(newConfigValue.getValueLabel());
+        String itemName = oldConfig != null ? oldConfig.getItemName() : configItem.getItemName();
         logEntry.setItemName(itemName);
         logEntry.setOldValue(oldValue);
         logEntry.setNewValue(newConfigValue.getValueLabel());
@@ -281,7 +277,8 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
                 StockBusinessType.MODIFICATION_USE,
                 BigDecimal.ZERO,
                 movementKey == null ? null : movementKey + ":MOVEMENT",
-                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId()
+                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId(),
+                null
         );
         newPart.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, newPart.getId()));
         collaborationService.stampWrite(newPart);
@@ -352,7 +349,8 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
                     StockBusinessType.MODIFICATION_RETURN,
                     BigDecimal.ZERO,
                     movementKey == null ? null : movementKey + ":OLD-MOVEMENT",
-                    lot.getId()
+                    lot.getId(),
+                    null
             );
             removedPart.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, removedPart.getId()));
             collaborationService.stampWrite(removedPart);
@@ -429,8 +427,14 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
         visibilityPolicy.ensureWritable(machine.getIsLocked(), "Vehicle is locked and cannot be modified");
         collaborationService.validateWrite(machine, request.getMachineVersion());
 
-        ConfigItem configItem = configItemRepository.findById(request.getConfigItemId())
+        ConfigItem configItem = configItemRepository.findByIdForUpdate(request.getConfigItemId())
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "配件分类不存在"));
+        if (machineConfigRepository
+                .findByMachineIdAndConfigItemIdForUpdate(machine.getId(), configItem.getId())
+                .isPresent()) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Vehicle already has this configuration item; use replacement instead");
+        }
 
         PartInventory newPart = partRepository.findByIdForUpdate(request.getNewPartId())
                 .orElseThrow(() -> new BusinessException(ResultCode.PART_NOT_FOUND, "仓库配件不存在"));
@@ -493,7 +497,8 @@ public class ConfigReplaceServiceImpl implements ConfigReplaceService {
                 StockBusinessType.MODIFICATION_USE,
                 BigDecimal.ZERO,
                 null,
-                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId()
+                fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId(),
+                null
         );
         newPart.setQuantity(stockLedgerService.totalAvailableQuantity(StockLedgerService.RESOURCE_PART, newPart.getId()));
         collaborationService.stampWrite(newPart);

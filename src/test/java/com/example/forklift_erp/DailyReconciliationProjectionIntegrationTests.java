@@ -1,10 +1,19 @@
 package com.example.forklift_erp;
 
 import com.example.forklift_erp.constant.FinancialEventType;
+import com.example.forklift_erp.constant.MachineStockStatus;
 import com.example.forklift_erp.entity.FinancialEvent;
+import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.OutboundOrder;
+import com.example.forklift_erp.entity.RentalRecord;
+import com.example.forklift_erp.entity.StockBalance;
+import com.example.forklift_erp.entity.Warehouse;
 import com.example.forklift_erp.repository.FinancialEventRepository;
+import com.example.forklift_erp.repository.MachineInventoryRepository;
 import com.example.forklift_erp.repository.OutboundOrderRepository;
+import com.example.forklift_erp.repository.RentalRecordRepository;
+import com.example.forklift_erp.repository.StockBalanceRepository;
+import com.example.forklift_erp.repository.WarehouseRepository;
 import com.example.forklift_erp.service.DailyReconciliationService;
 import com.example.forklift_erp.service.FinancialEventService;
 import org.junit.jupiter.api.AfterEach;
@@ -32,11 +41,40 @@ class DailyReconciliationProjectionIntegrationTests extends TestcontainersDataba
     @Autowired
     private FinancialEventRepository financialEventRepository;
 
+    @Autowired
+    private MachineInventoryRepository machineInventoryRepository;
+
+    @Autowired
+    private RentalRecordRepository rentalRecordRepository;
+
+    @Autowired
+    private StockBalanceRepository stockBalanceRepository;
+
+    @Autowired
+    private WarehouseRepository warehouseRepository;
+
     private final List<Long> financialEventIds = new ArrayList<>();
     private Long orderId;
+    private Long rentalId;
+    private Long machineId;
+    private Long extraWarehouseId;
 
     @AfterEach
     void cleanFacts() {
+        if (rentalId != null) {
+            rentalRecordRepository.deleteById(rentalId);
+            rentalId = null;
+        }
+        if (machineId != null) {
+            stockBalanceRepository.findByResourceTypeAndResourceId("MACHINE", machineId)
+                    .forEach(stockBalanceRepository::delete);
+            machineInventoryRepository.deleteById(machineId);
+            machineId = null;
+        }
+        if (extraWarehouseId != null) {
+            warehouseRepository.deleteById(extraWarehouseId);
+            extraWarehouseId = null;
+        }
         financialEventRepository.deleteAllByIdInBatch(financialEventIds);
         financialEventIds.clear();
         if (orderId != null) {
@@ -70,6 +108,64 @@ class DailyReconciliationProjectionIntegrationTests extends TestcontainersDataba
                     assertThat(row.getUnpaid()).isEqualByComparingTo("60.00");
                     assertThat(row.getStatus()).isEqualTo("OUTSTANDING");
                 });
+    }
+
+    @Test
+    void reportsRentalLockInAnotherWarehouseEvenWhenMachineHasAnActiveRental() {
+        Warehouse rentalWarehouse = warehouseRepository
+                .findFirstByDefaultWarehouseTrueOrderByIdAsc()
+                .orElseThrow();
+        Warehouse strayLockWarehouse = new Warehouse();
+        strayLockWarehouse.setWarehouseCode("RECON-WH-" + UUID.randomUUID());
+        strayLockWarehouse.setWarehouseName("Reconciliation stray lock warehouse");
+        strayLockWarehouse.setWarehouseType("MAIN");
+        strayLockWarehouse.setDefaultWarehouse(false);
+        extraWarehouseId = warehouseRepository.saveAndFlush(strayLockWarehouse).getId();
+
+        MachineInventory machine = new MachineInventory();
+        machine.setVehicleProductNumber("RECON-MACHINE-" + UUID.randomUUID());
+        machine.setName("Reconciliation rental machine");
+        machine.setSpecificationModel("RECON-MODEL");
+        machine.setWarehouseId(rentalWarehouse.getId());
+        machine.setWarehouseName(rentalWarehouse.getWarehouseName());
+        machine.setStockStatus(MachineStockStatus.RENTED.code());
+        machine.setInventoryCount(0);
+        machine.setModelOnly(false);
+        machineId = machineInventoryRepository.saveAndFlush(machine).getId();
+
+        stockBalanceRepository.saveAndFlush(balance(machineId, rentalWarehouse.getId()));
+        stockBalanceRepository.saveAndFlush(balance(machineId, extraWarehouseId));
+
+        RentalRecord rental = new RentalRecord();
+        rental.setRentalNo("RECON-RENTAL-" + UUID.randomUUID());
+        rental.setMachineId(machineId);
+        rental.setWarehouseId(rentalWarehouse.getId());
+        rental.setVehicleNumber(machine.getVehicleProductNumber());
+        rental.setMachineName(machine.getName());
+        rental.setDestination("Reconciliation test destination");
+        rental.setRentalPrice(new BigDecimal("100.00"));
+        rental.setStatus(RentalRecord.STATUS_ACTIVE);
+        rentalId = rentalRecordRepository.saveAndFlush(rental).getId();
+
+        var result = reconciliationService.reconcile(LocalDate.now());
+
+        assertThat(result.getRentalIssues())
+                .anySatisfy(issue -> {
+                    assertThat(issue.getCode()).isEqualTo("UNMATCHED_RENTAL_LOCK");
+                    assertThat(issue.getMachineId()).isEqualTo(machineId);
+                    assertThat(issue.getWarehouseId()).isEqualTo(extraWarehouseId);
+                });
+    }
+
+    private StockBalance balance(Long resourceId, Long warehouseId) {
+        StockBalance balance = new StockBalance();
+        balance.setResourceType("MACHINE");
+        balance.setResourceId(resourceId);
+        balance.setWarehouseId(warehouseId);
+        balance.setAvailableQuantity(0);
+        balance.setReservedQuantity(0);
+        balance.setLockedQuantity(1);
+        return balance;
     }
 
     private void saveEvent(String eventType, String amount, LocalDate date, String suffix) {

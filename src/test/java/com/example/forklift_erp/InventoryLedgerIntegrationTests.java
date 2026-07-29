@@ -372,7 +372,7 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
     }
 
     @Test
-    void inventoryDeletionRejectsNonZeroBalancesAndRemovesEmptyBalances() throws Exception {
+    void inventoryDeletionRejectsNonZeroBalancesAndRetainsLedgerHistory() throws Exception {
         String partCode = "LEDGER-DEL-" + unique("part");
         partsToCleanup.add(partCode);
         JsonNode part = createPart(partCode, 1);
@@ -416,9 +416,9 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
         mockMvc.perform(delete("/api/parts/{id}", partId)
                         .header("Authorization", bearer(superToken))
                         .param("version", String.valueOf(emptyPartVersion)))
-                .andExpect(status().isOk());
-        assertThat(partRepository.findById(partId)).isEmpty();
-        assertThat(balances(StockLedgerService.RESOURCE_PART, partId)).isEmpty();
+                .andExpect(status().isConflict());
+        assertThat(partRepository.findById(partId)).isPresent();
+        assertTotalBalance(StockLedgerService.RESOURCE_PART, partId, 0);
 
         JsonNode machine = createMachine(1);
         Long machineId = machine.path("id").asLong();
@@ -442,9 +442,9 @@ class InventoryLedgerIntegrationTests extends TestcontainersDatabaseSupport {
         mockMvc.perform(delete("/api/inventory/{id}", machineId)
                         .header("Authorization", bearer(superToken))
                         .param("version", String.valueOf(emptyMachineVersion)))
-                .andExpect(status().isOk());
-        assertThat(machineRepository.findById(machineId)).isEmpty();
-        assertThat(balances(StockLedgerService.RESOURCE_MACHINE, machineId)).isEmpty();
+                .andExpect(status().isConflict());
+        assertThat(machineRepository.findById(machineId)).isPresent();
+        assertTotalBalance(StockLedgerService.RESOURCE_MACHINE, machineId, 0);
     }
 
     @Test

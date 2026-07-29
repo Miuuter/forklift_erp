@@ -10,6 +10,12 @@ import java.util.List;
 public interface ModificationWorkOrderLineRepository extends JpaRepository<ModificationWorkOrderLine, Long> {
     boolean existsByNewPartId(Long newPartId);
 
+    boolean existsByConfigItemId(Long configItemId);
+
+    boolean existsByNewConfigValueId(Long newConfigValueId);
+
+    boolean existsByMachineConfigId(Long machineConfigId);
+
     boolean existsByWarehouseIdOrOldPartWarehouseId(Long warehouseId, Long oldPartWarehouseId);
 
     List<ModificationWorkOrderLine> findByWorkOrderIdOrderByIdAsc(Long workOrderId);

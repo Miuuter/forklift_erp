@@ -15,7 +15,6 @@ import com.example.forklift_erp.repository.PurchaseOrderRepository;
 import com.example.forklift_erp.repository.RentalBillRepository;
 import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.service.impl.OutboundReceivablePolicy;
-import com.example.forklift_erp.util.MoneyValues;
 import com.example.forklift_erp.util.SecurityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 @Service
@@ -77,27 +77,36 @@ public class PaymentRecordService {
     public PaymentRecordVO create(PaymentRecordCreateDTO request) {
         String requestId = normalizeRequestId(request.getRequestId());
         String persistedRequestId = "PAYMENT-REQUEST:" + requestId;
-        PaymentRecord existing = paymentRecordRepository.findByRequestId(persistedRequestId).orElse(null);
-        if (existing != null) {
-            return PaymentRecordVO.fromEntity(existing);
-        }
         String direction = normalizeDirection(request.getDirection());
         String sourceType = normalizeSourceType(request.getSourceType());
-        validateSourceExists(sourceType, request.getSourceId());
+        BigDecimal amount = requirePositiveAmount(request.getAmount());
+        String accountName = trimToNull(request.getAccountName());
+        String paymentMethod = trimToNull(request.getPaymentMethod());
+        String remark = trimToNull(request.getRemark());
         validateDirectionForSource(direction, sourceType);
-        validateSourceReadyForPayment(sourceType, request.getSourceId());
         if (!requestIdempotencyGuard.claim("PAYMENT_CREATE", requestId)) {
-            return existingRequest(persistedRequestId);
+            return existingRequest(
+                    persistedRequestId,
+                    direction,
+                    amount,
+                    sourceType,
+                    request.getSourceId(),
+                    request.getPaymentDate(),
+                    accountName,
+                    paymentMethod,
+                    remark
+            );
         }
+        lockPaymentSource(sourceType, request.getSourceId(), true);
         PaymentRecord saved = financialEventService.recordPayment(
                 direction,
-                MoneyValues.zeroIfNullOrNegative(request.getAmount()),
+                amount,
                 request.getPaymentDate(),
-                trimToNull(request.getAccountName()),
-                trimToNull(request.getPaymentMethod()),
+                accountName,
+                paymentMethod,
                 sourceType,
                 request.getSourceId(),
-                trimToNull(request.getRemark()),
+                remark,
                 persistedRequestId
         );
         syncOutboundReceipt(sourceType, request.getSourceId());
@@ -121,15 +130,31 @@ public class PaymentRecordService {
     public PaymentRecordVO reverse(Long id, String requestId, String remark) {
         String normalizedRequestId = normalizeRequestId(requestId);
         String persistedRequestId = "PAYMENT-REVERSAL-REQUEST:" + normalizedRequestId;
-        PaymentRecord requested = paymentRecordRepository
-                .findByRequestId(persistedRequestId)
-                .orElse(null);
-        if (requested != null) {
-            return PaymentRecordVO.fromEntity(requested);
+        String effectiveRemark = trimToNull(remark) == null ? "Payment reversal" : trimToNull(remark);
+        if (!requestIdempotencyGuard.claim("PAYMENT_REVERSE", normalizedRequestId)) {
+            return existingReversalRequest(persistedRequestId, id, effectiveRemark);
         }
-        PaymentRecord original = paymentRecordRepository.findById(id)
+        PaymentRecord candidate = paymentRecordRepository.findById(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Payment record not found"));
-        if (original.getReversalOfPaymentId() != null || original.getAmount() == null || original.getAmount().signum() <= 0) {
+        if (candidate.getReversalOfPaymentId() != null
+                || candidate.getAmount() == null
+                || candidate.getAmount().signum() <= 0) {
+            throw new BusinessException(ResultCode.CONFLICT, "Only an original positive payment can be reversed");
+        }
+        // Outbound updates lock their source before synchronizing receipt rows.
+        // Use the same order here so an update and reversal cannot deadlock.
+        lockPaymentSource(candidate.getSourceType(), candidate.getSourceId(), false);
+        PaymentRecord original = paymentRecordRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Payment record not found"));
+        if (!Objects.equals(candidate.getSourceType(), original.getSourceType())
+                || !Objects.equals(candidate.getSourceId(), original.getSourceId())
+                || !Objects.equals(candidate.getFinancialEventId(), original.getFinancialEventId())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Payment source changed while the reversal was being prepared");
+        }
+        if (original.getReversalOfPaymentId() != null
+                || original.getAmount() == null
+                || original.getAmount().signum() <= 0) {
             throw new BusinessException(ResultCode.CONFLICT, "Only an original positive payment can be reversed");
         }
         if (paymentRecordRepository.findByReversalOfPaymentId(original.getId()).isPresent()) {
@@ -141,9 +166,6 @@ public class PaymentRecordService {
             throw new BusinessException(ResultCode.CONFLICT,
                     "Payment reversal would make the source total negative");
         }
-        if (!requestIdempotencyGuard.claim("PAYMENT_REVERSE", normalizedRequestId)) {
-            return existingRequest(persistedRequestId);
-        }
         PaymentRecord reversal = financialEventService.recordPayment(
                 original.getDirection(),
                 original.getAmount().negate(),
@@ -152,11 +174,11 @@ public class PaymentRecordService {
                 original.getPaymentMethod(),
                 original.getSourceType(),
                 original.getSourceId(),
-                trimToNull(remark) == null ? "Payment reversal" : trimToNull(remark),
-                persistedRequestId
+                effectiveRemark,
+                persistedRequestId,
+                original.getId(),
+                original.getFinancialEventId()
         );
-        reversal.setReversalOfPaymentId(original.getId());
-        paymentRecordRepository.save(reversal);
         syncOutboundReceipt(original.getSourceType(), original.getSourceId());
         operationAuditService.record(
                 "Payment",
@@ -174,9 +196,49 @@ public class PaymentRecordService {
         return PaymentRecordVO.fromEntity(reversal);
     }
 
-    private PaymentRecordVO existingRequest(String persistedRequestId) {
+    private PaymentRecordVO existingRequest(
+            String persistedRequestId,
+            String direction,
+            BigDecimal amount,
+            String sourceType,
+            Long sourceId,
+            java.time.LocalDate requestedPaymentDate,
+            String accountName,
+            String paymentMethod,
+            String remark
+    ) {
+        PaymentRecord existing = existingClaimedRequest(persistedRequestId);
+        boolean samePayload = Objects.equals(direction, existing.getDirection())
+                && amountsEqual(amount, existing.getAmount())
+                && Objects.equals(sourceType, existing.getSourceType())
+                && Objects.equals(sourceId, existing.getSourceId())
+                && (requestedPaymentDate == null || Objects.equals(requestedPaymentDate, existing.getPaymentDate()))
+                && Objects.equals(accountName, trimToNull(existing.getAccountName()))
+                && Objects.equals(paymentMethod, trimToNull(existing.getPaymentMethod()))
+                && Objects.equals(remark, trimToNull(existing.getRemark()));
+        if (!samePayload) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Request ID was already used for a different payment payload");
+        }
+        return PaymentRecordVO.fromEntity(existing);
+    }
+
+    private PaymentRecordVO existingReversalRequest(
+            String persistedRequestId,
+            Long originalPaymentId,
+            String effectiveRemark
+    ) {
+        PaymentRecord existing = existingClaimedRequest(persistedRequestId);
+        if (!Objects.equals(originalPaymentId, existing.getReversalOfPaymentId())
+                || !Objects.equals(effectiveRemark, trimToNull(existing.getRemark()))) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Request ID was already used for a different payment reversal");
+        }
+        return PaymentRecordVO.fromEntity(existing);
+    }
+
+    private PaymentRecord existingClaimedRequest(String persistedRequestId) {
         return paymentRecordRepository.findByRequestIdForUpdate(persistedRequestId)
-                .map(PaymentRecordVO::fromEntity)
                 .orElseThrow(() -> new BusinessException(
                         ResultCode.CONFLICT,
                         "Request is already being processed; retry with the same requestId"
@@ -265,34 +327,64 @@ public class PaymentRecordService {
         }
     }
 
-    private void validateSourceReadyForPayment(String sourceType, Long sourceId) {
-        if (FinancialEventService.SOURCE_PURCHASE_ORDER.equals(sourceType)) {
-            var order = purchaseOrderRepository.findById(sourceId)
-                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Payment source record not found"));
-            if ("CANCELED".equalsIgnoreCase(order.getStatus())) {
-                throw new BusinessException(ResultCode.CONFLICT,
-                        "Canceled purchase orders cannot accept payments");
-            }
-            return;
+    private void lockPaymentSource(String sourceType, Long sourceId, boolean requireReady) {
+        if (sourceId == null) {
+            throw new BusinessException(ResultCode.PARAM_ERROR, "Payment source ID is required");
         }
-        if (FinancialEventService.SOURCE_REPAIR.equals(sourceType)) {
-            var repair = repairRecordRepository.findById(sourceId)
-                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Payment source record not found"));
-            if (!RepairStatus.COMPLETED.code().equals(repair.getStatus())) {
-                throw new BusinessException(ResultCode.CONFLICT,
-                        "Repair payments can only be recorded after the repair is completed");
+        switch (sourceType) {
+            case FinancialEventService.SOURCE_OUTBOUND_ORDER -> outboundOrderRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(this::paymentSourceNotFound);
+            case FinancialEventService.SOURCE_PURCHASE_ORDER -> {
+                var order = purchaseOrderRepository.findByIdForUpdate(sourceId)
+                        .orElseThrow(this::paymentSourceNotFound);
+                if (requireReady && "CANCELED".equalsIgnoreCase(order.getStatus())) {
+                    throw new BusinessException(ResultCode.CONFLICT,
+                            "Canceled purchase orders cannot accept payments");
+                }
             }
-            return;
-        }
-        if ("MODIFICATION_WORK_ORDER".equals(sourceType)) {
-            var order = modificationWorkOrderRepository.findById(sourceId)
-                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Payment source record not found"));
-            if (!ModificationWorkOrderStatus.COMPLETED.code().equals(order.getStatus())
-                    || !"AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType())) {
-                throw new BusinessException(ResultCode.CONFLICT,
-                        "Modification receipts require a completed after-sale work order");
+            case FinancialEventService.SOURCE_REPAIR -> {
+                var repair = repairRecordRepository.findByIdForUpdate(sourceId)
+                        .orElseThrow(this::paymentSourceNotFound);
+                if (requireReady && !RepairStatus.COMPLETED.code().equals(repair.getStatus())) {
+                    throw new BusinessException(ResultCode.CONFLICT,
+                            "Repair payments can only be recorded after the repair is completed");
+                }
             }
+            case FinancialEventService.SOURCE_RENTAL_BILL -> rentalBillRepository.findByIdForUpdate(sourceId)
+                    .orElseThrow(this::paymentSourceNotFound);
+            case "MODIFICATION_WORK_ORDER" -> {
+                var order = modificationWorkOrderRepository.findByIdForUpdate(sourceId)
+                        .orElseThrow(this::paymentSourceNotFound);
+                if (requireReady && (!ModificationWorkOrderStatus.COMPLETED.code().equals(order.getStatus())
+                        || !"AFTER_SALE".equalsIgnoreCase(order.getWorkOrderType()))) {
+                    throw new BusinessException(ResultCode.CONFLICT,
+                            "Modification receipts require a completed after-sale work order");
+                }
+            }
+            default -> throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Unsupported payment source type: " + sourceType);
         }
+    }
+
+    private BusinessException paymentSourceNotFound() {
+        return new BusinessException(ResultCode.NOT_FOUND, "Payment source record not found");
+    }
+
+    private BigDecimal requirePositiveAmount(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Payment amount must be greater than zero");
+        }
+        int integerDigits = Math.max(0, amount.precision() - amount.scale());
+        if (amount.scale() > 2 || integerDigits > 12) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Payment amount must fit DECIMAL(14,2)");
+        }
+        return amount;
+    }
+
+    private boolean amountsEqual(BigDecimal left, BigDecimal right) {
+        return left != null && right != null && left.compareTo(right) == 0;
     }
 
     private void validateDirectionForSource(String direction, String sourceType) {

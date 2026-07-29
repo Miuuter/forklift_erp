@@ -2,6 +2,7 @@ package com.example.forklift_erp.dto;
 
 import com.example.forklift_erp.entity.MachineInventory;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -44,12 +45,16 @@ public class MachineInventoryCreateDTO {
     @Size(max = 100)
     private String materialNumber;
     @DecimalMin(value = "0.00", message = "\u91c7\u8d2d\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Purchase price must fit DECIMAL(12,2)")
     private BigDecimal purchasePrice;
     @DecimalMin(value = "0.00", message = "Landed unit cost cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Landed unit cost must fit DECIMAL(12,2)")
     private BigDecimal landedUnitCost;
     @DecimalMin(value = "0.00", message = "\u9500\u552e\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Sale price must fit DECIMAL(12,2)")
     private BigDecimal salePrice;
     @DecimalMin(value = "0.00", message = "\u7ed3\u7b97\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Settlement price must fit DECIMAL(12,2)")
     private BigDecimal settlementPrice;
     @Size(max = 100)
     private String engineNumber;

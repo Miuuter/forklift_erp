@@ -24,6 +24,17 @@ public class StockMovementLine {
     @Column(name = "movement_id", nullable = false)
     private Long movementId;
 
+    /**
+     * The reversal header and line this detail belongs to. Both identifiers
+     * are populated together for a movement reversal; ordinary lines leave
+     * them null and V51 enforces that relationship at the database boundary.
+     */
+    @Column(name = "reversal_of_movement_id")
+    private Long reversalOfMovementId;
+
+    @Column(name = "reversal_of_movement_line_id")
+    private Long reversalOfMovementLineId;
+
     @Column(name = "resource_type", length = 30, nullable = false)
     private String resourceType;
 
@@ -48,7 +59,7 @@ public class StockMovementLine {
     @Column(name = "after_quantity", nullable = false)
     private Integer afterQuantity;
 
-    @Column(name = "unit_cost", precision = 12, scale = 2)
+    @Column(name = "unit_cost", precision = 18, scale = 6)
     private BigDecimal unitCost;
 
     @Column(name = "unit_revenue", precision = 12, scale = 2)

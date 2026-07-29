@@ -55,6 +55,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -130,6 +131,9 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
 
     @Autowired
     private InventoryMasterDeletionGuard deletionGuard;
+
+    @Autowired
+    private MachineConfigUpdateCoordinator machineConfigUpdateCoordinator;
 
     @Override
     public List<MachineInventory> findAll() {
@@ -373,12 +377,29 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
     @Override
     @Transactional
     public MachineInventoryVO inbound(InboundRequestDTO request) {
+        List<InboundRequestDTO.ConfigSelection> requestedConfigs =
+                request.getConfigs() == null ? List.of() : request.getConfigs();
+        if (requestedConfigs.stream().anyMatch(Objects::isNull)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Inbound configurations cannot contain null rows");
+        }
+        Set<Long> configItemIds = requestedConfigs.stream()
+                .map(InboundRequestDTO.ConfigSelection::getConfigItemId)
+                .collect(Collectors.toSet());
+        if (configItemIds.contains(null) || configItemIds.size() != requestedConfigs.size()) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Each inbound configuration item must be selected exactly once");
+        }
+        if (requestedConfigs.stream().anyMatch(config -> config.getConfigValueId() == null)) {
+            throw new BusinessException(ResultCode.PARAM_ERROR,
+                    "Inbound configuration value is required");
+        }
         MachineInventory savedMachine = save(request.getMachineInventory().toEntity());
         Long machineId = savedMachine.getId();
 
-        if (request.getConfigs() != null && !request.getConfigs().isEmpty()) {
+        if (!requestedConfigs.isEmpty()) {
             List<MachineConfig> configList = new ArrayList<>();
-            for (InboundRequestDTO.ConfigSelection config : request.getConfigs()) {
+            for (InboundRequestDTO.ConfigSelection config : requestedConfigs) {
                 ConfigItem item = configItemRepository.findById(config.getConfigItemId())
                         .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Config item not found"));
                 ConfigValue value = configValueRepository.findById(config.getConfigValueId())
@@ -431,22 +452,7 @@ public class MachineInventoryServiceImpl implements MachineInventoryService {
         MachineInventory machine = findByIdForUpdate(id)
                 .orElseThrow(() -> new BusinessException(ResultCode.VEHICLE_NOT_FOUND));
         collaborationService.validateWrite(machine, version);
-        List<MachineConfig> configs = configVOs.stream().map(vo -> {
-            MachineConfig mc = new MachineConfig();
-            mc.setMachineId(id);
-            mc.setConfigItemId(vo.getConfigItemId());
-            mc.setConfigValueId(vo.getConfigValueId());
-            mc.setItemName(vo.getItemName());
-            mc.setSelectedValue(vo.getSelectedValue());
-            mc.setIsStandard(vo.getIsStandard());
-            mc.setConfigSource(vo.getConfigSource() != null ? vo.getConfigSource() : "FACTORY");
-            mc.setInstalledDate(vo.getInstalledDate() != null ? vo.getInstalledDate() : LocalDateTime.now());
-            mc.setRemark(vo.getRemark());
-            return mc;
-        }).collect(Collectors.toList());
-
-        machineConfigService.deleteByMachineId(id);
-        List<MachineConfig> saved = machineConfigService.saveAll(configs);
+        List<MachineConfig> saved = machineConfigUpdateCoordinator.apply(id, configVOs);
         save(machine);
         List<MachineConfigVO> result = saved.stream().map(MachineConfigVO::fromEntity).collect(Collectors.toList());
         operationAuditService.record("Machine config", "CONFIG_UPDATE", "MACHINE", id,

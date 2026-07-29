@@ -86,6 +86,7 @@ class StockOperationRecorderTests {
                 eq("OTHER_OUTBOUND"),
                 eq(BigDecimal.ZERO),
                 eq(null),
+                eq(null),
                 eq(null)
         );
         verify(auditService).record(
@@ -153,6 +154,7 @@ class StockOperationRecorderTests {
                 eq(java.time.LocalDate.now()),
                 eq("OTHER_INBOUND"),
                 eq(BigDecimal.ZERO),
+                eq(null),
                 eq(null),
                 eq(null)
         );

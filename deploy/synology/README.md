@@ -29,7 +29,11 @@ initial NAS settings and tune only from measured DSM/Container Manager data.
 
 ## Upgrade
 
-1. Back up MySQL with a consistent `mysqldump` and snapshot `data/uploads`.
+1. Back up MySQL and `data/uploads` from one quiescent point. `backup.sh`
+   acquires a host lock, gracefully stops the running `app` service, writes
+   both archives, and starts the app again only after the uploads archive is
+   complete. This short maintenance window prevents an attachment row and
+   its file from landing in different backup points.
 2. Import the new image TAR or pull the new immutable image tag.
 3. Change only `ERP_VERSION` in `.env`.
 4. Recreate the app service with `docker compose up -d app`.
@@ -64,6 +68,33 @@ sh backup.sh daily
 The script keeps seven daily and four weekly copies. It also copies them to
 `ERP_BACKUP_REMOTE_DIR`. Configure DSM Task Scheduler to run it every night.
 
+The application is normally unavailable only while the SQL dump and uploads
+archive are being written. `ERP_BACKUP_APP_STOP_TIMEOUT` controls graceful
+shutdown (default 60 seconds). The script then waits up to
+`ERP_BACKUP_DB_DRAIN_ATTEMPTS` seconds for the application database user to
+have no remaining MySQL sessions. The `ERP_BACKUP_HEALTH_*` settings control
+the readiness probe after restart. Spring drains active requests for up to
+`ERP_SHUTDOWN_TIMEOUT` (default 45 seconds), with a 60-second container grace
+period. A failed dump, archive, or restart leaves a
+non-zero exit status; the exit handler still attempts to restart an app that
+the script stopped. A second overlapping backup is rejected by
+`$ERP_BACKUP_DIR/.backup.lock`; remove that directory only after confirming no
+backup process is still running.
+
+`backup.properties` records `snapshot_consistency=application-quiesced`, the
+quiesce timestamp, and the application resume timestamp. `LATEST` is updated
+only after all artifacts are complete and checksummed. Daily, weekly and
+independent copies are built in hidden staging directories and atomically
+published; an interrupted copy is therefore not selectable as the latest
+backup. The readiness probe requires `curl` unless `ERP_BACKUP_HEALTH_ATTEMPTS=0`
+is explicitly chosen.
+
+The restore drill rejects backups created by older scripts because they cannot
+prove that the database and uploads were captured at one point. For a
+manually reviewed legacy backup only, set `ERP_ALLOW_LEGACY_BACKUP=true`; the
+drill will keep the exact attachment path and size checks but reports a
+warning.
+
 Run an isolated monthly restore drill:
 
 ```sh
@@ -72,10 +103,13 @@ sh restore-drill.sh
 
 The drill requires the configured ERP image to be available locally. It
 validates checksums and uploads, starts an isolated MySQL container, restores
-the dump, verifies every active attachment file, starts an isolated ERP
-application, and checks health, build version, login, inventory access,
-critical tables, Flyway version, and a sample attachment download. It removes
-the temporary containers, network, and extracted files on exit.
+the dump, verifies exact paths and sizes for active attachments and legacy
+invoice/contract files, verifies retained import source fingerprints, starts
+an isolated ERP application, and checks health, build version, login,
+inventory access, critical tables, the expected Flyway version, and a sample
+attachment download. It removes the temporary containers, network, and
+extracted files on exit. Update `ERP_RESTORE_EXPECTED_FLYWAY_VERSION` whenever
+a release adds a migration.
 
 `ERP_JWT_SECRET` and `ERP_ADMIN_PASSWORD` must be present. If the restored
 database uses a different existing login, set `ERP_RESTORE_LOGIN_USERNAME` and

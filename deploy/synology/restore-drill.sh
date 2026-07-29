@@ -15,12 +15,17 @@ BACKUP_ROOT="${ERP_BACKUP_DIR:-$SCRIPT_DIR/backup}"
 BACKUP_DIR="${1:-}"
 MYSQL_IMAGE="${ERP_RESTORE_MYSQL_IMAGE:-mysql:8.0.43}"
 APP_IMAGE="${ERP_IMAGE:-forklift-erp}:${ERP_VERSION:-latest}"
+EXPECTED_FLYWAY_VERSION="${ERP_RESTORE_EXPECTED_FLYWAY_VERSION:-51}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 NETWORK="forklift-erp-restore-drill-$TIMESTAMP"
 MYSQL_CONTAINER="forklift-erp-restore-mysql-$TIMESTAMP"
 APP_CONTAINER="forklift-erp-restore-app-$TIMESTAMP"
 ROOT_PASSWORD="restore-drill-$TIMESTAMP"
 TEMP_UPLOADS=$(mktemp -d "${TMPDIR:-/tmp}/forklift-erp-restore.XXXXXX")
+TEMP_SQL="$TEMP_UPLOADS/forklift_erp.sql"
+# Cover validation failures before the full container cleanup trap is
+# installed below.
+trap 'rm -rf -- "$TEMP_UPLOADS"' EXIT INT TERM
 
 if [ -z "$BACKUP_DIR" ]; then
     BACKUP_DIR=$(find "$BACKUP_ROOT/daily" -mindepth 1 -maxdepth 1 -type d -name '20??????-??????' \
@@ -50,11 +55,48 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Verifying backup checksums and uploads archive"
+MANIFEST_LINE_COUNT=$(wc -l < "$BACKUP_DIR/SHA256SUMS.txt" | tr -d '[:space:]')
+if [ "$MANIFEST_LINE_COUNT" -ne 3 ] \
+    || ! grep -Eq '^[0123456789abcdefABCDEF]{64}[[:space:]]+forklift_erp\.sql\.gz$' "$BACKUP_DIR/SHA256SUMS.txt" \
+    || ! grep -Eq '^[0123456789abcdefABCDEF]{64}[[:space:]]+uploads\.tar\.gz$' "$BACKUP_DIR/SHA256SUMS.txt" \
+    || ! grep -Eq '^[0123456789abcdefABCDEF]{64}[[:space:]]+backup\.properties$' "$BACKUP_DIR/SHA256SUMS.txt"; then
+    echo "Restore drill refused: SHA256SUMS.txt contains unexpected or incomplete entries." >&2
+    exit 1
+fi
 (
     cd "$BACKUP_DIR"
+    # The allowlist above provides strict parsing without relying on GNU-only
+    # sha256sum flags that may be unavailable in Synology BusyBox.
     sha256sum -c SHA256SUMS.txt
 )
-tar -tzf "$BACKUP_DIR/uploads.tar.gz" >/dev/null
+if ! grep -qx 'snapshot_consistency=application-quiesced' "$BACKUP_DIR/backup.properties"; then
+    if [ "${ERP_ALLOW_LEGACY_BACKUP:-false}" != "true" ]; then
+        echo "Restore drill refused: backup does not prove a quiesced database/uploads snapshot." >&2
+        echo "Set ERP_ALLOW_LEGACY_BACKUP=true only for an explicitly reviewed legacy backup." >&2
+        exit 1
+    fi
+    echo "WARNING: restoring a legacy backup without a quiesced snapshot marker." >&2
+fi
+ARCHIVE_LIST="$TEMP_UPLOADS/archive-files.txt"
+if ! tar -tzf "$BACKUP_DIR/uploads.tar.gz" > "$ARCHIVE_LIST"; then
+    echo "Restore drill failed: uploads archive listing failed." >&2
+    exit 1
+fi
+while IFS= read -r archive_entry; do
+    case "$archive_entry" in
+        uploads|uploads/*) ;;
+        *)
+            echo "Restore drill refused: uploads archive contains an unsafe path: $archive_entry" >&2
+            exit 1
+            ;;
+    esac
+    case "$archive_entry" in
+        /*|../*|*/../*|*/..)
+            echo "Restore drill refused: uploads archive contains a traversal path: $archive_entry" >&2
+            exit 1
+            ;;
+    esac
+done < "$ARCHIVE_LIST"
 tar -xzf "$BACKUP_DIR/uploads.tar.gz" -C "$TEMP_UPLOADS"
 if [ ! -d "$TEMP_UPLOADS/uploads" ]; then
     echo "Restore drill failed: uploads directory is missing from the archive." >&2
@@ -87,8 +129,18 @@ if [ "$ready" != "true" ]; then
 fi
 
 echo "Restoring database dump"
-gzip -dc "$BACKUP_DIR/forklift_erp.sql.gz" \
-    | docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$ROOT_PASSWORD" forklift_erp
+if ! gzip -dc "$BACKUP_DIR/forklift_erp.sql.gz" > "$TEMP_SQL"; then
+    echo "Restore drill failed: database dump decompression failed." >&2
+    exit 1
+fi
+if [ ! -s "$TEMP_SQL" ]; then
+    echo "Restore drill failed: decompressed database dump is empty." >&2
+    exit 1
+fi
+if ! docker exec -i "$MYSQL_CONTAINER" mysql -uroot -p"$ROOT_PASSWORD" forklift_erp < "$TEMP_SQL"; then
+    echo "Restore drill failed: database import failed." >&2
+    exit 1
+fi
 
 TABLE_COUNT=$(docker exec "$MYSQL_CONTAINER" mysql -N -uroot -p"$ROOT_PASSWORD" \
     -e "select count(*) from information_schema.tables where table_schema='forklift_erp'")
@@ -97,20 +149,103 @@ if [ "${TABLE_COUNT:-0}" -lt 1 ]; then
     exit 1
 fi
 
+verify_upload_reference() {
+    reference_label="$1"
+    storage_subdir="$2"
+    stored_name="$3"
+    expected_size="$4"
+    expected_hash="${5:-}"
+    case "$stored_name" in
+        */*|*..*)
+            echo "Unsafe restored upload file name ($reference_label): $stored_name" >&2
+            return 1
+            ;;
+    esac
+    upload_path="$TEMP_UPLOADS/uploads/$storage_subdir/$stored_name"
+    if [ ! -f "$upload_path" ]; then
+        echo "Missing restored upload file ($reference_label): $storage_subdir/$stored_name" >&2
+        return 1
+    fi
+    case "$expected_size" in
+        '') ;;
+        *[!0-9]*)
+            echo "Invalid stored file size ($reference_label): $expected_size" >&2
+            return 1
+            ;;
+        *)
+            actual_size=$(wc -c < "$upload_path" | tr -d '[:space:]')
+            if [ "$actual_size" -ne "$expected_size" ]; then
+                echo "Restored upload size mismatch ($reference_label): $storage_subdir/$stored_name (database=$expected_size, file=$actual_size)" >&2
+                return 1
+            fi
+            ;;
+    esac
+    if [ -n "$expected_hash" ]; then
+        case "$expected_hash" in
+            *[!0123456789abcdefABCDEF]*)
+                echo "Invalid stored file fingerprint ($reference_label): $expected_hash" >&2
+                return 1
+                ;;
+        esac
+        if [ "${#expected_hash}" -ne 64 ]; then
+            echo "Invalid stored file fingerprint ($reference_label): $expected_hash" >&2
+            return 1
+        fi
+        actual_hash=$(sha256sum "$upload_path" | awk '{ print tolower($1) }')
+        if [ "$actual_hash" != "$(printf '%s' "$expected_hash" | tr '[:upper:]' '[:lower:]')" ]; then
+            echo "Restored upload fingerprint mismatch ($reference_label): $storage_subdir/$stored_name" >&2
+            return 1
+        fi
+    fi
+    return 0
+}
+
 ATTACHMENT_LIST="$TEMP_UPLOADS/attachment-files.txt"
-docker exec "$MYSQL_CONTAINER" mysql -N -uroot -p"$ROOT_PASSWORD" forklift_erp \
-    -e "select stored_file_name from resource_attachment where deleted=0 order by id" \
+docker exec "$MYSQL_CONTAINER" mysql -N --batch --raw -uroot -p"$ROOT_PASSWORD" forklift_erp \
+    -e "select concat('attachment:', id), coalesce(storage_scope, 'ATTACHMENT'), stored_file_name, coalesce(cast(file_size as char), '') from resource_attachment where deleted=0 order by id" \
     > "$ATTACHMENT_LIST"
-MISSING_ATTACHMENTS=0
-while IFS= read -r stored_name; do
+MISSING_UPLOAD_REFERENCES=0
+while IFS="$(printf '\t')" read -r reference_label storage_scope stored_name expected_size; do
     [ -n "$stored_name" ] || continue
-    if ! find "$TEMP_UPLOADS/uploads" -type f -name "$stored_name" -print -quit | grep -q .; then
-        echo "Missing restored attachment file: $stored_name" >&2
-        MISSING_ATTACHMENTS=$((MISSING_ATTACHMENTS + 1))
+    case "$storage_scope" in
+        ATTACHMENT) storage_subdir=attachments ;;
+        LEGACY_ORDER_INVOICE) storage_subdir=invoices ;;
+        LEGACY_ORDER_CONTRACT) storage_subdir=contracts ;;
+        *)
+            echo "Unknown attachment storage scope in restored database: $storage_scope" >&2
+            MISSING_UPLOAD_REFERENCES=$((MISSING_UPLOAD_REFERENCES + 1))
+            continue
+            ;;
+    esac
+    if ! verify_upload_reference "$reference_label/$storage_scope" "$storage_subdir" "$stored_name" "$expected_size"; then
+        MISSING_UPLOAD_REFERENCES=$((MISSING_UPLOAD_REFERENCES + 1))
     fi
 done < "$ATTACHMENT_LIST"
-if [ "$MISSING_ATTACHMENTS" -ne 0 ]; then
-    echo "Restore drill failed: $MISSING_ATTACHMENTS attachment files are missing." >&2
+
+IMPORT_LIST="$TEMP_UPLOADS/import-files.txt"
+docker exec "$MYSQL_CONTAINER" mysql -N --batch --raw -uroot -p"$ROOT_PASSWORD" forklift_erp \
+    -e "select concat('import:', id), staged_file_name, coalesce(file_fingerprint, '') from data_import_job where staged_file_name is not null and staged_file_name <> '' order by id" \
+    > "$IMPORT_LIST"
+while IFS="$(printf '\t')" read -r reference_label stored_name expected_hash; do
+    [ -n "$stored_name" ] || continue
+    if ! verify_upload_reference "$reference_label" imports "$stored_name" '' "$expected_hash"; then
+        MISSING_UPLOAD_REFERENCES=$((MISSING_UPLOAD_REFERENCES + 1))
+    fi
+done < "$IMPORT_LIST"
+
+LEGACY_ORDER_FILE_LIST="$TEMP_UPLOADS/legacy-order-files.txt"
+docker exec "$MYSQL_CONTAINER" mysql -N --batch --raw -uroot -p"$ROOT_PASSWORD" forklift_erp \
+    -e "select concat('invoice:', id), 'invoices', invoice_stored_file_name, coalesce(cast(invoice_file_size as char), '') from outbound_order where invoice_stored_file_name is not null and invoice_stored_file_name <> '' union all select concat('contract:', id), 'contracts', contract_stored_file_name, coalesce(cast(contract_file_size as char), '') from outbound_order where contract_stored_file_name is not null and contract_stored_file_name <> '' order by 1" \
+    > "$LEGACY_ORDER_FILE_LIST"
+while IFS="$(printf '\t')" read -r reference_label storage_subdir stored_name expected_size; do
+    [ -n "$stored_name" ] || continue
+    if ! verify_upload_reference "$reference_label" "$storage_subdir" "$stored_name" "$expected_size"; then
+        MISSING_UPLOAD_REFERENCES=$((MISSING_UPLOAD_REFERENCES + 1))
+    fi
+done < "$LEGACY_ORDER_FILE_LIST"
+
+if [ "$MISSING_UPLOAD_REFERENCES" -ne 0 ]; then
+    echo "Restore drill failed: $MISSING_UPLOAD_REFERENCES database-referenced upload files are missing or mismatched." >&2
     exit 1
 fi
 # mktemp normally creates a 0700 directory. The restored application runs as
@@ -140,6 +275,8 @@ docker run -d --name "$APP_CONTAINER" \
     -e FORKLIFT_ERP_SEED_DEMO_DATA=false \
     -e FORKLIFT_ERP_BUSINESS_DATA_RESET_ENABLED=false \
     -e FORKLIFT_ERP_DATA_RESTORE_ENABLED=false \
+    -e FORKLIFT_ERP_IMPORT_RETENTION_ENABLED=false \
+    -e FORKLIFT_ERP_IMPORT_RECOVERY_ENABLED=false \
     -e FORKLIFT_ERP_ATTACHMENT_STORAGE_DIR=/data/uploads/attachments \
     -e FORKLIFT_ERP_INVOICE_STORAGE_DIR=/data/uploads/invoices \
     -e FORKLIFT_ERP_CONTRACT_STORAGE_DIR=/data/uploads/contracts \
@@ -214,6 +351,10 @@ fi
 
 LATEST_FLYWAY=$(docker exec "$MYSQL_CONTAINER" mysql -N -uroot -p"$ROOT_PASSWORD" forklift_erp \
     -e "select version from flyway_schema_history where success=1 order by installed_rank desc limit 1")
+if [ "$LATEST_FLYWAY" != "$EXPECTED_FLYWAY_VERSION" ]; then
+    echo "Restore drill failed: expected Flyway $EXPECTED_FLYWAY_VERSION, found ${LATEST_FLYWAY:-unknown}." >&2
+    exit 1
+fi
 CRITICAL_TABLE_COUNT=$(docker exec "$MYSQL_CONTAINER" mysql -N -uroot -p"$ROOT_PASSWORD" \
     -e "select count(*) from information_schema.tables where table_schema='forklift_erp' and table_name in ('machine_inventory','part_inventory','stock_movement','stock_lot','financial_event','payment_record','resource_attachment','request_idempotency')")
 if [ "$CRITICAL_TABLE_COUNT" -ne 8 ]; then

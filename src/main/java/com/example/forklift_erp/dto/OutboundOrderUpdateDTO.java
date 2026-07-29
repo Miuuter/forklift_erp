@@ -1,6 +1,7 @@
 package com.example.forklift_erp.dto;
 
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -11,17 +12,23 @@ import java.time.LocalDate;
 public class OutboundOrderUpdateDTO {
     private Long version;
     @DecimalMin(value = "0.00", message = "\u7ed3\u7b97\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Settlement price must fit DECIMAL(12,2)")
     private BigDecimal settlementPrice;
     @DecimalMin(value = "0.00", message = "Unit sale price cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Unit sale price must fit DECIMAL(12,2)")
     private BigDecimal unitSalePrice;
     @DecimalMin(value = "0.00", message = "Line amount cannot be negative")
+    @Digits(integer = 12, fraction = 2, message = "Line amount must fit DECIMAL(14,2)")
     private BigDecimal lineAmount;
     private LocalDate salesDate;
     @DecimalMin(value = "0.00", message = "\u9500\u552e\u4ef7\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Sale price must fit DECIMAL(12,2)")
     private BigDecimal salePrice;
     @DecimalMin(value = "0.00", message = "\u5e94\u6536\u91d1\u989d\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Receivable amount must fit DECIMAL(12,2)")
     private BigDecimal receivableAmount;
     @DecimalMin(value = "0.00", message = "\u5df2\u6536\u91d1\u989d\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 10, fraction = 2, message = "Received amount must fit DECIMAL(12,2)")
     private BigDecimal receivedAmount;
     private LocalDate paymentDueDate;
     private LocalDate lastPaymentDate;

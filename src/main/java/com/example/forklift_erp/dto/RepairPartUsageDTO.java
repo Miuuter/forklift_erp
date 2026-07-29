@@ -1,6 +1,7 @@
 package com.example.forklift_erp.dto;
 
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -21,9 +22,11 @@ public class RepairPartUsageDTO {
     private Integer quantity = 1;
 
     @DecimalMin(value = "0.00", message = "Repair part charge unit price cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Charge unit price must fit DECIMAL(12,2)")
     private BigDecimal chargeUnitPrice;
 
     @DecimalMin(value = "0.00", message = "Repair part discount cannot be negative")
+    @Digits(integer = 10, fraction = 2, message = "Discount amount must fit DECIMAL(12,2)")
     private BigDecimal discountAmount = BigDecimal.ZERO;
 
     private String remark;
@@ -32,8 +35,11 @@ public class RepairPartUsageDTO {
     // unchanged line can round-trip through the form without losing identity.
     private String partCode;
     private String partName;
+    @Digits(integer = 10, fraction = 2, message = "Unit cost must fit DECIMAL(12,2)")
     private BigDecimal unitCost;
+    @Digits(integer = 12, fraction = 2, message = "Charge amount must fit DECIMAL(14,2)")
     private BigDecimal chargeAmount;
+    @Digits(integer = 12, fraction = 2, message = "Cost amount must fit DECIMAL(14,2)")
     private BigDecimal costAmount;
     private Long stockMovementId;
 }

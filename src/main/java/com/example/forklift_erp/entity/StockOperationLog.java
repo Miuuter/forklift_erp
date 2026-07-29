@@ -39,7 +39,7 @@ public class StockOperationLog {
     @Column(name = "after_quantity")
     private Integer afterQuantity;
 
-    @Column(name = "unit_cost", precision = 12, scale = 2)
+    @Column(name = "unit_cost", precision = 18, scale = 6)
     private BigDecimal unitCost;
 
     @Column(name = "unit_revenue", precision = 12, scale = 2)

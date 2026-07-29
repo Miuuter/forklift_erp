@@ -23,7 +23,7 @@ public class VehicleConfigValue implements CollaborativeResource {
     private Long id;
 
     @Version
-    @Column(name = "version")
+    @Column(name = "version", nullable = false)
     private Long version;
 
     @NotNull(message = "整车配置项不能为空")

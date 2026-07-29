@@ -1,13 +1,16 @@
 package com.example.forklift_erp;
 
 import com.example.forklift_erp.dto.MachineInventoryCreateDTO;
+import com.example.forklift_erp.dto.ModificationWorkOrderCreateDTO;
 import com.example.forklift_erp.dto.OutboundOrderUpdateDTO;
 import com.example.forklift_erp.dto.PartInventoryCreateDTO;
 import com.example.forklift_erp.dto.PartOutboundOrderCreateDTO;
+import com.example.forklift_erp.dto.PaymentRecordCreateDTO;
 import com.example.forklift_erp.dto.PurchaseOrderDTO;
 import com.example.forklift_erp.dto.RentalRecordCreateDTO;
 import com.example.forklift_erp.dto.RentalRecordUpdateDTO;
 import com.example.forklift_erp.dto.RepairRecordCreateDTO;
+import com.example.forklift_erp.dto.RepairPartUsageDTO;
 import com.example.forklift_erp.dto.VehicleOutboundOrderCreateDTO;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
@@ -128,6 +131,29 @@ class DtoMoneyValidationTests {
         rentalUpdateDto.setMonthlyRentalPrice(amount("1"));
         rentalUpdateDto.setRentalPrice(amount("-1"));
         assertInvalidProperties(rentalUpdateDto, "rentalPrice");
+    }
+
+    @Test
+    void moneyDtosRejectSilentDatabaseRoundingAndOverflow() {
+        MachineInventoryCreateDTO machine = new MachineInventoryCreateDTO();
+        machine.setPurchasePrice(amount("1.001"));
+        assertInvalidProperties(machine, "purchasePrice");
+
+        PaymentRecordCreateDTO payment = new PaymentRecordCreateDTO();
+        payment.setAmount(amount("12.345"));
+        assertInvalidProperties(payment, "amount");
+
+        OutboundOrderUpdateDTO outbound = new OutboundOrderUpdateDTO();
+        outbound.setLineAmount(amount("1234567890123.45"));
+        assertInvalidProperties(outbound, "lineAmount");
+
+        RepairPartUsageDTO usage = new RepairPartUsageDTO();
+        usage.setChargeUnitPrice(amount("1.999"));
+        assertInvalidProperties(usage, "chargeUnitPrice");
+
+        ModificationWorkOrderCreateDTO.Line line = new ModificationWorkOrderCreateDTO.Line();
+        line.setOldPartUnitCost(amount("10000000000.00"));
+        assertInvalidProperties(line, "oldPartUnitCost");
     }
 
     private static BigDecimal amount(String value) {

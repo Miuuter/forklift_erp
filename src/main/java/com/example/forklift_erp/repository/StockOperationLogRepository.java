@@ -18,4 +18,6 @@ public interface StockOperationLogRepository extends JpaRepository<StockOperatio
     );
 
     List<StockOperationLog> findByResourceTypeAndResourceIdOrderByIdAsc(String resourceType, Long resourceId);
+
+    boolean existsByResourceTypeAndResourceId(String resourceType, Long resourceId);
 }

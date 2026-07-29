@@ -209,6 +209,7 @@ class DataImportVehicleImporterTests {
                         5, "V-600",
                         14, "Existing Buyer",
                         15, "New Address",
+                        16, "New Contact",
                         17, "13900000000"
                 ))))
         )), businessContext());
@@ -217,7 +218,8 @@ class DataImportVehicleImporterTests {
         verify(customerService).update(eq(44L), customerCaptor.capture());
         assertThat(customerCaptor.getValue().getVersion()).isEqualTo(3L);
         assertThat(customerCaptor.getValue().getAddress()).isEqualTo("New Address");
-        assertThat(customerCaptor.getValue().getContactName()).isEqualTo("13900000000");
+        assertThat(customerCaptor.getValue().getContactName()).isEqualTo("New Contact");
+        assertThat(customerCaptor.getValue().getContactPhone()).isEqualTo("13900000000");
     }
 
     @Test

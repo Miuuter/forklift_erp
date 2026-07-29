@@ -1,6 +1,7 @@
 package com.example.forklift_erp.dto;
 
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -14,6 +15,7 @@ public class RemovedPartValuationDTO {
 
     @NotNull(message = "旧件估值不能为空")
     @DecimalMin(value = "0.01", message = "旧件估值必须大于 0")
+    @Digits(integer = 10, fraction = 2, message = "Removed-part value must fit DECIMAL(12,2)")
     private BigDecimal unitCost;
 
     @NotBlank(message = "估值依据不能为空")

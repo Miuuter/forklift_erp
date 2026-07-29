@@ -9,6 +9,7 @@ import com.example.forklift_erp.entity.Role;
 import com.example.forklift_erp.entity.User;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.RoleRepository;
+import com.example.forklift_erp.repository.RepairRecordRepository;
 import com.example.forklift_erp.repository.UserRepository;
 import com.example.forklift_erp.security.JwtTokenProvider;
 import com.example.forklift_erp.security.PermissionCodes;
@@ -36,6 +37,7 @@ public class AuthService {
     private final PermissionService permissionService;
     private final OperationAuditService operationAuditService;
     private final CollaborationService collaborationService;
+    private final RepairRecordRepository repairRecordRepository;
 
     public AuthService(
             UserRepository userRepository,
@@ -44,7 +46,8 @@ public class AuthService {
             JwtTokenProvider jwtTokenProvider,
             PermissionService permissionService,
             OperationAuditService operationAuditService,
-            CollaborationService collaborationService
+            CollaborationService collaborationService,
+            RepairRecordRepository repairRecordRepository
     ) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -53,6 +56,7 @@ public class AuthService {
         this.permissionService = permissionService;
         this.operationAuditService = operationAuditService;
         this.collaborationService = collaborationService;
+        this.repairRecordRepository = repairRecordRepository;
     }
 
     @Transactional(readOnly = true)
@@ -282,9 +286,13 @@ public class AuthService {
         }
         rejectSuperAdminTarget(targetUser, "超级管理员账号不允许删除");
 
+        collaborationService.validateWrite(targetUser, version);
+        if (repairRecordRepository.existsByRepairPersonUserId(targetUser.getId())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "User has repair history and cannot be deleted; disable the account instead");
+        }
         operationAuditService.record("用户管理", "DELETE", RoleNames.USER, targetUser.getId(),
                 targetUser.getUsername(), roleNames(targetUser), "删除用户", null, null, RoleNames.USER, targetUser.getId());
-        collaborationService.validateWrite(targetUser, version);
         userRepository.delete(targetUser);
     }
 

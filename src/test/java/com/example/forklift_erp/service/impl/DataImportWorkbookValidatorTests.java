@@ -60,6 +60,59 @@ class DataImportWorkbookValidatorTests {
                 .containsExactly("partCode", "partName", "quantity");
     }
 
+    @Test
+    void inboundRowsDoNotRequireTheOptionalRemarksColumn() {
+        WorkbookSnapshot snapshot = new WorkbookSnapshot(Map.of(
+                "Inbound",
+                List.of(new WorkbookRow(2, row("", "", "", "", "Forklift", "", "CPC30", "", "V-001")))
+        ));
+
+        assertThat(validator.validateVehicleRows(snapshot)).isEmpty();
+    }
+
+    @Test
+    void validateVehicleRowsRejectsValuesThatWouldOtherwiseBeSilentlyChanged() {
+        WorkbookSnapshot snapshot = new WorkbookSnapshot(Map.of(
+                "Sales",
+                List.of(new WorkbookRow(2, row(
+                        "", "not-a-date", "Forklift", "Brand", "Config", "V-001", "", "", "",
+                        "10.123", "", "-1.00", "", "", "Customer A", "", "", "", "", "", "",
+                        "", "", "", "", "also-not-a-date"
+                )))
+        ));
+
+        assertThat(validator.validateVehicleRows(snapshot))
+                .extracting(DataImportErrorVO::getFieldName)
+                .contains("salesDate", "invoiceApplicationDate", "settlementPrice", "salePrice");
+    }
+
+    @Test
+    void validatePartRowsRequiresExactPositiveQuantityAndBoundedMoneyAndDate() {
+        WorkbookSnapshot snapshot = new WorkbookSnapshot(Map.of(
+                "Parts",
+                List.of(new WorkbookRow(2, row(
+                        "invalid-date", "P-001", "", "", "Filter", "F-10", "pcs", "1.5", "10000000000.00"
+                )))
+        ));
+
+        assertThat(validator.validatePartRows(snapshot))
+                .extracting(DataImportErrorVO::getFieldName)
+                .containsExactlyInAnyOrder("quantity", "unitPrice", "inboundDate");
+    }
+
+    @Test
+    void validateRejectsMissingOrEmptySupportedSheets() {
+        WorkbookSnapshot missingParts = new WorkbookSnapshot(Map.of("RenamedParts", List.of()));
+        WorkbookSnapshot emptyVehicles = new WorkbookSnapshot(Map.of("Sales", List.of()));
+
+        assertThat(validator.validatePartRows(missingParts))
+                .extracting(DataImportErrorVO::getFieldName)
+                .containsExactly("sheet");
+        assertThat(validator.validateVehicleRows(emptyVehicles))
+                .extracting(DataImportErrorVO::getFieldName)
+                .containsExactly("rows");
+    }
+
     private List<String> row(String... values) {
         return List.of(values);
     }

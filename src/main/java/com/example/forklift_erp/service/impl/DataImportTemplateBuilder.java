@@ -57,7 +57,7 @@ public class DataImportTemplateBuilder {
     DataImportTemplateFile partTemplate() {
         try (Workbook workbook = new XSSFWorkbook()) {
             createSheet(workbook, "Parts", List.of(
-                    "Inbound Date", "Order No", "Document Type", "Document Name", "Part Name", "Specification",
+                    "Inbound Date", "Part Code", "Document Type", "Document Name", "Part Name", "Specification",
                     "Unit", "Quantity", "Unit Price", "Warehouse", "Note", "Remark", "Source"
             ));
             return new DataImportTemplateFile("parts-purchase-template.xlsx", toBytes(workbook));

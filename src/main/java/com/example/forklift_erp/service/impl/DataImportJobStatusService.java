@@ -27,9 +27,13 @@ public class DataImportJobStatusService {
         return findJob(jobId);
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.MANDATORY)
     public DataImportJob markCompleted(Long jobId, int importedRows, int skippedRows, String summary, String importedBy) {
         DataImportJob job = findJob(jobId);
+        if (!"IMPORTING".equals(job.getStatus())) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Import job is no longer in progress");
+        }
         job.setStatus("COMPLETED");
         job.setImportedRows(importedRows);
         job.setSkippedRows(skippedRows);
@@ -41,12 +45,13 @@ public class DataImportJobStatusService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DataImportJob markFailed(Long jobId, String summary, String importedBy) {
-        DataImportJob job = findJob(jobId);
-        job.setStatus("FAILED");
-        job.setSummary(summary);
-        job.setImportedBy(importedBy);
-        job.setFinishedAt(LocalDateTime.now());
-        return jobRepository.save(job);
+        jobRepository.failImportIfInProgress(
+                jobId,
+                summary,
+                importedBy,
+                LocalDateTime.now()
+        );
+        return findJob(jobId);
     }
 
     private DataImportJob findJob(Long jobId) {

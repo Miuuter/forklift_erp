@@ -9,6 +9,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,6 +18,9 @@ import java.util.List;
 @Slf4j
 @Service
 public class DataImportRetentionService {
+    private static final List<String> TERMINAL_STATUSES = List.of(
+            "COMPLETED", "FAILED", "VALIDATION_FAILED"
+    );
     private final DataImportJobRepository jobRepository;
     private final DataImportFileStorage fileStorage;
     private final OperationAuditService operationAuditService;
@@ -46,15 +51,23 @@ public class DataImportRetentionService {
             return 0;
         }
         LocalDateTime cutoff = LocalDateTime.now().minusDays(retentionDays);
-        List<DataImportJob> expired =
-                jobRepository.findByStagedFileNameIsNotNullAndCreatedAtBeforeOrderByIdAsc(cutoff);
+        List<Long> expiredJobIds = jobRepository.findTerminalExpiredFileJobIds(cutoff, TERMINAL_STATUSES);
         int deleted = 0;
-        for (DataImportJob job : expired) {
-            try {
-                fileStorage.delete(job.getStagedFileName());
-            } catch (RuntimeException ex) {
-                log.error("Failed to purge import source file for jobId={}", job.getId(), ex);
+        for (Long jobId : expiredJobIds) {
+            DataImportJob job = jobRepository.findByIdForUpdate(jobId).orElse(null);
+            if (!eligible(job, cutoff)) {
                 continue;
+            }
+            String stagedFileName = job.getStagedFileName();
+            if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+                try {
+                    fileStorage.delete(stagedFileName);
+                } catch (RuntimeException ex) {
+                    log.error("Failed to purge import source file for jobId={}", job.getId(), ex);
+                    continue;
+                }
+            } else {
+                deleteAfterCommit(job.getId(), stagedFileName);
             }
             job.setStagedFileName(null);
             jobRepository.save(job);
@@ -74,5 +87,29 @@ public class DataImportRetentionService {
             );
         }
         return deleted;
+    }
+
+    private boolean eligible(DataImportJob job, LocalDateTime cutoff) {
+        return job != null
+                && job.getStagedFileName() != null
+                && !job.getStagedFileName().isBlank()
+                && job.getCreatedAt() != null
+                && job.getCreatedAt().isBefore(cutoff)
+                && TERMINAL_STATUSES.contains(job.getStatus());
+    }
+
+    private void deleteAfterCommit(Long jobId, String stagedFileName) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    fileStorage.delete(stagedFileName);
+                } catch (RuntimeException ex) {
+                    // The metadata no longer references the file, so a retrying
+                    // orphan-file sweeper may remove it without risking data loss.
+                    log.error("Failed to purge committed import source file for jobId={}", jobId, ex);
+                }
+            }
+        });
     }
 }

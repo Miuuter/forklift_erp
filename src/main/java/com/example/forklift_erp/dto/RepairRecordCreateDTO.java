@@ -5,6 +5,7 @@ import com.example.forklift_erp.constant.RepairStatus;
 import com.example.forklift_erp.entity.RepairRecord;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -60,18 +61,25 @@ public class RepairRecordCreateDTO {
     private List<RepairPartUsageDTO> partUsages = new ArrayList<>();
 
     @DecimalMin(value = "0.00", message = "\u5de5\u65f6\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 4, fraction = 1, message = "Work hours must fit DECIMAL(5,1)")
     private BigDecimal workHours;
     @DecimalMin(value = "0.00", message = "\u7ef4\u4fee\u6536\u5165\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 8, fraction = 2, message = "Repair fee must fit DECIMAL(10,2)")
     private BigDecimal repairFee;
     @DecimalMin(value = "0.00", message = "\u7ef4\u4fee\u652f\u51fa\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 8, fraction = 2, message = "Repair expense must fit DECIMAL(10,2)")
     private BigDecimal repairExpense;
     @DecimalMin(value = "0.00", message = "可转嫁金额不能为负数")
+    @Digits(integer = 10, fraction = 2, message = "Pass-through amount must fit DECIMAL(12,2)")
     private BigDecimal passThroughAmount;
     @DecimalMin(value = "0.00", message = "\u914d\u4ef6\u8d39\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 8, fraction = 2, message = "Parts fee must fit DECIMAL(10,2)")
     private BigDecimal partsFee;
     @DecimalMin(value = "0.00", message = "\u603b\u8d39\u7528\u4e0d\u80fd\u4e3a\u8d1f\u6570")
+    @Digits(integer = 8, fraction = 2, message = "Total fee must fit DECIMAL(10,2)")
     private BigDecimal totalFee;
     @DecimalMin(value = "0.00", message = "客户应收不能为负数")
+    @Digits(integer = 10, fraction = 2, message = "Receivable amount must fit DECIMAL(12,2)")
     private BigDecimal receivableAmount;
 
     @Pattern(regexp = RepairStatus.VALIDATION_PATTERN, message = "状态值非法")

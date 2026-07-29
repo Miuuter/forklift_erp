@@ -6,6 +6,7 @@ import com.example.forklift_erp.dto.OutboundOrderUpdateDTO;
 import com.example.forklift_erp.dto.VehicleOutboundOrderCreateDTO;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.OutboundOrder;
+import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.CustomerRepository;
 import com.example.forklift_erp.repository.MachineInventoryRepository;
@@ -73,6 +74,25 @@ class OutboundOrderServiceImplTests {
         assertThat(fixture.order.getUnitSalePrice()).isEqualByComparingTo("80.00");
         assertThat(fixture.order.getLineAmount()).isEqualByComparingTo("240.00");
         assertThat(fixture.order.getReceivableAmount()).isEqualByComparingTo("240.00");
+    }
+
+    @Test
+    void updatePreservesSixDecimalFifoAverageAndPostsExactCentCost() {
+        Fixture fixture = fixture();
+        fixture.order.setQuantity(2);
+        fixture.order.setStockOperationLogId(88L);
+        StockOperationLog log = new StockOperationLog();
+        log.setId(88L);
+        log.setUnitCost(new BigDecimal("33.335000"));
+        when(fixture.stockOperationLogRepository.findById(88L)).thenReturn(Optional.of(log));
+        OutboundOrderUpdateDTO request = new OutboundOrderUpdateDTO();
+        request.setVersion(4L);
+
+        fixture.service.update(fixture.order.getId(), request);
+
+        assertThat(log.getUnitCost()).isEqualByComparingTo("33.335000");
+        verify(fixture.financialEventService).replaceSalesPosting(
+                eq(fixture.order), eq(new BigDecimal("66.67")), eq(false));
     }
 
     @Test
@@ -165,7 +185,8 @@ class OutboundOrderServiceImplTests {
                 financialEventService,
                 outboundOrderRepository,
                 machineInventoryRepository,
-                stockLedgerService
+                stockLedgerService,
+                stockOperationLogRepository
         );
     }
 
@@ -175,7 +196,8 @@ class OutboundOrderServiceImplTests {
             FinancialEventService financialEventService,
             OutboundOrderRepository outboundOrderRepository,
             MachineInventoryRepository machineInventoryRepository,
-            StockLedgerService stockLedgerService
+            StockLedgerService stockLedgerService,
+            StockOperationLogRepository stockOperationLogRepository
     ) {
     }
 }

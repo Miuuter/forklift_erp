@@ -28,7 +28,7 @@ public class RentalRecord implements CollaborativeResource {
     private Long id;
 
     @Version
-    @Column(name = "version")
+    @Column(name = "version", nullable = false)
     private Long version;
 
     @Column(name = "rental_no", nullable = false, unique = true, length = 80)

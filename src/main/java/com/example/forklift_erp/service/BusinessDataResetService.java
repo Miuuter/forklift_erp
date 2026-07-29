@@ -1,125 +1,130 @@
 package com.example.forklift_erp.service;
 
-import com.example.forklift_erp.repository.ConfigReplaceLogRepository;
-import com.example.forklift_erp.repository.CustomerRepository;
-import com.example.forklift_erp.repository.MachineConfigRepository;
-import com.example.forklift_erp.repository.MachineInventoryRepository;
-import com.example.forklift_erp.repository.ModificationWorkOrderLineRepository;
-import com.example.forklift_erp.repository.ModificationWorkOrderRepository;
-import com.example.forklift_erp.repository.OperationAuditLogRepository;
-import com.example.forklift_erp.repository.OutboundOrderRepository;
-import com.example.forklift_erp.repository.PartInventoryRepository;
-import com.example.forklift_erp.repository.RepairRecordRepository;
-import com.example.forklift_erp.repository.RentalRecordRepository;
-import com.example.forklift_erp.repository.StockBalanceRepository;
-import com.example.forklift_erp.repository.StockMovementLineRepository;
-import com.example.forklift_erp.repository.StockMovementRepository;
-import com.example.forklift_erp.repository.StockOperationLogRepository;
-import com.example.forklift_erp.repository.DataImportJobRepository;
-import com.example.forklift_erp.repository.ResourceAttachmentRepository;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.jpa.repository.JpaRepository;
+import com.example.forklift_erp.common.ResultCode;
+import com.example.forklift_erp.config.MaintenanceOperation;
+import com.example.forklift_erp.exception.BusinessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
 public class BusinessDataResetService {
+    /**
+     * Leaf-to-root order for every table whose rows are business facts rather
+     * than authentication, configuration, warehouse, supplier or template
+     * master data. New business tables must be added here and to the reset
+     * integration invariant before a release can pass.
+     */
+    private static final List<ResetTarget> RESET_TARGETS = List.of(
+            target("requestIdempotency", "request_idempotency"),
+            target("dataImportRows", "data_import_row"),
+            target("resourceAttachments", "resource_attachment"),
+            target("repairPartUsage", "repair_part_usage"),
+            target("modificationWorkOrderLines", "modification_work_order_line"),
+            target("paymentRecords", "payment_record", "reversal_of_payment_id"),
+            target("rentalBills", "rental_bill"),
+            target("stockLotCostAdjustments", "stock_lot_cost_adjustment"),
+            target("stockMovementLines", "stock_movement_line"),
+            target("stockLotConsumptions", "stock_lot_consumption", "reversal_of_consumption_id"),
+            target("financialEvents", "financial_event", "reversal_of_event_id"),
+            target("configReplaceLogs", "config_replace_log"),
+            target("outboundOrders", "outbound_order"),
+            target("purchaseOrders", "purchase_order"),
+            target("stocktakingRecords", "stocktaking_record"),
+            target("modificationWorkOrders", "modification_work_order"),
+            target("rentalRecords", "rental_record"),
+            target("stockLots", "stock_lot"),
+            target("stockMovements", "stock_movement"),
+            target("stockBalances", "stock_balance"),
+            target("stockOperationLogs", "stock_operation_log"),
+            target("machineConfigs", "machine_config"),
+            target("repairRecords", "repair_record"),
+            target("partInventories", "part_inventory"),
+            target("machineInventories", "machine_inventory"),
+            target("customers", "customer_profile"),
+            target("dataImportJobs", "data_import_job"),
+            target("migrationExceptions", "migration_exception"),
+            target("operationAuditLogs", "operation_audit_log")
+    );
 
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private final JdbcTemplate jdbcTemplate;
 
-    @Autowired
-    private ModificationWorkOrderLineRepository modificationWorkOrderLineRepository;
-
-    @Autowired
-    private ModificationWorkOrderRepository modificationWorkOrderRepository;
-
-    @Autowired
-    private ConfigReplaceLogRepository configReplaceLogRepository;
-
-    @Autowired
-    private StockOperationLogRepository stockOperationLogRepository;
-
-    @Autowired
-    private OutboundOrderRepository outboundOrderRepository;
-
-    @Autowired
-    private RentalRecordRepository rentalRecordRepository;
-
-    @Autowired
-    private MachineConfigRepository machineConfigRepository;
-
-    @Autowired
-    private StockMovementLineRepository stockMovementLineRepository;
-
-    @Autowired
-    private StockMovementRepository stockMovementRepository;
-
-    @Autowired
-    private StockBalanceRepository stockBalanceRepository;
-
-    @Autowired
-    private RepairRecordRepository repairRecordRepository;
-
-    @Autowired
-    private PartInventoryRepository partInventoryRepository;
-
-    @Autowired
-    private MachineInventoryRepository machineInventoryRepository;
-
-    @Autowired
-    private CustomerRepository customerRepository;
-
-    @Autowired
-    private OperationAuditLogRepository operationAuditLogRepository;
-
-    @Autowired
-    private ResourceAttachmentRepository resourceAttachmentRepository;
-
-    @Autowired
-    private DataImportJobRepository dataImportJobRepository;
+    public BusinessDataResetService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
 
     @Transactional
+    @MaintenanceOperation
     public Map<String, Long> resetBusinessData() {
         Map<String, Long> summary = new LinkedHashMap<>();
-
-        summary.put("repairPartUsage", deleteNativeTable("repair_part_usage"));
-        summary.put("modificationWorkOrderLines", deleteAll(modificationWorkOrderLineRepository));
-        summary.put("modificationWorkOrders", deleteAll(modificationWorkOrderRepository));
-        summary.put("configReplaceLogs", deleteAll(configReplaceLogRepository));
-        summary.put("stockOperationLogs", deleteAll(stockOperationLogRepository));
-        summary.put("outboundOrders", deleteAll(outboundOrderRepository));
-        summary.put("rentalRecords", deleteAll(rentalRecordRepository));
-        summary.put("machineConfigs", deleteAll(machineConfigRepository));
-        summary.put("stockMovementLines", deleteAll(stockMovementLineRepository));
-        summary.put("stockMovements", deleteAll(stockMovementRepository));
-        summary.put("stockBalances", deleteAll(stockBalanceRepository));
-        summary.put("repairRecords", deleteAll(repairRecordRepository));
-        summary.put("partInventories", deleteAll(partInventoryRepository));
-        summary.put("machineInventories", deleteAll(machineInventoryRepository));
-        summary.put("customers", deleteAll(customerRepository));
-        summary.put("resourceAttachments", deleteAll(resourceAttachmentRepository));
-        summary.put("dataImportJobs", deleteAll(dataImportJobRepository));
-        summary.put("operationAuditLogs", deleteAll(operationAuditLogRepository));
-
+        for (ResetTarget target : RESET_TARGETS) {
+            long count = rowCount(target.tableName());
+            if (count > 0) {
+                if (target.selfReferenceColumn() == null) {
+                    jdbcTemplate.update("delete from `" + target.tableName() + "`");
+                } else {
+                    deleteSelfReferentialRows(target);
+                }
+            }
+            summary.put(target.summaryKey(), count);
+        }
+        assertResetInvariant();
         return summary;
     }
 
-    private long deleteNativeTable(String tableName) {
-        Long count = jdbcTemplate.queryForObject("select count(*) from " + tableName, Long.class);
-        jdbcTemplate.update("delete from " + tableName);
+    private void deleteSelfReferentialRows(ResetTarget target) {
+        long previous = rowCount(target.tableName());
+        while (previous > 0) {
+            int deleted = jdbcTemplate.update(
+                    "delete parent from `" + target.tableName() + "` parent "
+                            + "left join `" + target.tableName() + "` child "
+                            + "on child.`" + target.selfReferenceColumn() + "` = parent.id "
+                            + "where child.id is null"
+            );
+            if (deleted <= 0) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR,
+                        "Business reset found a cyclic self-reference in " + target.tableName());
+            }
+            long remaining = rowCount(target.tableName());
+            if (remaining >= previous) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR,
+                        "Business reset made no progress in " + target.tableName());
+            }
+            previous = remaining;
+        }
+    }
+
+    private void assertResetInvariant() {
+        for (ResetTarget target : RESET_TARGETS) {
+            long remaining = rowCount(target.tableName());
+            if (remaining != 0) {
+                throw new BusinessException(ResultCode.SYSTEM_ERROR,
+                        "Business reset invariant failed for " + target.tableName()
+                                + ": remaining rows=" + remaining);
+            }
+        }
+    }
+
+    private long rowCount(String tableName) {
+        Long count = jdbcTemplate.queryForObject(
+                "select count(*) from `" + tableName + "`",
+                Long.class
+        );
         return count == null ? 0L : count;
     }
 
-    private long deleteAll(JpaRepository<?, ?> repository) {
-        long count = repository.count();
-        if (count > 0) {
-            repository.deleteAllInBatch();
-        }
-        return count;
+    private static ResetTarget target(String summaryKey, String tableName) {
+        return new ResetTarget(summaryKey, tableName, null);
+    }
+
+    private static ResetTarget target(String summaryKey, String tableName, String selfReferenceColumn) {
+        return new ResetTarget(summaryKey, tableName, selfReferenceColumn);
+    }
+
+    private record ResetTarget(String summaryKey, String tableName, String selfReferenceColumn) {
     }
 }

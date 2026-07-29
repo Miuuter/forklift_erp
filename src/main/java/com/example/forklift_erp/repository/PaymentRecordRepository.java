@@ -16,12 +16,31 @@ public interface PaymentRecordRepository extends JpaRepository<PaymentRecord, Lo
     Optional<PaymentRecord> findByRequestId(String requestId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select payment from PaymentRecord payment where payment.id = :id")
+    Optional<PaymentRecord> findByIdForUpdate(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select payment from PaymentRecord payment where payment.requestId = :requestId")
     Optional<PaymentRecord> findByRequestIdForUpdate(@Param("requestId") String requestId);
 
     Optional<PaymentRecord> findByReversalOfPaymentId(Long reversalOfPaymentId);
 
     List<PaymentRecord> findBySourceTypeAndSourceIdOrderByPaymentDateAscIdAsc(String sourceType, Long sourceId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select payment
+            from PaymentRecord payment
+            where payment.sourceType = :sourceType
+              and payment.sourceId = :sourceId
+              and payment.direction = :direction
+            order by payment.paymentDate asc, payment.id asc
+            """)
+    List<PaymentRecord> findBySourceTypeAndSourceIdAndDirectionForUpdate(
+            @Param("sourceType") String sourceType,
+            @Param("sourceId") Long sourceId,
+            @Param("direction") String direction
+    );
 
     boolean existsBySourceTypeAndSourceId(String sourceType, Long sourceId);
 

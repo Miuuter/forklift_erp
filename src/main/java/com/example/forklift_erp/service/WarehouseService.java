@@ -127,12 +127,16 @@ public class WarehouseService {
     @Transactional
     public WarehouseVO create(WarehouseDTO request) {
         ensureUniqueCode(request.getWarehouseCode(), null);
+        boolean makeDefault = Boolean.TRUE.equals(request.getDefaultWarehouse());
+        List<Warehouse> lockedWarehouses = makeDefault
+                ? warehouseRepository.findAllForUpdate()
+                : List.of();
+        if (makeDefault) {
+            clearOtherDefaultWarehouses(lockedWarehouses, null);
+        }
         Warehouse warehouse = new Warehouse();
         copy(request, warehouse);
         Warehouse saved = warehouseRepository.saveAndFlush(warehouse);
-        if (Boolean.TRUE.equals(saved.getDefaultWarehouse())) {
-            clearOtherDefaultWarehouses(saved.getId());
-        }
         operationAuditService.record("Warehouse", "CREATE", "WAREHOUSE", saved.getId(),
                 saved.getWarehouseCode(), saved.getWarehouseName(), "Create warehouse", null, saved.getAddress());
         return enrichOne(saved);
@@ -140,15 +144,28 @@ public class WarehouseService {
 
     @Transactional
     public WarehouseVO update(Long id, WarehouseDTO request) {
-        Warehouse warehouse = warehouseRepository.findByIdForUpdate(id)
-                .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Warehouse not found"));
+        boolean makeDefault = Boolean.TRUE.equals(request.getDefaultWarehouse());
+        List<Warehouse> lockedWarehouses = makeDefault
+                ? warehouseRepository.findAllForUpdate()
+                : List.of();
+        Warehouse warehouse = makeDefault
+                ? lockedWarehouses.stream()
+                    .filter(candidate -> Objects.equals(candidate.getId(), id))
+                    .findFirst()
+                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Warehouse not found"))
+                : warehouseRepository.findByIdForUpdate(id)
+                    .orElseThrow(() -> new BusinessException(ResultCode.NOT_FOUND, "Warehouse not found"));
         validateVersion(warehouse, request.getVersion());
         ensureUniqueCode(request.getWarehouseCode(), id);
+        if (Boolean.TRUE.equals(warehouse.getDefaultWarehouse()) && !makeDefault) {
+            throw new BusinessException(ResultCode.CONFLICT,
+                    "Default warehouse cannot be unset; set another warehouse as default instead");
+        }
+        if (makeDefault) {
+            clearOtherDefaultWarehouses(lockedWarehouses, id);
+        }
         copy(request, warehouse);
         Warehouse saved = warehouseRepository.saveAndFlush(warehouse);
-        if (Boolean.TRUE.equals(saved.getDefaultWarehouse())) {
-            clearOtherDefaultWarehouses(saved.getId());
-        }
         operationAuditService.record("Warehouse", "UPDATE", "WAREHOUSE", saved.getId(),
                 saved.getWarehouseCode(), saved.getWarehouseName(), "Update warehouse", null, saved.getAddress());
         return enrichOne(saved);
@@ -402,14 +419,15 @@ public class WarehouseService {
         warehouse.setDefaultWarehouse(Boolean.TRUE.equals(request.getDefaultWarehouse()));
     }
 
-    private void clearOtherDefaultWarehouses(Long defaultId) {
-        warehouseRepository.findAll().stream()
+    private void clearOtherDefaultWarehouses(List<Warehouse> lockedWarehouses, Long defaultId) {
+        List<Warehouse> retiredDefaults = lockedWarehouses.stream()
                 .filter(warehouse -> !Objects.equals(warehouse.getId(), defaultId))
                 .filter(warehouse -> Boolean.TRUE.equals(warehouse.getDefaultWarehouse()))
-                .forEach(warehouse -> {
-                    warehouse.setDefaultWarehouse(false);
-                    warehouseRepository.save(warehouse);
-                });
+                .peek(warehouse -> warehouse.setDefaultWarehouse(false))
+                .toList();
+        if (!retiredDefaults.isEmpty()) {
+            warehouseRepository.saveAllAndFlush(retiredDefaults);
+        }
     }
 
     private void ensureUniqueCode(String code, Long currentId) {
