@@ -21,7 +21,7 @@ import java.util.Locale;
  */
 @Service
 public class ModificationAccountingService {
-    private static final String SOURCE_TYPE = "MODIFICATION_WORK_ORDER";
+    private static final String SOURCE_TYPE = FinancialEventService.SOURCE_MODIFICATION_WORK_ORDER;
 
     private final ModificationWorkOrderRepository workOrderRepository;
     private final StockLotConsumptionRepository stockLotConsumptionRepository;

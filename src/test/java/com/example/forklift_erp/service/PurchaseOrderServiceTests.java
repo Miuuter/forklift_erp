@@ -14,6 +14,7 @@ import java.time.LocalDate;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -38,6 +39,18 @@ class PurchaseOrderServiceTests {
                 new PurchaseOrderService(), "landedUnitCost", order);
 
         assertThat(landedUnitCost).isEqualByComparingTo("33.333333");
+    }
+
+    @Test
+    void totalAmountRejectsConflictBetweenUnitPriceAndExplicitTotal() {
+        assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(
+                new PurchaseOrderService(),
+                "totalAmount",
+                3,
+                new BigDecimal("30.00"),
+                new BigDecimal("89.99")))
+                .isInstanceOf(com.example.forklift_erp.exception.BusinessException.class)
+                .hasMessage("Purchase total amount must equal quantity multiplied by unit price");
     }
 
     @Test

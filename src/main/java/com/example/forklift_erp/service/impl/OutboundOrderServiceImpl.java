@@ -204,7 +204,8 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         outboundCustomerService.copyCustomer(order, request.getCustomerId());
         BigDecimal unitSalePrice = resolveUnitSalePrice(
                 request.getUnitSalePrice(), request.getSettlementPrice(), request.getSalePrice(), machine.getSalePrice());
-        BigDecimal lineAmount = resolveLineAmount(request.getLineAmount(), request.getReceivableAmount(), unitSalePrice, 1);
+        BigDecimal lineAmount = OutboundPricingSupport.resolveLineAmount(
+                request.getLineAmount(), request.getReceivableAmount(), unitSalePrice, 1);
         order.setSettlementPrice(unitSalePrice);
         order.setUnitSalePrice(unitSalePrice);
         order.setLineAmount(lineAmount);
@@ -315,7 +316,8 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         outboundCustomerService.copyCustomer(order, request.getCustomerId());
         BigDecimal unitSalePrice = resolveUnitSalePrice(
                 request.getUnitSalePrice(), request.getSettlementPrice(), part.getSalePrice(), part.getSettlementPrice());
-        BigDecimal lineAmount = resolveLineAmount(request.getLineAmount(), request.getReceivableAmount(), unitSalePrice, quantity);
+        BigDecimal lineAmount = OutboundPricingSupport.resolveLineAmount(
+                request.getLineAmount(), request.getReceivableAmount(), unitSalePrice, quantity);
         order.setSettlementPrice(unitSalePrice);
         order.setUnitSalePrice(unitSalePrice);
         order.setLineAmount(lineAmount);
@@ -399,12 +401,18 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
         if (request.getSalePrice() != null) {
             order.setSalePrice(MoneyValues.firstNonNegativeOrNull(request.getSalePrice(), BigDecimal.ZERO));
         }
-        if (request.getLineAmount() != null) {
-            order.setLineAmount(MoneyValues.zeroIfNullOrNegative(request.getLineAmount()));
-        } else if (request.getReceivableAmount() != null) {
-            order.setLineAmount(MoneyValues.zeroIfNullOrNegative(request.getReceivableAmount()));
-        } else if (unitSalePriceChanged || order.getLineAmount() == null) {
-            order.setLineAmount(resolveLineAmount(null, null,
+        if (request.getLineAmount() != null
+                || request.getReceivableAmount() != null
+                || unitSalePriceChanged
+                || order.getLineAmount() == null) {
+            order.setLineAmount(OutboundPricingSupport.resolveLineAmount(null, null,
+                    MoneyValues.firstNonNegativeOrNull(order.getUnitSalePrice(), order.getSettlementPrice(), order.getSalePrice()),
+                    order.getQuantity()));
+        }
+        if (request.getLineAmount() != null || request.getReceivableAmount() != null) {
+            order.setLineAmount(OutboundPricingSupport.resolveLineAmount(
+                    request.getLineAmount(),
+                    request.getReceivableAmount(),
                     MoneyValues.firstNonNegativeOrNull(order.getUnitSalePrice(), order.getSettlementPrice(), order.getSalePrice()),
                     order.getQuantity()));
         }
@@ -562,20 +570,6 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
                 : MoneyValues.firstNonNegativeOrNull(values);
     }
 
-    private BigDecimal resolveLineAmount(
-            BigDecimal requestedLineAmount,
-            BigDecimal requestedReceivableAmount,
-            BigDecimal unitSalePrice,
-            Integer quantity
-    ) {
-        BigDecimal explicit = MoneyValues.firstNonNegativeOrNull(requestedLineAmount, requestedReceivableAmount);
-        if (explicit != null) {
-            return explicit;
-        }
-        int safeQuantity = quantity == null || quantity < 1 ? 1 : quantity;
-        return MoneyValues.zeroIfNullOrNegative(unitSalePrice).multiply(BigDecimal.valueOf(safeQuantity));
-    }
-
     private LocalDate salesBusinessDate(OutboundOrder order) {
         return order.getSalesDate() == null ? LocalDate.now() : order.getSalesDate();
     }
@@ -613,6 +607,15 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
             StockLotService.ConsumptionResult fifo,
             LocalDate businessDate
     ) {
+        finalizeOutboundMovement(order, fifo, businessDate, true);
+    }
+
+    private void finalizeOutboundMovement(
+            OutboundOrder order,
+            StockLotService.ConsumptionResult fifo,
+            LocalDate businessDate,
+            boolean overwriteCostAmount
+    ) {
         List<StockMovement> movements = stockMovementRepository.findBySourceTypeAndSourceId(SOURCE_TYPE, order.getId());
         Long firstLotId = fifo.consumptions().isEmpty() ? null : fifo.consumptions().get(0).getStockLotId();
         for (StockMovement movement : movements) {
@@ -622,10 +625,14 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
             List<StockMovementLine> lines = stockMovementLineRepository.findByMovementIdOrderByIdAsc(movement.getId());
             for (StockMovementLine line : lines) {
                 line.setUnitCost(fifo.unitCost());
-                line.setCostAmount(fifo.totalCost());
+                if (overwriteCostAmount || line.getCostAmount() == null) {
+                    line.setCostAmount(fifo.totalCost());
+                }
                 line.setUnitRevenue(resolveUnitSalePrice(order.getUnitSalePrice(), order.getSettlementPrice(), order.getSalePrice()));
                 line.setLineAmount(MoneyValues.zeroIfNullOrNegative(order.getLineAmount()));
-                line.setStockLotId(firstLotId);
+                if (firstLotId != null) {
+                    line.setStockLotId(firstLotId);
+                }
                 stockMovementLineRepository.save(line);
             }
         }
@@ -647,23 +654,16 @@ public class OutboundOrderServiceImpl implements OutboundOrderService {
                 unitCostForOrder(order),
                 List.of()
         );
-        finalizeOutboundMovement(order, snapshot, salesBusinessDate(order));
+        finalizeOutboundMovement(order, snapshot, salesBusinessDate(order), false);
     }
 
     private BigDecimal outboundCost(OutboundOrder order) {
-        if (order.getStockOperationLogId() == null) {
-            return BigDecimal.ZERO;
-        }
-        return stockOperationLogRepository.findById(order.getStockOperationLogId())
-                .map(log -> MoneyValues.zeroIfNullOrNegative(log.getUnitCost())
-                        .multiply(BigDecimal.valueOf(order.getQuantity() == null ? 1 : order.getQuantity()))
-                        .setScale(2, java.math.RoundingMode.HALF_UP))
-                .orElse(BigDecimal.ZERO);
+        return OutboundPricingSupport.outboundCost(order, SOURCE_TYPE, stockMovementRepository,
+                stockMovementLineRepository, stockOperationLogRepository);
     }
 
     private BigDecimal unitCostForOrder(OutboundOrder order) {
-        int quantity = order.getQuantity() == null || order.getQuantity() < 1 ? 1 : order.getQuantity();
-        return outboundCost(order).divide(BigDecimal.valueOf(quantity), 6, java.math.RoundingMode.HALF_UP);
+        return OutboundPricingSupport.unitCostForOrder(order, outboundCost(order));
     }
 
     private String nextOrderNo() {

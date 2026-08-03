@@ -1,3 +1,5 @@
+import { createRequestId } from "./request-id.js";
+
 const TOKEN_KEY = "forklift_erp_token";
 const USER_KEY = "forklift_erp_user";
 const API_CACHE_PREFIX = "forklift_erp_api_cache:";
@@ -32,7 +34,12 @@ export function createApiClient(getToken) {
   return async function api(path, options = {}) {
     const method = (options.method || "GET").toUpperCase();
     const isFormData = options.body instanceof FormData;
-    const headers = isFormData ? {} : { "Content-Type": "application/json" };
+    const headers = { ...(options.headers || {}) };
+    if (!isFormData && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+    const requestId = options.requestId || createRequestId(`api-${method.toLowerCase()}`);
+    headers["X-Request-ID"] = requestId;
     const token = getToken();
     if (options.auth !== false && token) {
       headers.Authorization = `Bearer ${token}`;
@@ -58,12 +65,14 @@ export function createApiClient(getToken) {
       error.authExpired = true;
       error.status = response.status;
       error.code = payload?.code;
+      error.requestId = payload?.requestId || response.headers.get("X-Request-ID") || requestId;
       throw error;
     }
     if (!response.ok) {
       const error = new Error(payload?.message || `请求失败：${response.status}`);
       error.status = response.status;
       error.code = payload?.code;
+      error.requestId = payload?.requestId || response.headers.get("X-Request-ID") || requestId;
       throw error;
     }
     if (payload && Object.prototype.hasOwnProperty.call(payload, "code")) {
@@ -71,6 +80,7 @@ export function createApiClient(getToken) {
         const error = new Error(payload.message || "请求失败");
         error.status = response.status;
         error.code = payload.code;
+        error.requestId = payload.requestId || response.headers.get("X-Request-ID") || requestId;
         throw error;
       }
       if (cacheable) {

@@ -339,7 +339,7 @@ public class FinancialStatisticsBuilder {
                 } else if ("RENTAL_BILL".equals(source)) {
                     row.setRentalIncome(row.getRentalIncome().add(amount));
                     row.setRentalOrders(row.getRentalOrders() + (amount.signum() >= 0 ? 1 : -1));
-                } else {
+                } else if (FinancialEventService.SOURCE_MODIFICATION_WORK_ORDER.equals(source)) {
                     row.setModificationIncome(row.getModificationIncome().add(amount));
                 }
             }
@@ -354,14 +354,14 @@ public class FinancialStatisticsBuilder {
                     row.setOutboundCost(row.getOutboundCost().add(amount));
                 } else if ("REPAIR".equals(source)) {
                     row.setRepairPartsCost(row.getRepairPartsCost().add(amount));
-                } else {
+                } else if (FinancialEventService.SOURCE_MODIFICATION_WORK_ORDER.equals(source)) {
                     row.setModificationExpense(row.getModificationExpense().add(amount));
                 }
             }
             case FinancialEventType.OPERATING_COST -> {
                 if ("REPAIR".equals(source)) {
                     row.setRepairExpense(row.getRepairExpense().add(amount));
-                } else {
+                } else if (FinancialEventService.SOURCE_MODIFICATION_WORK_ORDER.equals(source)) {
                     row.setModificationExpense(row.getModificationExpense().add(amount));
                 }
             }

@@ -100,4 +100,12 @@ class DataImportFileStorageTests {
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("请选择导入文件");
     }
+
+    @Test
+    void fingerprintStreamsTheStoredFileWithStableSha256() throws IOException {
+        Path file = Files.writeString(tempDir.resolve("source.xlsx"), "closed-loop-import");
+
+        assertThat(storage.fingerprint(file))
+                .isEqualTo("06793f92933af710b2116f97bab2099d162ce6fe49a7ac04b899795ea36fab22");
+    }
 }

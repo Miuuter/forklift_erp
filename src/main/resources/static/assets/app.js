@@ -6623,7 +6623,7 @@ function renderLoadError(error) {
         <div class="empty-state empty-state-error">
           <span class="empty-state-visual" aria-hidden="true">${icons.warning}</span>
           <strong>数据加载失败</strong>
-          <span>${escapeHtml(error?.message || "请刷新后重试")}</span>
+          <span>${escapeHtml(errorMessage(error, "请刷新后重试"))}</span>
           <button class="btn btn-primary" type="button" data-action="refresh">${icon("refresh")}重新加载</button>
         </div>
       </div>
@@ -6757,14 +6757,19 @@ function handleActionError(error) {
     return;
   }
   if (isConflictError(error)) {
-    showToast(error.message || "数据已被其他用户更新，请刷新后重试", "error");
+    showToast(errorMessage(error, "数据已被其他用户更新，请刷新后重试"), "error");
     void refreshAfterConflict();
     return;
   }
   if (state.modal && els?.modalCard?.querySelector("form")) {
-    showModalValidationSummary(els.modalCard.querySelector("form"), error.message || "保存失败，请检查表单后重试");
+    showModalValidationSummary(els.modalCard.querySelector("form"), errorMessage(error, "保存失败，请检查表单后重试"));
   }
-  showToast(error.message || "操作失败", "error");
+  showToast(errorMessage(error, "操作失败"), "error");
+}
+
+function errorMessage(error, fallback) {
+  const message = error?.message || fallback;
+  return error?.requestId ? `${message}（请求 ID：${error.requestId}）` : message;
 }
 
 async function refreshAfterConflict() {

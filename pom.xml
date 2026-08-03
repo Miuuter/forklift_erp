@@ -264,6 +264,8 @@
 				<configuration>
 					<generateGitPropertiesFile>true</generateGitPropertiesFile>
 					<generateGitPropertiesFilename>${project.build.outputDirectory}/git.properties</generateGitPropertiesFilename>
+					<!-- Use the installed Git CLI so builds do not load a user-local JGit config. -->
+					<useNativeGit>true</useNativeGit>
 					<failOnNoGitDirectory>false</failOnNoGitDirectory>
 				</configuration>
 			</plugin>

@@ -101,7 +101,7 @@ forklift:
     data-restore:
       enabled: ${FORKLIFT_ERP_DATA_RESTORE_ENABLED:false}
   seed-demo-data:
-    enabled: ${FORKLIFT_ERP_SEED_DEMO_DATA:true} # 本地启动时幂等补齐演示业务数据；生产可设为 false
+    enabled: ${FORKLIFT_ERP_SEED_DEMO_DATA:false} # 旧展示 fixture 默认关闭；完整测试库由受控闭环种子脚本创建
 
 springdoc:
   api-docs:

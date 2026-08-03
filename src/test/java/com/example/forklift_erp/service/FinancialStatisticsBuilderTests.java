@@ -90,7 +90,9 @@ class FinancialStatisticsBuilderTests {
                 event(FinancialEventType.REVENUE, "100.00", "OUTBOUND_ORDER", 1L),
                 event(FinancialEventType.COST_OF_GOODS_SOLD, "60.00", "OUTBOUND_ORDER", 1L),
                 event(FinancialEventType.CASH_RECEIPT, "40.00", "OUTBOUND_ORDER", 1L),
-                event(FinancialEventType.INVENTORY_GAIN, "15.00", "STOCKTAKING", 9L)
+                event(FinancialEventType.INVENTORY_GAIN, "15.00", "STOCKTAKING", 9L),
+                event(FinancialEventType.REVENUE, "999.00", "NEW_UNMAPPED_SOURCE", 10L),
+                event(FinancialEventType.OPERATING_COST, "888.00", "NEW_UNMAPPED_SOURCE", 10L)
         );
 
         StatisticsDashboardVO.FinancialRow january = findPeriod(
@@ -101,6 +103,8 @@ class FinancialStatisticsBuilderTests {
         assertMoney(january.getOutboundRevenue(), "100.00");
         assertMoney(january.getOutboundCost(), "60.00");
         assertMoney(january.getInventoryGain(), "15.00");
+        assertMoney(january.getModificationIncome(), "0.00");
+        assertMoney(january.getModificationExpense(), "0.00");
         assertMoney(january.getTotalIncome(), "115.00");
         assertMoney(january.getTotalExpense(), "60.00");
         assertMoney(january.getNetCashflow(), "40.00");

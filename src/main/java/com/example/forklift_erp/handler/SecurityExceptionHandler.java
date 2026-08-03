@@ -2,6 +2,7 @@ package com.example.forklift_erp.handler;
 
 import com.example.forklift_erp.common.Result;
 import com.example.forklift_erp.common.ResultCode;
+import com.example.forklift_erp.config.RequestCorrelationFilter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,7 +24,8 @@ public class SecurityExceptionHandler implements AuthenticationEntryPoint, Acces
                          AuthenticationException authException) throws IOException {
         response.setContentType("application/json;charset=UTF-8");
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-        Result<Void> result = Result.error(ResultCode.UNAUTHORIZED, "认证失败，请登录");
+        Result<Void> result = Result.<Void>error(ResultCode.UNAUTHORIZED, "认证失败，请登录")
+                .withRequestId(RequestCorrelationFilter.currentRequestId());
         response.getWriter().write(objectMapper.writeValueAsString(result));
     }
 
@@ -32,7 +34,8 @@ public class SecurityExceptionHandler implements AuthenticationEntryPoint, Acces
                        AccessDeniedException accessDeniedException) throws IOException {
         response.setContentType("application/json;charset=UTF-8");
         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-        Result<Void> result = Result.error(ResultCode.FORBIDDEN, "无权限访问");
+        Result<Void> result = Result.<Void>error(ResultCode.FORBIDDEN, "无权限访问")
+                .withRequestId(RequestCorrelationFilter.currentRequestId());
         response.getWriter().write(objectMapper.writeValueAsString(result));
     }
 }

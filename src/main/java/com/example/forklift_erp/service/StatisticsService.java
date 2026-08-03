@@ -77,6 +77,14 @@ public class StatisticsService {
                             + " 条未解决迁移异常；本报表仅展示已过账的库存与财务事实，未使用旧主档字段补值。"
             );
         }
+        long unknownFinancialEvents = projectionRepository.unknownFinancialEventCount(selectedStart, selectedEnd);
+        if (unknownFinancialEvents > 0) {
+            dashboard.setDataComplete(false);
+            dashboard.getDataWarnings().add(
+                    "存在 " + unknownFinancialEvents
+                            + " 条未知财务来源事件未计入收入/费用分类，请补充来源类型映射后再使用报表"
+            );
+        }
         return dashboard;
     }
 

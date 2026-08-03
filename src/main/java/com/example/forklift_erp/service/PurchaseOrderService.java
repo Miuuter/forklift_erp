@@ -582,13 +582,25 @@ public class PurchaseOrderService {
     }
 
     private BigDecimal totalAmount(Integer quantity, BigDecimal unitPrice, BigDecimal requestTotal) {
-        if (requestTotal != null) {
-            return MoneyValues.zeroIfNegative(requestTotal);
+        BigDecimal normalizedUnitPrice = MoneyValues.zeroIfNegative(unitPrice);
+        BigDecimal normalizedRequestTotal = MoneyValues.zeroIfNegative(requestTotal);
+        if (normalizedRequestTotal != null && normalizedUnitPrice != null) {
+            BigDecimal calculated = normalizedUnitPrice
+                    .multiply(BigDecimal.valueOf(quantity == null ? 0 : quantity))
+                    .setScale(2, RoundingMode.HALF_UP);
+            BigDecimal explicit = normalizedRequestTotal.setScale(2, RoundingMode.HALF_UP);
+            if (calculated.compareTo(explicit) != 0) {
+                throw new BusinessException(ResultCode.PARAM_ERROR,
+                        "Purchase total amount must equal quantity multiplied by unit price");
+            }
         }
-        if (unitPrice == null) {
+        if (requestTotal != null) {
+            return normalizedRequestTotal;
+        }
+        if (normalizedUnitPrice == null) {
             return BigDecimal.ZERO;
         }
-        return unitPrice.multiply(BigDecimal.valueOf(quantity == null ? 0 : quantity));
+        return normalizedUnitPrice.multiply(BigDecimal.valueOf(quantity == null ? 0 : quantity));
     }
 
     private Supplier resolveSupplier(PurchaseOrderDTO request, PurchaseOrder order, String resourceType) {

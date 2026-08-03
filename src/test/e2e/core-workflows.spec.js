@@ -37,4 +37,37 @@ test.describe("forklift ERP core workflows", () => {
       await expect(page.locator("#moduleContent")).not.toContainText("加载失败");
     });
   }
+
+  test("客户新增流程可完成写入并在结束后清理测试数据", async ({ page }) => {
+    const companyName = `E2E-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const cleanup = async () => {
+      await page.evaluate(async name => {
+        const token = localStorage.getItem("forklift_erp_token") || "";
+        const headers = { Authorization: `Bearer ${token}` };
+        const response = await fetch(`/api/customers?paged=true&keyword=${encodeURIComponent(name)}`, { headers });
+        if (!response.ok) return;
+        const payload = await response.json();
+        const rows = payload?.data?.content || [];
+        const created = rows.find(row => row.companyName === name);
+        if (created?.id) {
+          await fetch(`/api/customers/${created.id}?version=${encodeURIComponent(created.version ?? "")}`, {
+            method: "DELETE",
+            headers: { ...headers, "X-Request-ID": `e2e-cleanup-${created.id}` }
+          });
+        }
+      }, companyName);
+    };
+
+    try {
+      await page.getByRole("button", { name: "客户列表", exact: true }).click();
+      await page.getByRole("button", { name: "新增客户", exact: true }).click();
+      await page.getByLabel("公司名称").fill(companyName);
+      await page.getByLabel("联系人姓名").fill("E2E 测试联系人");
+      await page.getByRole("button", { name: "保存", exact: true }).click();
+      await expect(page.getByText(companyName, { exact: true })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
 });

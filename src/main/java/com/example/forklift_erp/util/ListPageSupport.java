@@ -41,7 +41,8 @@ public final class ListPageSupport {
     public static <T> PageResult<T> page(List<T> rows, Integer page, Integer size) {
         int normalizedPage = page(page);
         int normalizedSize = size(size);
-        int fromIndex = Math.min(normalizedPage * normalizedSize, rows.size());
+        long offset = (long) normalizedPage * normalizedSize;
+        int fromIndex = (int) Math.min(offset, rows.size());
         int toIndex = Math.min(fromIndex + normalizedSize, rows.size());
         return PageResult.of(rows.subList(fromIndex, toIndex), normalizedPage, normalizedSize, rows.size());
     }

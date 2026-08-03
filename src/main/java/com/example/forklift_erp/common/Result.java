@@ -13,6 +13,11 @@ public class Result<T> implements Serializable {
     private String message;
     private T data;
     private Long timestamp;
+    /**
+     * Correlation identifier echoed by the API for support and browser diagnostics.
+     * It is optional so existing clients can continue to deserialize the response.
+     */
+    private String requestId;
 
     private Result() {
         this.timestamp = System.currentTimeMillis();
@@ -23,6 +28,11 @@ public class Result<T> implements Serializable {
         this.message = message;
         this.data = data;
         this.timestamp = System.currentTimeMillis();
+    }
+
+    public Result<T> withRequestId(String requestId) {
+        this.requestId = requestId;
+        return this;
     }
 
     // ==================== 成功响应 ====================

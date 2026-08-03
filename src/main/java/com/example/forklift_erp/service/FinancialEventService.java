@@ -35,6 +35,7 @@ public class FinancialEventService {
     public static final String SOURCE_PURCHASE_ORDER = "PURCHASE_ORDER";
     public static final String SOURCE_REPAIR = "REPAIR";
     public static final String SOURCE_RENTAL_BILL = "RENTAL_BILL";
+    public static final String SOURCE_MODIFICATION_WORK_ORDER = "MODIFICATION_WORK_ORDER";
     private static final Set<String> SUPPORTED_EVENT_TYPES = Set.of(
             FinancialEventType.ACCOUNTS_RECEIVABLE,
             FinancialEventType.ACCOUNTS_PAYABLE,

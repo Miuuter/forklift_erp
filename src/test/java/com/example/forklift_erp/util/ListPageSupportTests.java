@@ -39,4 +39,13 @@ class ListPageSupportTests {
         assertThat(pageRequest.getPageNumber()).isZero();
         assertThat(pageRequest.getPageSize()).isEqualTo(200);
     }
+
+    @Test
+    void largePageNumberDoesNotOverflowTheInMemoryOffset() {
+        PageResult<Integer> page = ListPageSupport.page(List.of(1, 2, 3), Integer.MAX_VALUE, 200);
+
+        assertThat(page.getContent()).isEmpty();
+        assertThat(page.getPage()).isEqualTo(Integer.MAX_VALUE);
+        assertThat(page.isLast()).isTrue();
+    }
 }

@@ -1,3 +1,4 @@
+import { renderDataWarnings } from "./display-utils.js";
 export function createDashboardView(deps) {
   const {
     state,
@@ -32,12 +33,10 @@ export function createDashboardView(deps) {
     toDataAttrName,
     repairStatusToggle
   } = deps;
-
   return {
     renderOverview,
     renderStatistics
   };
-
   function renderOverview() {
     const vehicles = state.data.vehicles.filter(item => !item.modelOnly);
     const vehicleRows = vehicleFlowRows();
@@ -85,7 +84,6 @@ export function createDashboardView(deps) {
     const recentVehicleRows = vehicleRows
       .filter(row => row.orderId || Number(row.inventoryCount || 0) > 0)
       .slice(0, 8);
-
     return `
       <div class="page overview-page">
         <section class="summary-grid">
@@ -148,6 +146,8 @@ export function createDashboardView(deps) {
             <button class="btn btn-ghost" type="button" data-action="refresh">${icon("refresh")}刷新</button>
           </div>
         </div>
+
+        ${renderDataWarnings(stats.dataWarnings)}
 
         <section class="summary-grid">
           ${summaryCard("年度总收入", money(annual.totalIncome), `出库 ${money(annual.outboundRevenue)} / 维修 ${money(annual.repairIncome)} / 租赁 ${money(annual.rentalIncome)} / 盘盈 ${money(annual.inventoryGain)}`)}

@@ -30,6 +30,15 @@ class FileStorageSupportTests {
                     "Unsupported file type"
             );
 
+    private static final FileStorageSupport.UploadConstraints CSV_ONLY =
+            new FileStorageSupport.UploadConstraints(
+                    1024,
+                    Set.of("csv"),
+                    "File is required",
+                    "File is too large",
+                    "Unsupported file type"
+            );
+
     Path tempDir;
 
     private final FileStorageSupport fileStorageSupport = new FileStorageSupport();
@@ -129,6 +138,29 @@ class FileStorageSupportTests {
         ))
                 .isInstanceOf(BusinessException.class)
                 .hasMessage("Unsupported file type");
+    }
+
+    @Test
+    void storeStreamsUtf8CsvSignatureValidation() throws IOException {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "customers.csv",
+                "text/csv",
+                "company,contact\n叉车公司,李工\n".getBytes(StandardCharsets.UTF_8)
+        );
+
+        FileStorageSupport.StoredFile stored = fileStorageSupport.store(
+                file,
+                tempDir,
+                "customers.csv",
+                "customers.csv",
+                CSV_ONLY,
+                "Invalid path",
+                "Save failed"
+        );
+
+        assertThat(stored.fileSize()).isEqualTo(Files.size(stored.filePath()));
+        assertThat(Files.readString(stored.filePath())).contains("叉车公司");
     }
 
     @Test

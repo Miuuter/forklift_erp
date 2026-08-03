@@ -10,6 +10,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.io.IOException;
+import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
@@ -91,14 +92,14 @@ public class DataImportFileStorage {
     }
 
     String fingerprint(Path file) {
-        try {
-            byte[] bytes = Files.readAllBytes(file);
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(bytes);
-            StringBuilder builder = new StringBuilder(hash.length * 2);
-            for (byte value : hash) {
-                builder.append(String.format("%02x", value));
+        try (InputStream input = Files.newInputStream(file)) {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
             }
-            return builder.toString();
+            return java.util.HexFormat.of().formatHex(digest.digest());
         } catch (java.io.IOException | NoSuchAlgorithmException ex) {
             throw new BusinessException(ResultCode.SYSTEM_ERROR, "Unable to fingerprint import file");
         }

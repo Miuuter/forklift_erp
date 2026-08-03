@@ -21,6 +21,10 @@ public class RequestCorrelationFilter extends OncePerRequestFilter {
     public static final String MDC_KEY = "requestId";
     private static final Pattern SAFE_ID = Pattern.compile("[A-Za-z0-9._:-]{1,100}");
 
+    public static String currentRequestId() {
+        return MDC.get(MDC_KEY);
+    }
+
     @Override
     protected void doFilterInternal(
             HttpServletRequest request,

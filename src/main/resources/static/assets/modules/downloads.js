@@ -1,3 +1,5 @@
+import { createRequestId } from "./request-id.js";
+
 export function createDownloadActions({
   getToken,
   endpoints,
@@ -56,15 +58,24 @@ export function createDownloadActions({
   }
 
   async function requestBlob(url, fallbackName, fallbackPrefix, markAuthExpired) {
-    const response = await fetch(url, { headers: authHeaders(getToken?.()) });
+    const requestId = createRequestId("download");
+    const response = await fetch(url, {
+      headers: {
+        ...authHeaders(getToken?.()),
+        "X-Request-ID": requestId
+      }
+    });
     if (response.status === 401 && markAuthExpired) {
       const error = new Error("\u672a\u767b\u5f55\u6216\u767b\u5f55\u5df2\u8fc7\u671f");
       error.authExpired = true;
+      error.requestId = response.headers.get("X-Request-ID") || requestId;
       throw error;
     }
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
-      throw new Error(payload?.message || `${fallbackPrefix}${response.status}`);
+      const error = new Error(payload?.message || `${fallbackPrefix}${response.status}`);
+      error.requestId = payload?.requestId || response.headers.get("X-Request-ID") || requestId;
+      throw error;
     }
     const blob = await response.blob();
     const filename = filenameFromDisposition(response.headers.get("Content-Disposition")) || fallbackName;

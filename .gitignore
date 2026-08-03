@@ -1,5 +1,6 @@
 HELP.md
 target/
+local-db-backups/
 dist/
 node_modules/
 coverage/

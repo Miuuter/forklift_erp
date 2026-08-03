@@ -207,10 +207,10 @@ public class StatisticsProjectionRepository {
                         SUM(CASE WHEN event_type = 'REVENUE' AND source_type = 'RENTAL_BILL'
                                  THEN amount ELSE 0 END) AS rental_income,
                         SUM(CASE WHEN event_type = 'REVENUE'
-                                      AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL')
+                                      AND source_type = 'MODIFICATION_WORK_ORDER'
                                  THEN amount ELSE 0 END) AS modification_income,
                         SUM(CASE WHEN event_type IN ('OPERATING_COST', 'COST_OF_GOODS_SOLD')
-                                      AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR')
+                                      AND source_type = 'MODIFICATION_WORK_ORDER'
                                  THEN amount ELSE 0 END) AS modification_expense,
                         SUM(CASE WHEN event_type = 'INVENTORY_GAIN' THEN amount ELSE 0 END) AS inventory_gain,
                         SUM(CASE WHEN event_type = 'INVENTORY_LOSS' THEN amount ELSE 0 END) AS inventory_loss,
@@ -222,7 +222,7 @@ public class StatisticsProjectionRepository {
                         SUM(CASE WHEN event_type = 'REVENUE' AND source_type = 'RENTAL_BILL'
                                  THEN SIGN(amount) ELSE 0 END) AS rental_orders,
                         SUM(CASE WHEN event_type = 'REVENUE'
-                                      AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL')
+                                      AND source_type = 'MODIFICATION_WORK_ORDER'
                                  THEN SIGN(amount) ELSE 0 END) AS modification_orders
                     FROM financial_event
                     WHERE business_date >= :startDate
@@ -307,7 +307,7 @@ public class StatisticsProjectionRepository {
                     GROUP BY resource_id
                 ) balance ON balance.resource_id = m.id
                 LEFT JOIN (
-                    SELECT resource_id, SUM(remaining_quantity * unit_cost) AS cost_value
+                    SELECT resource_id, SUM(remaining_cost_amount) AS cost_value
                     FROM stock_lot
                     WHERE resource_type = 'MACHINE'
                       AND status <> 'REVERSED'
@@ -346,7 +346,7 @@ public class StatisticsProjectionRepository {
                     GROUP BY resource_id
                 ) balance ON balance.resource_id = p.id
                 LEFT JOIN (
-                    SELECT resource_id, SUM(remaining_quantity * unit_cost) AS cost_value
+                    SELECT resource_id, SUM(remaining_cost_amount) AS cost_value
                     FROM stock_lot
                     WHERE resource_type = 'PART'
                       AND status <> 'REVERSED'
@@ -369,6 +369,19 @@ public class StatisticsProjectionRepository {
         return new MapSqlParameterSource()
                 .addValue("startDate", start)
                 .addValue("endDate", end);
+    }
+
+    public long unknownFinancialEventCount(LocalDate start, LocalDate end) {
+        String sql = """
+                SELECT COUNT(*)
+                FROM financial_event
+                WHERE business_date >= :startDate
+                  AND business_date <= :endDate
+                  AND event_type IN ('REVENUE', 'COST_OF_GOODS_SOLD', 'OPERATING_COST')
+                  AND source_type NOT IN ('OUTBOUND_ORDER', 'REPAIR', 'RENTAL_BILL', 'MODIFICATION_WORK_ORDER')
+                """;
+        Long count = jdbcTemplate.queryForObject(sql, dates(start, end), Long.class);
+        return count == null ? 0L : count;
     }
 
     private BigDecimal money(BigDecimal value) {

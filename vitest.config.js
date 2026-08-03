@@ -8,7 +8,8 @@ export default defineConfig({
       provider: "v8",
       include: [
         "src/main/resources/static/assets/modules/request-id.js",
-        "src/main/resources/static/assets/modules/batch-operations.js"
+        "src/main/resources/static/assets/modules/batch-operations.js",
+        "src/main/resources/static/assets/modules/downloads.js"
       ],
       reporter: ["text", "json-summary"],
       thresholds: {

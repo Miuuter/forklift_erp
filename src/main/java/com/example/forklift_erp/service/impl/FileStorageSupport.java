@@ -11,6 +11,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +20,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -66,6 +69,10 @@ public class FileStorageSupport {
             try (InputStream inputStream = file.getInputStream()) {
                 Files.copy(inputStream, tempFile, StandardCopyOption.REPLACE_EXISTING);
             }
+            long actualSize = Files.size(tempFile);
+            if (actualSize > constraints.maxSize()) {
+                throw new BusinessException(ResultCode.PARAM_ERROR, constraints.sizeMessage());
+            }
             validateSignature(tempFile, extension, constraints.typeMessage());
             moveIntoPlace(tempFile, target);
             return new StoredFile(
@@ -73,7 +80,7 @@ public class FileStorageSupport {
                     target.getFileName().toString(),
                     originalName,
                     canonicalContentType(extension),
-                    file.getSize(),
+                    actualSize,
                     extension
             );
         } catch (RuntimeException e) {
@@ -309,17 +316,20 @@ public class FileStorageSupport {
     }
 
     private boolean isTextFile(Path file) throws IOException {
-        byte[] content = Files.readAllBytes(file);
-        for (byte value : content) {
-            if (value == 0) {
-                return false;
+        try (Reader reader = new InputStreamReader(
+                Files.newInputStream(file),
+                StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT))) {
+            char[] buffer = new char[8192];
+            int read;
+            while ((read = reader.read(buffer)) != -1) {
+                for (int index = 0; index < read; index++) {
+                    if (buffer[index] == '\0') {
+                        return false;
+                    }
+                }
             }
-        }
-        try {
-            java.nio.charset.StandardCharsets.UTF_8.newDecoder()
-                    .onMalformedInput(CodingErrorAction.REPORT)
-                    .onUnmappableCharacter(CodingErrorAction.REPORT)
-                    .decode(java.nio.ByteBuffer.wrap(content));
             return true;
         } catch (CharacterCodingException ignored) {
             return false;

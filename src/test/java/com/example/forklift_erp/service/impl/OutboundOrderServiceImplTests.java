@@ -6,6 +6,8 @@ import com.example.forklift_erp.dto.OutboundOrderUpdateDTO;
 import com.example.forklift_erp.dto.VehicleOutboundOrderCreateDTO;
 import com.example.forklift_erp.entity.MachineInventory;
 import com.example.forklift_erp.entity.OutboundOrder;
+import com.example.forklift_erp.entity.StockMovement;
+import com.example.forklift_erp.entity.StockMovementLine;
 import com.example.forklift_erp.entity.StockOperationLog;
 import com.example.forklift_erp.exception.BusinessException;
 import com.example.forklift_erp.repository.CustomerRepository;
@@ -93,6 +95,50 @@ class OutboundOrderServiceImplTests {
         assertThat(log.getUnitCost()).isEqualByComparingTo("33.335000");
         verify(fixture.financialEventService).replaceSalesPosting(
                 eq(fixture.order), eq(new BigDecimal("66.67")), eq(false));
+    }
+
+    @Test
+    void updateUsesExistingMovementLineCostAmountInsteadOfRebuildingFromAverage() {
+        Fixture fixture = fixture();
+        fixture.order.setQuantity(2);
+        fixture.order.setStockOperationLogId(88L);
+        StockOperationLog log = new StockOperationLog();
+        log.setId(88L);
+        log.setUnitCost(new BigDecimal("33.330000"));
+        when(fixture.stockOperationLogRepository.findById(88L)).thenReturn(Optional.of(log));
+
+        StockMovement movement = new StockMovement();
+        movement.setId(90L);
+        StockMovementLine line = new StockMovementLine();
+        line.setQuantityDelta(-2);
+        line.setCostAmount(new BigDecimal("66.67"));
+        when(fixture.stockMovementRepository.findBySourceTypeAndSourceId("OUTBOUND_ORDER", fixture.order.getId()))
+                .thenReturn(List.of(movement));
+        when(fixture.stockMovementLineRepository.findByMovementIdOrderByIdAsc(90L))
+                .thenReturn(List.of(line));
+
+        OutboundOrderUpdateDTO request = new OutboundOrderUpdateDTO();
+        request.setVersion(4L);
+
+        fixture.service.update(fixture.order.getId(), request);
+
+        assertThat(line.getCostAmount()).isEqualByComparingTo("66.67");
+        assertThat(log.getUnitCost()).isEqualByComparingTo("33.335000");
+        verify(fixture.financialEventService).replaceSalesPosting(
+                eq(fixture.order), eq(new BigDecimal("66.67")), eq(false));
+    }
+
+    @Test
+    void updateRejectsLineAmountThatDisagreesWithUnitPrice() {
+        Fixture fixture = fixture();
+        OutboundOrderUpdateDTO request = new OutboundOrderUpdateDTO();
+        request.setVersion(4L);
+        request.setLineAmount(new BigDecimal("200.00"));
+
+        assertThatThrownBy(() -> fixture.service.update(fixture.order.getId(), request))
+                .isInstanceOf(BusinessException.class)
+                .hasMessage("Line amount must equal quantity multiplied by unit sale price");
+        verify(fixture.outboundOrderRepository, org.mockito.Mockito.never()).saveAndFlush(any());
     }
 
     @Test
@@ -186,7 +232,9 @@ class OutboundOrderServiceImplTests {
                 outboundOrderRepository,
                 machineInventoryRepository,
                 stockLedgerService,
-                stockOperationLogRepository
+                stockOperationLogRepository,
+                stockMovementRepository,
+                stockMovementLineRepository
         );
     }
 
@@ -197,7 +245,9 @@ class OutboundOrderServiceImplTests {
             OutboundOrderRepository outboundOrderRepository,
             MachineInventoryRepository machineInventoryRepository,
             StockLedgerService stockLedgerService,
-            StockOperationLogRepository stockOperationLogRepository
+            StockOperationLogRepository stockOperationLogRepository,
+            StockMovementRepository stockMovementRepository,
+            StockMovementLineRepository stockMovementLineRepository
     ) {
     }
 }

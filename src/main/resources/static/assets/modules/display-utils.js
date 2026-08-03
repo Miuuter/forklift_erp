@@ -87,6 +87,20 @@ export function emptyState(message) {
   `;
 }
 
+export function renderDataWarnings(warnings) {
+  const items = [...new Set((Array.isArray(warnings) ? warnings : [])
+    .map(item => String(item || "").trim())
+    .filter(Boolean))];
+  if (!items.length) return "";
+  return `
+    <section class="data-warning-banner" role="alert" aria-live="polite">
+      <strong>统计数据存在未解决警告</strong>
+      <span>以下结果需要先完成数据修复或迁移核查，不应作为正常发布依据：</span>
+      <ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+    </section>
+  `;
+}
+
 export function escapeHtml(value) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
